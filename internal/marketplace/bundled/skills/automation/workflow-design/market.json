@@ -1,0 +1,18 @@
+{
+  "kind": "skill",
+  "plugin": "automation",
+  "source": "rovecode",
+  "signals": [
+    "workflow",
+    "pipeline",
+    "sequence",
+    "step",
+    "process",
+    "orchestrate",
+    "chain",
+    "flow",
+    "automate process",
+    "business logic",
+    "state machine"
+  ]
+}

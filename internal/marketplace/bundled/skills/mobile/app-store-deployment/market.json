@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "mobile",
+  "source": "rovecode",
+  "signals": [
+    "app store",
+    "Play Store",
+    "App Store Connect",
+    "submission",
+    "certificate",
+    "signing",
+    "EAS Build"
+  ]
+}

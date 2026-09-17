@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "database",
+  "source": "rovecode",
+  "signals": [
+    "index",
+    "B-tree",
+    "slow query",
+    "full scan",
+    "composite index",
+    "partial index"
+  ]
+}

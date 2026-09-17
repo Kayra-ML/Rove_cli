@@ -1,0 +1,23 @@
+{
+  "kind": "skill",
+  "plugin": "rust",
+  "source": "rovecode",
+  "signals": [
+    "error",
+    "Result",
+    "Option",
+    "unwrap",
+    "expect",
+    "?",
+    "propagate",
+    "thiserror",
+    "anyhow",
+    "custom error",
+    "error type",
+    "panic",
+    "recover",
+    "error handling",
+    "failure",
+    "fallible"
+  ]
+}

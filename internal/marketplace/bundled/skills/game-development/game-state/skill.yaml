@@ -1,0 +1,18 @@
+name: game-state
+version: 0.1.0
+author: Kayra-ML
+description: "Finite state machines, hierarchical states, save/load, pause, scene flow, and avoiding god-objects for game state."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/game-development
+license: proprietary

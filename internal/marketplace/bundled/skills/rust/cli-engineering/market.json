@@ -1,0 +1,23 @@
+{
+  "kind": "skill",
+  "plugin": "rust",
+  "source": "rovecode",
+  "signals": [
+    "CLI",
+    "command line",
+    "clap",
+    "argument",
+    "subcommand",
+    "flag",
+    "terminal",
+    "stdout",
+    "stderr",
+    "prompt",
+    "interactive",
+    "TUI",
+    "binary",
+    "executable",
+    "tool",
+    "utility"
+  ]
+}

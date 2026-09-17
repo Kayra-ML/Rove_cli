@@ -1,0 +1,18 @@
+name: indexing-strategy
+version: 0.1.0
+author: Kayra-ML
+description: "B-tree index internals, when not to index, composite index column order, partial indexes, GIN indexes, index bloat, covering indexes, and index monitoring."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/database
+license: proprietary

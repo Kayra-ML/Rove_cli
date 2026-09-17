@@ -1,0 +1,18 @@
+name: rate-limiting
+version: 0.1.0
+author: Kayra-ML
+description: "Fixed window vs sliding window vs token bucket algorithms, per-IP vs per-user limits, Redis-backed rate limiting, and rate limit headers."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/backend
+license: proprietary

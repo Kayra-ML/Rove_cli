@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "backend",
+  "source": "rovecode",
+  "signals": [
+    "express",
+    "fastify",
+    "hono",
+    "node server",
+    "app.use",
+    "router"
+  ]
+}

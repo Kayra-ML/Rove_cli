@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "security",
+  "source": "rovecode",
+  "signals": [
+    "dependency",
+    "npm audit",
+    "vulnerability",
+    "supply chain",
+    "CVE",
+    "outdated package"
+  ]
+}

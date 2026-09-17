@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "game-development",
+  "source": "rovecode",
+  "signals": [
+    "physics",
+    "collision",
+    "rigidbody",
+    "collider",
+    "raycast",
+    "character controller",
+    "hitbox"
+  ]
+}

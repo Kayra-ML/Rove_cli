@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "testing",
+  "source": "rovecode",
+  "signals": [
+    "e2e",
+    "end-to-end",
+    "playwright",
+    "cypress",
+    "browser test",
+    "user flow"
+  ]
+}

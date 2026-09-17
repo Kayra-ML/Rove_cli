@@ -1,0 +1,15 @@
+{
+  "kind": "skill",
+  "plugin": "backend",
+  "source": "rovecode",
+  "signals": [
+    "auth",
+    "JWT",
+    "session",
+    "login",
+    "token",
+    "OAuth",
+    "refresh token",
+    "password"
+  ]
+}

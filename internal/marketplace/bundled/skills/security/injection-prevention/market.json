@@ -1,0 +1,12 @@
+{
+  "kind": "skill",
+  "plugin": "security",
+  "source": "rovecode",
+  "signals": [
+    "SQL injection",
+    "injection",
+    "parameterized query",
+    "prepared statement",
+    "command injection"
+  ]
+}

@@ -1,0 +1,18 @@
+name: offline-storage
+version: 0.1.0
+author: Kayra-ML
+description: "AsyncStorage vs MMKV, WatermelonDB, offline-first architecture, optimistic updates, conflict resolution, NetInfo, and secure storage."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/mobile
+license: proprietary

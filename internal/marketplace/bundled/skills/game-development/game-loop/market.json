@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "game-development",
+  "source": "rovecode",
+  "signals": [
+    "game loop",
+    "timestep",
+    "delta time",
+    "tick",
+    "fixed update",
+    "frame rate",
+    "interpolation"
+  ]
+}

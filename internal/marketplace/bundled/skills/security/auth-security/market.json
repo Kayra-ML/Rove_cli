@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "security",
+  "source": "rovecode",
+  "signals": [
+    "auth security",
+    "JWT security",
+    "session security",
+    "password",
+    "brute force",
+    "token security"
+  ]
+}

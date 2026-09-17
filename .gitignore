@@ -1,0 +1,22 @@
+# Go
+/build/
+/bin/
+*.exe
+
+# Wails
+desktop/frontend/dist/
+desktop/frontend/node_modules/
+desktop/frontend/.next/
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Env / secrets
+.env
+*.env
+
+# OS
+.DS_Store
+Thumbs.db

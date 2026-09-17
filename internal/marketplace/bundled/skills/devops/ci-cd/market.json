@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "devops",
+  "source": "rovecode",
+  "signals": [
+    "CI",
+    "CD",
+    "GitHub Actions",
+    "pipeline",
+    "workflow",
+    "automated deploy",
+    "build"
+  ]
+}

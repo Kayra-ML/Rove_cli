@@ -1,0 +1,20 @@
+{
+  "kind": "skill",
+  "plugin": "web-design",
+  "source": "rovecode",
+  "signals": [
+    "accessibility",
+    "a11y",
+    "WCAG",
+    "ARIA",
+    "screen reader",
+    "keyboard",
+    "focus management",
+    "color contrast",
+    "alt text",
+    "semantic HTML",
+    "inclusive design",
+    "disability",
+    "assistive technology"
+  ]
+}

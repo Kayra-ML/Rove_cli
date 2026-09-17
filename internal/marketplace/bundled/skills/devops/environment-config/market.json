@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "devops",
+  "source": "rovecode",
+  "signals": [
+    "environment",
+    ".env",
+    "config",
+    "ENV",
+    "secrets",
+    "production config",
+    "12-factor"
+  ]
+}

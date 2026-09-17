@@ -1,0 +1,18 @@
+name: deployment-strategies
+version: 0.1.0
+author: Kayra-ML
+description: "Blue-green, canary, rolling deployments, zero-downtime checklist, graceful shutdown, database migration order, and rollback procedures."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/devops
+license: proprietary

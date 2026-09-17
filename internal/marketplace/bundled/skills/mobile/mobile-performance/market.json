@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "mobile",
+  "source": "rovecode",
+  "signals": [
+    "mobile performance",
+    "jank",
+    "frame drop",
+    "slow render",
+    "FPS",
+    "Hermes",
+    "bridge"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "testing",
+  "source": "rovecode",
+  "signals": [
+    "mock",
+    "stub",
+    "spy",
+    "fake",
+    "vi.mock",
+    "jest.mock",
+    "dependency injection"
+  ]
+}

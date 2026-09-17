@@ -1,0 +1,17 @@
+{
+  "kind": "skill",
+  "plugin": "web-design",
+  "source": "rovecode",
+  "signals": [
+    "spacing",
+    "padding",
+    "margin",
+    "rhythm",
+    "grid system",
+    "8px",
+    "layout spacing",
+    "whitespace system",
+    "clamp",
+    "fluid spacing"
+  ]
+}

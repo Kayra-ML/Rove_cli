@@ -1,0 +1,23 @@
+name: workspace-notes
+version: 0.1.0
+author: aether
+description: Capture durable notes into workspace memory.
+entrypoints:
+  - SKILL.md
+requiredTools:
+  - read_file
+  - write_file
+hooks:
+  onSessionStart: remember recent decisions
+commands:
+  - name: /note
+    description: Store a workspace note
+    prompt: Persist the user's note into workspace memory.
+dependencies: []
+permissions:
+  filesystem: true
+  shell: false
+  network: false
+  browser: false
+  git: false
+license: MIT

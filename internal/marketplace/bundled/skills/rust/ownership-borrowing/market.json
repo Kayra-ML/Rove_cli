@@ -1,0 +1,22 @@
+{
+  "kind": "skill",
+  "plugin": "rust",
+  "source": "rovecode",
+  "signals": [
+    "ownership",
+    "borrow",
+    "lifetime",
+    "borrow checker",
+    "move",
+    "clone",
+    "reference",
+    "mutable reference",
+    "interior mutability",
+    "RefCell",
+    "Rc",
+    "Arc",
+    "cannot borrow",
+    "does not live long enough",
+    "ownership error"
+  ]
+}

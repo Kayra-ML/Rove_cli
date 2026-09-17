@@ -1,0 +1,15 @@
+{
+  "kind": "skill",
+  "plugin": "ai-engineering",
+  "source": "rovecode",
+  "signals": [
+    "prompt",
+    "system prompt",
+    "few-shot",
+    "chain of thought",
+    "instruction",
+    "openai",
+    "anthropic",
+    "llm"
+  ]
+}

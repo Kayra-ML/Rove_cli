@@ -1,0 +1,15 @@
+{
+  "kind": "skill",
+  "plugin": "game-development",
+  "source": "rovecode",
+  "signals": [
+    "asset",
+    "atlas",
+    "addressable",
+    "prefab",
+    "import",
+    "streaming",
+    "texture",
+    "audio clip"
+  ]
+}

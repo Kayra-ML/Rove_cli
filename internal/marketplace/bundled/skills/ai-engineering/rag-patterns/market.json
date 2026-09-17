@@ -1,0 +1,15 @@
+{
+  "kind": "skill",
+  "plugin": "ai-engineering",
+  "source": "rovecode",
+  "signals": [
+    "rag",
+    "retrieval",
+    "chunk",
+    "vector search",
+    "rerank",
+    "knowledge base",
+    "grounding",
+    "citation"
+  ]
+}

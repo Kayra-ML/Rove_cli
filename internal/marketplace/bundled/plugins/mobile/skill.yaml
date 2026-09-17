@@ -1,0 +1,24 @@
+name: mobile
+version: 0.1.0
+author: Kayra-ML
+description: "React Native patterns, mobile performance, navigation, offline storage, and app store deployment."
+entrypoints:
+  - PLUGIN.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies:
+  - react-native-patterns
+  - mobile-performance
+  - navigation-patterns
+  - offline-storage
+  - push-notifications
+  - app-store-deployment
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins
+license: proprietary

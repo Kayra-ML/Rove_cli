@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "mobile",
+  "source": "rovecode",
+  "signals": [
+    "offline",
+    "local storage",
+    "AsyncStorage",
+    "SQLite",
+    "MMKV",
+    "sync",
+    "cache"
+  ]
+}

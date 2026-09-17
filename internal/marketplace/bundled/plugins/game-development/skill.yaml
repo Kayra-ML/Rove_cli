@@ -1,0 +1,24 @@
+name: game-development
+version: 0.1.0
+author: Kayra-ML
+description: "Game engine engineering covering game loops, physics, rendering, input, state machines, and asset pipelines."
+entrypoints:
+  - PLUGIN.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies:
+  - game-loop
+  - physics-patterns
+  - rendering-pipeline
+  - input-handling
+  - game-state
+  - asset-management
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins
+license: proprietary

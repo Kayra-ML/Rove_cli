@@ -1,0 +1,22 @@
+{
+  "kind": "skill",
+  "plugin": "automation",
+  "source": "rovecode",
+  "signals": [
+    "retry",
+    "reliable",
+    "resilient",
+    "backoff",
+    "circuit breaker",
+    "timeout",
+    "idempotent",
+    "failure",
+    "recover",
+    "fault tolerant",
+    "flaky",
+    "intermittent",
+    "error recovery",
+    "dead letter",
+    "compensating action"
+  ]
+}

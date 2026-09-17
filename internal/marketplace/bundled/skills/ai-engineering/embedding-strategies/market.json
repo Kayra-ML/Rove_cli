@@ -1,0 +1,15 @@
+{
+  "kind": "skill",
+  "plugin": "ai-engineering",
+  "source": "rovecode",
+  "signals": [
+    "embedding",
+    "vector",
+    "cosine",
+    "hnsw",
+    "faiss",
+    "pinecone",
+    "chroma",
+    "similarity"
+  ]
+}

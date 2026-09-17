@@ -1,0 +1,22 @@
+{
+  "kind": "skill",
+  "plugin": "web-design",
+  "source": "rovecode",
+  "signals": [
+    "layout",
+    "grid",
+    "composition",
+    "hierarchy",
+    "whitespace",
+    "density",
+    "section",
+    "page structure",
+    "sidebar",
+    "dashboard",
+    "panel",
+    "column",
+    "asymmetric",
+    "negative space",
+    "visual weight"
+  ]
+}

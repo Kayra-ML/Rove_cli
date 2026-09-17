@@ -1,0 +1,18 @@
+name: environment-config
+version: 0.1.0
+author: Kayra-ML
+description: "12-factor app config, .env vs environment variables, .env.example pattern, config validation at startup, environment-specific config, and Zod for env validation."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/devops
+license: proprietary

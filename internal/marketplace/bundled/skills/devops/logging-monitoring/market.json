@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "devops",
+  "source": "rovecode",
+  "signals": [
+    "logging",
+    "monitoring",
+    "observability",
+    "metrics",
+    "traces",
+    "alerts",
+    "error tracking"
+  ]
+}

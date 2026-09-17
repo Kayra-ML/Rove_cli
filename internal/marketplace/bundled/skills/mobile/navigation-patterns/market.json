@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "mobile",
+  "source": "rovecode",
+  "signals": [
+    "navigation",
+    "React Navigation",
+    "stack",
+    "tab",
+    "drawer",
+    "deep link",
+    "route"
+  ]
+}

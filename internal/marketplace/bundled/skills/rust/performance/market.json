@@ -1,0 +1,23 @@
+{
+  "kind": "skill",
+  "plugin": "rust",
+  "source": "rovecode",
+  "signals": [
+    "performance",
+    "optimize",
+    "profiling",
+    "allocation",
+    "heap",
+    "stack",
+    "zero-cost",
+    "SIMD",
+    "inline",
+    "benchmark",
+    "flamegraph",
+    "perf",
+    "throughput",
+    "latency",
+    "memory usage",
+    "fast"
+  ]
+}

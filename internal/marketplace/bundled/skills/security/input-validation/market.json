@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "security",
+  "source": "rovecode",
+  "signals": [
+    "input validation",
+    "sanitization",
+    "user input",
+    "zod",
+    "validation schema",
+    "malicious input"
+  ]
+}

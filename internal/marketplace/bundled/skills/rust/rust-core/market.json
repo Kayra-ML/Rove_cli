@@ -1,0 +1,21 @@
+{
+  "kind": "skill",
+  "plugin": "rust",
+  "source": "rovecode",
+  "signals": [
+    "rust",
+    "cargo",
+    "trait",
+    "generic",
+    "iterator",
+    "pattern matching",
+    "match",
+    "enum",
+    "struct",
+    "impl",
+    "module",
+    "crate",
+    "rustc",
+    "idiomatic"
+  ]
+}

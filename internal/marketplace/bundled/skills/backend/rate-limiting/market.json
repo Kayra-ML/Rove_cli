@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "backend",
+  "source": "rovecode",
+  "signals": [
+    "rate limit",
+    "throttle",
+    "abuse",
+    "DDoS",
+    "quota",
+    "429"
+  ]
+}

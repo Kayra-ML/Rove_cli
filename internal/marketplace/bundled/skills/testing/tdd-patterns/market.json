@@ -1,0 +1,12 @@
+{
+  "kind": "skill",
+  "plugin": "testing",
+  "source": "rovecode",
+  "signals": [
+    "TDD",
+    "test driven",
+    "red green refactor",
+    "write test first",
+    "failing test"
+  ]
+}

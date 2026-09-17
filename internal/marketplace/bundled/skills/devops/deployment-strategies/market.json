@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "devops",
+  "source": "rovecode",
+  "signals": [
+    "deploy",
+    "blue-green",
+    "canary",
+    "rolling",
+    "zero downtime",
+    "rollback"
+  ]
+}

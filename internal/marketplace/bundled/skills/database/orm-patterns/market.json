@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "database",
+  "source": "rovecode",
+  "signals": [
+    "ORM",
+    "Prisma",
+    "Drizzle",
+    "TypeORM",
+    "Sequelize",
+    "query builder",
+    "model"
+  ]
+}

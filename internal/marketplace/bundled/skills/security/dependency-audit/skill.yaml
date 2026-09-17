@@ -1,0 +1,18 @@
+name: dependency-audit
+version: 0.1.0
+author: Kayra-ML
+description: "npm/bun audit workflow, CVSS scores, Dependabot/Renovate, lockfile importance, supply chain attacks, SBOM, and minimal dependency principle."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/security
+license: proprietary

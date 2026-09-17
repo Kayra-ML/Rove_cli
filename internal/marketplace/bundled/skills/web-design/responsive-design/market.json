@@ -1,0 +1,21 @@
+{
+  "kind": "skill",
+  "plugin": "web-design",
+  "source": "rovecode",
+  "signals": [
+    "responsive",
+    "mobile",
+    "tablet",
+    "breakpoint",
+    "fluid",
+    "adaptive",
+    "viewport",
+    "container query",
+    "media query",
+    "mobile-first",
+    "screen size",
+    "portrait",
+    "landscape",
+    "flexible layout"
+  ]
+}

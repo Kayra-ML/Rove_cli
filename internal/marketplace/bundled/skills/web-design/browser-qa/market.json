@@ -1,0 +1,22 @@
+{
+  "kind": "skill",
+  "plugin": "web-design",
+  "source": "rovecode",
+  "signals": [
+    "browser",
+    "cross-browser",
+    "Safari",
+    "Firefox",
+    "Chrome",
+    "Edge",
+    "compatibility",
+    "rendering",
+    "CSS bug",
+    "browser bug",
+    "visual regression",
+    "testing",
+    "QA",
+    "browser support",
+    "polyfill"
+  ]
+}

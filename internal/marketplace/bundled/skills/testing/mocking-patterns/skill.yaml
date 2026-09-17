@@ -1,0 +1,18 @@
+name: mocking-patterns
+version: 0.1.0
+author: Kayra-ML
+description: "Mock vs stub vs spy vs fake, vi.mock() patterns, MSW for HTTP, mocking time and filesystem, and avoiding over-mocking."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/testing
+license: proprietary

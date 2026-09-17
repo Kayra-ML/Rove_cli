@@ -1,0 +1,24 @@
+name: database
+version: 0.1.0
+author: Kayra-ML
+description: "Database schema design, query optimization, indexing, migrations, and ORM patterns."
+entrypoints:
+  - PLUGIN.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies:
+  - schema-design
+  - query-optimization
+  - migrations
+  - indexing-strategy
+  - transactions
+  - orm-patterns
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins
+license: proprietary

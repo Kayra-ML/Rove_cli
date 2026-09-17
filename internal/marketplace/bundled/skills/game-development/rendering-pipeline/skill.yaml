@@ -1,0 +1,18 @@
+name: rendering-pipeline
+version: 0.1.0
+author: Kayra-ML
+description: "Draw calls, batching, shaders, cameras, culling, lighting, and 2D vs 3D pipeline choices in Unity URP, Unreal, and Godot."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/game-development
+license: proprietary

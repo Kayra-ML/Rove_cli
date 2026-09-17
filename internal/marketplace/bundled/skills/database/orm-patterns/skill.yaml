@@ -1,0 +1,18 @@
+name: orm-patterns
+version: 0.1.0
+author: Kayra-ML
+description: "ORM vs query builder vs raw SQL decision tree, Prisma and Drizzle patterns, N+1 with ORMs, raw queries, transactions, and repository pattern."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/database
+license: proprietary

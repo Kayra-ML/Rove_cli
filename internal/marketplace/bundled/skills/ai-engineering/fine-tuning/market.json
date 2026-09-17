@@ -1,0 +1,15 @@
+{
+  "kind": "skill",
+  "plugin": "ai-engineering",
+  "source": "rovecode",
+  "signals": [
+    "fine-tune",
+    "finetune",
+    "lora",
+    "qlora",
+    "sft",
+    "dpo",
+    "adapter",
+    "instruction tuning"
+  ]
+}

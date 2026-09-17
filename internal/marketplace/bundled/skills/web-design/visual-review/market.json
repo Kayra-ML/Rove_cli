@@ -1,0 +1,21 @@
+{
+  "kind": "skill",
+  "plugin": "web-design",
+  "source": "rovecode",
+  "signals": [
+    "review",
+    "critique",
+    "feedback",
+    "improve",
+    "evaluate",
+    "assess",
+    "looks generic",
+    "looks bad",
+    "improve design",
+    "design feedback",
+    "visual quality",
+    "design critique",
+    "what's wrong",
+    "make it better"
+  ]
+}

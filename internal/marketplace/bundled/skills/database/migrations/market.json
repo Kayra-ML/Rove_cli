@@ -1,0 +1,12 @@
+{
+  "kind": "skill",
+  "plugin": "database",
+  "source": "rovecode",
+  "signals": [
+    "migration",
+    "schema change",
+    "ALTER TABLE",
+    "rollback",
+    "database version"
+  ]
+}

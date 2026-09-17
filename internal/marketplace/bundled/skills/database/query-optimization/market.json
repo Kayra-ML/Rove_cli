@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "database",
+  "source": "rovecode",
+  "signals": [
+    "slow query",
+    "query optimization",
+    "EXPLAIN",
+    "N+1",
+    "performance",
+    "query plan"
+  ]
+}

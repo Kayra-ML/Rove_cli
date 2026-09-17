@@ -1,0 +1,15 @@
+{
+  "kind": "skill",
+  "plugin": "testing",
+  "source": "rovecode",
+  "signals": [
+    "unit test",
+    "vitest",
+    "jest",
+    "describe",
+    "it(",
+    "expect",
+    "assertion",
+    "test coverage"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "security",
+  "source": "rovecode",
+  "signals": [
+    "secrets",
+    "API key leak",
+    "credential leak",
+    "git history",
+    "secret rotation",
+    "env variable"
+  ]
+}

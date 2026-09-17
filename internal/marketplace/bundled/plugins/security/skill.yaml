@@ -1,0 +1,24 @@
+name: security
+version: 0.1.0
+author: Kayra-ML
+description: "Authentication security, input validation, OWASP top 10, dependency auditing, and secrets management."
+entrypoints:
+  - PLUGIN.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies:
+  - auth-security
+  - input-validation
+  - dependency-audit
+  - xss-csrf-protection
+  - injection-prevention
+  - secrets-hygiene
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins
+license: proprietary

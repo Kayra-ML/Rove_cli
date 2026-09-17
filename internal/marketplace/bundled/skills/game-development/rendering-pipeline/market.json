@@ -1,0 +1,15 @@
+{
+  "kind": "skill",
+  "plugin": "game-development",
+  "source": "rovecode",
+  "signals": [
+    "rendering",
+    "shader",
+    "draw call",
+    "batching",
+    "camera",
+    "culling",
+    "sprite",
+    "material"
+  ]
+}

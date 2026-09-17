@@ -1,0 +1,30 @@
+name: web-design
+version: 0.1.0
+author: Kayra-ML
+description: "Professional web design expertise covering visual design, UX, interaction, and browser implementation."
+entrypoints:
+  - PLUGIN.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies:
+  - creative-direction
+  - layout-composition
+  - typography
+  - spacing-rhythm
+  - color-system
+  - responsive-design
+  - interaction-design
+  - motion-engineering
+  - accessibility
+  - web-performance
+  - browser-qa
+  - visual-review
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins
+license: proprietary

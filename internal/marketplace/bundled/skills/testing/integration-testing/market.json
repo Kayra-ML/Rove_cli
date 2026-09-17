@@ -1,0 +1,12 @@
+{
+  "kind": "skill",
+  "plugin": "testing",
+  "source": "rovecode",
+  "signals": [
+    "integration test",
+    "API test",
+    "database test",
+    "supertest",
+    "test database"
+  ]
+}

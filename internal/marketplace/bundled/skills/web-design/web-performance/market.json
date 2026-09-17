@@ -1,0 +1,25 @@
+{
+  "kind": "skill",
+  "plugin": "web-design",
+  "source": "rovecode",
+  "signals": [
+    "performance",
+    "speed",
+    "loading",
+    "LCP",
+    "CLS",
+    "FID",
+    "INP",
+    "Core Web Vitals",
+    "optimize",
+    "bundle size",
+    "lazy load",
+    "preload",
+    "cache",
+    "fast",
+    "lighthouse",
+    "PageSpeed",
+    "font loading",
+    "image optimization"
+  ]
+}

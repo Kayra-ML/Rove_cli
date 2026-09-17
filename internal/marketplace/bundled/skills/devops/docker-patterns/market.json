@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "devops",
+  "source": "rovecode",
+  "signals": [
+    "docker",
+    "container",
+    "Dockerfile",
+    "docker-compose",
+    "image",
+    "layer"
+  ]
+}

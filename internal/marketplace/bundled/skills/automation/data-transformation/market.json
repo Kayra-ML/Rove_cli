@@ -1,0 +1,24 @@
+{
+  "kind": "skill",
+  "plugin": "automation",
+  "source": "rovecode",
+  "signals": [
+    "transform",
+    "ETL",
+    "data",
+    "convert",
+    "map",
+    "parse",
+    "format",
+    "JSON",
+    "CSV",
+    "XML",
+    "schema",
+    "validate",
+    "normalize",
+    "clean data",
+    "data pipeline",
+    "extract",
+    "load"
+  ]
+}

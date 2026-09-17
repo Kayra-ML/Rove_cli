@@ -1,0 +1,18 @@
+name: query-optimization
+version: 0.1.0
+author: Kayra-ML
+description: "EXPLAIN ANALYZE output, N+1 problem, index usage, covering indexes, LIMIT/OFFSET vs cursor pagination performance, and connection pooling."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/database
+license: proprietary

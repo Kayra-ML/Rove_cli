@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "devops",
+  "source": "rovecode",
+  "signals": [
+    "secrets",
+    "API key",
+    "credentials",
+    "vault",
+    "secret rotation",
+    "KMS"
+  ]
+}

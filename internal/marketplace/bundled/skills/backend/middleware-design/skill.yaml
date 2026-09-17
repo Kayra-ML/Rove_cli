@@ -1,0 +1,18 @@
+name: middleware-design
+version: 0.1.0
+author: Kayra-ML
+description: "Middleware execution order, error middleware, async patterns, request validation, CORS, compression, and middleware vs route handler separation."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/backend
+license: proprietary

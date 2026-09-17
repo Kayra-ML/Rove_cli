@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "security",
+  "source": "rovecode",
+  "signals": [
+    "XSS",
+    "cross-site scripting",
+    "CSRF",
+    "cross-site request forgery",
+    "Content-Security-Policy",
+    "CSP"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "backend",
+  "source": "rovecode",
+  "signals": [
+    "error handling",
+    "error response",
+    "exception",
+    "500",
+    "400",
+    "error middleware"
+  ]
+}

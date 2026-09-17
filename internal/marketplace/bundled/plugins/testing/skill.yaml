@@ -1,0 +1,24 @@
+name: testing
+version: 0.1.0
+author: Kayra-ML
+description: "Unit testing, integration testing, E2E, TDD, mocking, and performance testing patterns."
+entrypoints:
+  - PLUGIN.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies:
+  - unit-testing
+  - integration-testing
+  - e2e-testing
+  - tdd-patterns
+  - mocking-patterns
+  - performance-testing
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins
+license: proprietary

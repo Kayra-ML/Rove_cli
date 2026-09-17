@@ -1,0 +1,23 @@
+{
+  "kind": "skill",
+  "plugin": "web-design",
+  "source": "rovecode",
+  "signals": [
+    "animation",
+    "motion",
+    "transition",
+    "animate",
+    "spring",
+    "easing",
+    "scroll animation",
+    "parallax",
+    "entrance",
+    "exit",
+    "keyframe",
+    "framer motion",
+    "GSAP",
+    "CSS animation",
+    "animated",
+    "movement"
+  ]
+}

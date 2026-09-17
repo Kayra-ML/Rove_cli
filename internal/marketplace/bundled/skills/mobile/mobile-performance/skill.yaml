@@ -1,0 +1,18 @@
+name: mobile-performance
+version: 0.1.0
+author: Kayra-ML
+description: "JS/UI/Native thread model, Hermes engine, New Architecture (JSI/Fabric/TurboModules), bridge bottlenecks, Flipper profiling, and re-render prevention."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/mobile
+license: proprietary

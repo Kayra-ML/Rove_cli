@@ -1,0 +1,15 @@
+{
+  "kind": "skill",
+  "plugin": "game-development",
+  "source": "rovecode",
+  "signals": [
+    "input",
+    "gamepad",
+    "keyboard",
+    "touch",
+    "rebinding",
+    "coyote time",
+    "input buffer",
+    "action map"
+  ]
+}

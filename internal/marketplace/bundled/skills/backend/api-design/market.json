@@ -1,0 +1,15 @@
+{
+  "kind": "skill",
+  "plugin": "backend",
+  "source": "rovecode",
+  "signals": [
+    "api design",
+    "REST",
+    "endpoint",
+    "routes",
+    "HTTP methods",
+    "status codes",
+    "versioning",
+    "pagination"
+  ]
+}

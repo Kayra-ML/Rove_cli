@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "database",
+  "source": "rovecode",
+  "signals": [
+    "transaction",
+    "ACID",
+    "rollback",
+    "commit",
+    "concurrent",
+    "deadlock",
+    "isolation"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "database",
+  "source": "rovecode",
+  "signals": [
+    "schema",
+    "table",
+    "column",
+    "relation",
+    "foreign key",
+    "normalization",
+    "data model"
+  ]
+}

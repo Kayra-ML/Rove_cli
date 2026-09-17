@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "game-development",
+  "source": "rovecode",
+  "signals": [
+    "game state",
+    "fsm",
+    "state machine",
+    "save load",
+    "pause",
+    "scene",
+    "checkpoint"
+  ]
+}

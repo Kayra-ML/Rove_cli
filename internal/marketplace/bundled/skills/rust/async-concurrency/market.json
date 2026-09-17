@@ -1,0 +1,23 @@
+{
+  "kind": "skill",
+  "plugin": "rust",
+  "source": "rovecode",
+  "signals": [
+    "async",
+    "await",
+    "tokio",
+    "future",
+    "concurrent",
+    "concurrency",
+    "spawn",
+    "channel",
+    "mpsc",
+    "Mutex",
+    "RwLock",
+    "async runtime",
+    "blocking",
+    "non-blocking",
+    "parallelism",
+    "thread"
+  ]
+}

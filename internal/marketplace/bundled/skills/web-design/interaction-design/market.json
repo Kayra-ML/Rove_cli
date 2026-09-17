@@ -1,0 +1,24 @@
+{
+  "kind": "skill",
+  "plugin": "web-design",
+  "source": "rovecode",
+  "signals": [
+    "interaction",
+    "hover",
+    "focus",
+    "click",
+    "microinteraction",
+    "state",
+    "feedback",
+    "transition",
+    "toggle",
+    "dropdown",
+    "tooltip",
+    "popover",
+    "gesture",
+    "touch",
+    "swipe",
+    "drag",
+    "interactive"
+  ]
+}

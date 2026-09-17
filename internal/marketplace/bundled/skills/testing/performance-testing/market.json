@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "testing",
+  "source": "rovecode",
+  "signals": [
+    "performance test",
+    "load test",
+    "benchmark",
+    "k6",
+    "artillery",
+    "throughput",
+    "latency"
+  ]
+}

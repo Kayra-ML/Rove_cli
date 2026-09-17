@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "plugin": "mobile",
+  "source": "rovecode",
+  "signals": [
+    "push notification",
+    "FCM",
+    "APNs",
+    "expo notifications",
+    "background notification",
+    "notification permission"
+  ]
+}

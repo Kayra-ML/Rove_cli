@@ -1,0 +1,18 @@
+name: scraping-strategy
+version: 0.1.0
+author: Kayra-ML
+description: "Web scraping architecture, selector strategy, rate limiting, anti-bot handling, and ethical scraping practices."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/automation
+license: proprietary

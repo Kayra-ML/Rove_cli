@@ -1,0 +1,15 @@
+{
+  "kind": "skill",
+  "plugin": "mobile",
+  "source": "rovecode",
+  "signals": [
+    "react native",
+    "RN",
+    "expo sdk",
+    "expo router",
+    "native component",
+    "StyleSheet",
+    "FlatList",
+    "hooks"
+  ]
+}

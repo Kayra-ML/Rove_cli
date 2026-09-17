@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "plugin": "ai-engineering",
+  "source": "rovecode",
+  "signals": [
+    "eval",
+    "evaluation",
+    "hallucination",
+    "llm-as-judge",
+    "golden set",
+    "benchmark",
+    "regression"
+  ]
+}

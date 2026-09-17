@@ -1,0 +1,22 @@
+{
+  "kind": "skill",
+  "plugin": "automation",
+  "source": "rovecode",
+  "signals": [
+    "scrape",
+    "scraping",
+    "crawl",
+    "spider",
+    "extract data",
+    "website data",
+    "rate limit",
+    "anti-bot",
+    "CAPTCHA",
+    "robots.txt",
+    "sitemap",
+    "cheerio",
+    "selector",
+    "XPath",
+    "CSS selector"
+  ]
+}

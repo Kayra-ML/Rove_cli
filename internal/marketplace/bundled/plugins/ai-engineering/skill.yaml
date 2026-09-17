@@ -1,0 +1,24 @@
+name: ai-engineering
+version: 0.1.0
+author: Kayra-ML
+description: "LLM application engineering covering prompt design, RAG, embeddings, fine-tuning, agent architecture, and evaluation."
+entrypoints:
+  - PLUGIN.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies:
+  - prompt-engineering
+  - rag-patterns
+  - fine-tuning
+  - agent-design
+  - embedding-strategies
+  - llm-evaluation
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins
+license: proprietary

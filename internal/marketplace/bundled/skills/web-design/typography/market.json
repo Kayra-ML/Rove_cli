@@ -1,0 +1,22 @@
+{
+  "kind": "skill",
+  "plugin": "web-design",
+  "source": "rovecode",
+  "signals": [
+    "typography",
+    "font",
+    "typeface",
+    "type scale",
+    "heading",
+    "body text",
+    "readability",
+    "legibility",
+    "line height",
+    "letter spacing",
+    "font pairing",
+    "serif",
+    "sans-serif",
+    "monospace",
+    "variable font"
+  ]
+}

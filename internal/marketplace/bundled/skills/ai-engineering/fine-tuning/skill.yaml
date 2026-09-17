@@ -1,0 +1,18 @@
+name: fine-tuning
+version: 0.1.0
+author: Kayra-ML
+description: "When to fine-tune vs prompt vs RAG, LoRA/QLoRA, dataset quality, catastrophic forgetting, and evaluation of adapted models."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/ai-engineering
+license: proprietary

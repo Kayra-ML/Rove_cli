@@ -1,0 +1,18 @@
+name: scheduling
+version: 0.1.0
+author: Kayra-ML
+description: "Cron jobs, task scheduling, time-based triggers, distributed scheduling, and avoiding common scheduling pitfalls."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/automation
+license: proprietary

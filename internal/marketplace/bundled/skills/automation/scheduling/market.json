@@ -1,0 +1,19 @@
+{
+  "kind": "skill",
+  "plugin": "automation",
+  "source": "rovecode",
+  "signals": [
+    "schedule",
+    "cron",
+    "scheduled",
+    "timer",
+    "interval",
+    "periodic",
+    "daily",
+    "hourly",
+    "trigger",
+    "time-based",
+    "background job",
+    "recurring"
+  ]
+}

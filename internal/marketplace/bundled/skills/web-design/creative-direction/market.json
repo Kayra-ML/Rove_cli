@@ -1,0 +1,20 @@
+{
+  "kind": "skill",
+  "plugin": "web-design",
+  "source": "rovecode",
+  "signals": [
+    "design direction",
+    "visual concept",
+    "brand",
+    "aesthetic",
+    "design DNA",
+    "style guide",
+    "moodboard",
+    "visual identity",
+    "creative brief",
+    "look and feel",
+    "design language",
+    "visual language",
+    "design system foundation"
+  ]
+}

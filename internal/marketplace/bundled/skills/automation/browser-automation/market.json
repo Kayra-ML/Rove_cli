@@ -1,0 +1,23 @@
+{
+  "kind": "skill",
+  "plugin": "automation",
+  "source": "rovecode",
+  "signals": [
+    "browser",
+    "Playwright",
+    "Puppeteer",
+    "Selenium",
+    "headless",
+    "navigate",
+    "click",
+    "fill",
+    "screenshot",
+    "page",
+    "selector",
+    "DOM",
+    "browser automation",
+    "web scraping",
+    "UI test",
+    "end-to-end"
+  ]
+}

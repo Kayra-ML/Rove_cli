@@ -1,0 +1,18 @@
+name: unit-testing
+version: 0.1.0
+author: Kayra-ML
+description: "What makes a good unit test, AAA pattern, naming conventions, Vitest vs Jest, coverage strategy, and test doubles."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/testing
+license: proprietary

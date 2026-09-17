@@ -1,0 +1,24 @@
+name: backend
+version: 0.1.0
+author: Kayra-ML
+description: "Backend API design, server patterns, authentication, middleware, and HTTP engineering."
+entrypoints:
+  - PLUGIN.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies:
+  - api-design
+  - authentication
+  - middleware-design
+  - error-handling-http
+  - rate-limiting
+  - express-patterns
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins
+license: proprietary

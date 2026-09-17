@@ -1,0 +1,18 @@
+name: navigation-patterns
+version: 0.1.0
+author: Kayra-ML
+description: "React Navigation v6, TypeScript type-safe navigation, nested navigators, deep linking, auth gate pattern, back button, and state persistence."
+entrypoints:
+  - SKILL.md
+requiredTools: []
+hooks: {}
+commands: []
+dependencies: []
+permissions:
+  filesystem: false
+  shell: false
+  network: false
+  browser: false
+  git: false
+homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/mobile
+license: proprietary
