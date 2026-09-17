@@ -1,0 +1,12 @@
+name: health-monitor
+version: "1.0.0"
+author: Aether
+description: "Agent süreçlerinin sağlığını izler, çöken agent'ı yeniden başlatır ve durumu loglar."
+kind: automation
+trigger:
+  every_seconds: 15
+permissions:
+  shell: true
+  network: false
+  git: false
+tags: [health, agents, monitor, reliability]

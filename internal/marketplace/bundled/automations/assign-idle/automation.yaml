@@ -1,0 +1,12 @@
+name: assign-idle
+version: "1.0.0"
+author: Aether
+description: "Boşta bekleyen agent'ları sıradaki hazır karta otomatik atar."
+kind: automation
+trigger:
+  every_seconds: 30
+permissions:
+  shell: false
+  network: false
+  git: false
+tags: [agents, assign, idle]

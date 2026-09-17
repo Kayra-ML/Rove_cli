@@ -527,6 +527,23 @@ type AutomationJob struct {
 	UpdatedAt    time.Time      `json:"updatedAt"`
 }
 
-// --- MCP server ---
+// --- Automation Template (catalog entry) ---
 
-// --- Webhook ---
+// AutomationTemplate is a read-only blueprint that lives in the bundled
+// automations/ directory.  Installing one creates an AutomationJob record.
+type AutomationTemplate struct {
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Author      string   `json:"author"`
+	Description string   `json:"description"`
+	Kind        string   `json:"kind"`
+	Tags        []string `json:"tags,omitempty"`
+	EverySeconds int     `json:"everySeconds"`
+	Permissions struct {
+		Shell   bool `json:"shell"`
+		Network bool `json:"network"`
+		Git     bool `json:"git"`
+	} `json:"permissions"`
+	// Installed is true when an AutomationJob with matching Name already exists.
+	Installed bool `json:"installed"`
+}

@@ -18,7 +18,9 @@ export function Icon({
     | "box"
     | "cart"
     | "sliders"
-    | "palette";
+    | "palette"
+    | "lightning"
+    | "trash";
   size?: number;
 }) {
   const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -55,5 +57,9 @@ export function Icon({
       return <svg {...p}><path d="M4 8h16M4 16h16"/><circle cx="9" cy="8" r="2.2" fill="currentColor" stroke="none"/><circle cx="15" cy="16" r="2.2" fill="currentColor" stroke="none"/></svg>;
     case "palette":
       return <svg {...p}><path d="M12 3a9 9 0 1 0 0 18h1.6a2.2 2.2 0 0 0 1.7-3.6 2.2 2.2 0 0 1 1.7-3.6H18a3 3 0 0 0 0-6h-.5"/><circle cx="7.5" cy="10" r="1.1" fill="currentColor" stroke="none"/><circle cx="10.5" cy="7.2" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.2" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="8.2" cy="13.5" r="1.1" fill="currentColor" stroke="none"/></svg>;
+    case "lightning":
+      return <svg {...p}><path d="M13 3L4 14h8l-1 7 9-11h-8l1-7z"/></svg>;
+    case "trash":
+      return <svg {...p}><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>;
   }
 }

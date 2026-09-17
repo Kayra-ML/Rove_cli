@@ -1,0 +1,12 @@
+name: sweep-ready
+version: "1.0.0"
+author: Aether
+description: "Kanban backlog'unda bekleyen hazır kartları otomatik tarar ve idle agent'a atar."
+kind: automation
+trigger:
+  every_seconds: 60
+permissions:
+  shell: false
+  network: false
+  git: false
+tags: [kanban, sweep, agents]

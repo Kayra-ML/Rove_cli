@@ -102,10 +102,13 @@ const (
 	MethodCostPriceTable = "cost.pricetable"
 
 	// Automation.
-	MethodAutomationList   = "automation.list"
-	MethodAutomationUpsert = "automation.upsert"
-	MethodAutomationDelete = "automation.delete"
-	MethodAutomationTick   = "automation.tick"
+	MethodAutomationList      = "automation.list"
+	MethodAutomationUpsert    = "automation.upsert"
+	MethodAutomationDelete    = "automation.delete"
+	MethodAutomationTick      = "automation.tick"
+	MethodAutomationCatalog   = "automation.catalog"
+	MethodAutomationInstall   = "automation.install"
+	MethodAutomationUninstall = "automation.uninstall"
 
 	// Git branch / push / PR.
 	MethodGitBranch = "git.branch"

@@ -1,0 +1,12 @@
+name: drive-goals
+version: "1.0.0"
+author: Aether
+description: "Aktif goal'lerin durumunu periyodik kontrol eder, judge'u tetikler, sonucu Kanban'a yansıtır."
+kind: automation
+trigger:
+  every_seconds: 120
+permissions:
+  shell: true
+  network: false
+  git: true
+tags: [goals, judge, kanban]
