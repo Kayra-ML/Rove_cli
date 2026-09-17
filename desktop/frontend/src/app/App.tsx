@@ -47,6 +47,7 @@ export function App() {
   const { agents, reload: reloadAgents } = useAgents();
   const newChatRef = useRef<(() => Promise<Session | null>) | null>(null);
   const [rpcOk, setRpcOk] = useState(true);
+  const [updateAvail, setUpdateAvail] = useState<string | null>(null);
   const [auxOpen, setAuxOpen] = useState(() => localStorage.getItem("aether.auxOpen") !== "0");
   const [sideOpen, setSideOpen] = useState(() => localStorage.getItem("aether.sideOpen") !== "0");
 
@@ -159,6 +160,26 @@ export function App() {
     };
     tick();
     const id = window.setInterval(tick, 8000);
+    return () => window.clearInterval(id);
+  }, [ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const CURRENT = "v0.1.0";
+    const check = async () => {
+      try {
+        const r = await fetch(
+          "https://api.github.com/repos/Kayra-ML/Rove_cli/releases/latest",
+          { headers: { Accept: "application/vnd.github+json" } }
+        );
+        if (!r.ok) return;
+        const j = (await r.json()) as { tag_name?: string };
+        const tag = j.tag_name ?? "";
+        if (tag && tag !== CURRENT) setUpdateAvail(tag);
+      } catch { /* offline */ }
+    };
+    void check();
+    const id = window.setInterval(check, 6 * 60 * 60 * 1000); // every 6h
     return () => window.clearInterval(id);
   }, [ready]);
 
@@ -478,6 +499,20 @@ export function App() {
       />
 
       <Toasts />
+
+      {updateAvail && (
+        <div className="update-banner">
+          <span>🎉 Güncelleme mevcut: <strong>{updateAvail}</strong></span>
+          <a
+            href={`https://github.com/Kayra-ML/Rove_cli/releases/tag/${updateAvail}`}
+            target="_blank" rel="noreferrer"
+            className="update-link"
+          >
+            İndir
+          </a>
+          <button className="update-dismiss" onClick={() => setUpdateAvail(null)} title="Kapat">×</button>
+        </div>
+      )}
 
       <div className="status">
         <span style={{ color: rpcOk ? "var(--ok)" : "var(--bad)" }}>● {rpcOk ? t("connected", lang) : "offline"}</span>

@@ -1050,3 +1050,36 @@ textarea { resize: none; }
 }
 .slash-row span { color: var(--muted); font-size: 12px; }
 .slash-row.active, .slash-row:hover { background: var(--bg-hover); }
+
+/* ─── update banner ────────────────────────────── */
+.update-banner {
+  position: fixed;
+  bottom: 32px; right: 16px;
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-raised);
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--border));
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.45);
+  z-index: 9000;
+  animation: slide-in-right .22s ease;
+}
+.update-banner strong { color: var(--accent); }
+.update-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+.update-dismiss {
+  background: none; border: none;
+  color: var(--muted); font-size: 18px; line-height: 1;
+  cursor: pointer; padding: 0 2px; opacity: .75;
+}
+.update-dismiss:hover { opacity: 1; color: var(--text); }
+@keyframes slide-in-right {
+  from { transform: translateX(60px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
