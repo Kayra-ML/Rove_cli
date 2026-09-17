@@ -244,6 +244,13 @@ func (s *Store) migrate() error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_ledger_session ON usage_ledger(session_id)`,
+		`CREATE TABLE IF NOT EXISTS mcp_servers (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			command TEXT NOT NULL DEFAULT '',
+			args TEXT NOT NULL DEFAULT '[]',
+			env TEXT NOT NULL DEFAULT '{}'
+		)`,
 	}
 	// Split: DDL statements run in a transaction; ALTER TABLE statements
 	// run individually outside it (SQLite ignores "duplicate column" errors).
@@ -1202,4 +1209,39 @@ func JoinIDs(ids []types.ID) string {
 		ss[i] = string(id)
 	}
 	return strings.Join(ss, ",")
+}
+
+// ── MCP server registry ───────────────────────────────────────────────────────
+
+func (s *Store) UpsertMCPServer(ctx context.Context, srv types.MCPServerConfig) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO mcp_servers(id,name,command,args,env) VALUES(?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET name=excluded.name, command=excluded.command, args=excluded.args, env=excluded.env`,
+		srv.ID, srv.Name, srv.Command, mustJSON(srv.Args), mustJSON(srv.Env))
+	return err
+}
+
+func (s *Store) ListMCPServers(ctx context.Context) ([]types.MCPServerConfig, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,command,args,env FROM mcp_servers ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []types.MCPServerConfig
+	for rows.Next() {
+		var srv types.MCPServerConfig
+		var args, env string
+		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Command, &args, &env); err != nil {
+			return nil, err
+		}
+		unmarshal(args, &srv.Args)
+		unmarshal(env, &srv.Env)
+		out = append(out, srv)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteMCPServer(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM mcp_servers WHERE id=?`, id)
+	return err
 }

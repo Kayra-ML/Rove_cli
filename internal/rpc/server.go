@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/aether-dev/aether/internal/agent"
+	"github.com/aether-dev/aether/internal/billing"
 	"github.com/aether-dev/aether/internal/core"
 	"github.com/aether-dev/aether/internal/harness"
 	"github.com/aether-dev/aether/internal/id"
@@ -981,140 +982,161 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		filename := "session-" + string(p.SessionID) + ".md"
 		return core.MustJSON(map[string]any{"markdown": sb.String(), "filename": filename}), nil
-
 	case protocol.MethodSessionImport:
-			var p struct {
-				AgentID     types.ID `json:"agentId"`
-				WorkspaceID types.ID `json:"workspaceId"`
-				Title       string   `json:"title"`
-				Markdown    string   `json:"markdown"`
+		var p struct {
+			AgentID     types.ID `json:"agentId"`
+			WorkspaceID types.ID `json:"workspaceId"`
+			Title       string   `json:"title"`
+			Markdown    string   `json:"markdown"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if p.Title == "" {
+			p.Title = "Imported session"
+		}
+		sess, err := a.Sess.Create(ctx, p.Title, p.AgentID, p.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		// Parse blocks separated by "\n---\n"
+		blocks := strings.Split(p.Markdown, "\n---\n")
+		for _, block := range blocks {
+			block = strings.TrimSpace(block)
+			if block == "" {
+				continue
 			}
-			if err := json.Unmarshal(req.Params, &p); err != nil {
+			// Expect "## role\n\ncontent"
+			lines := strings.SplitN(block, "\n", 3)
+			if len(lines) < 2 {
+				continue
+			}
+			roleLine := strings.TrimPrefix(strings.TrimSpace(lines[0]), "## ")
+			var content string
+			if len(lines) == 3 {
+				content = strings.TrimSpace(lines[2])
+			} else {
+				content = strings.TrimSpace(lines[1])
+			}
+			if roleLine == "" || content == "" {
+				continue
+			}
+			msg := types.Message{
+				SessionID: sess.ID,
+				Role:      types.MessageRole(roleLine),
+				Content:   content,
+			}
+			if _, err := a.Sess.Append(ctx, msg); err != nil {
 				return nil, err
 			}
-			if p.Title == "" {
-				p.Title = "Imported session"
-			}
-			sess, err := a.Sess.Create(ctx, p.Title, p.AgentID, p.WorkspaceID)
-			if err != nil {
-				return nil, err
-			}
-			// Parse blocks separated by "\n---\n"
-			blocks := strings.Split(p.Markdown, "\n---\n")
-			for _, block := range blocks {
-				block = strings.TrimSpace(block)
-				if block == "" {
-					continue
-				}
-				// Expect "## role\n\ncontent"
-				lines := strings.SplitN(block, "\n", 3)
-				if len(lines) < 2 {
-					continue
-				}
-				roleLine := strings.TrimPrefix(strings.TrimSpace(lines[0]), "## ")
-				var content string
-				if len(lines) == 3 {
-					content = strings.TrimSpace(lines[2])
-				} else {
-					content = strings.TrimSpace(lines[1])
-				}
-				if roleLine == "" || content == "" {
-					continue
-				}
-				msg := types.Message{
-					SessionID: sess.ID,
-					Role:      types.MessageRole(roleLine),
-					Content:   content,
-				}
-				if _, err := a.Sess.Append(ctx, msg); err != nil {
-					return nil, err
-				}
-			}
-			hist, herr := a.Sess.History(ctx, sess.ID)
-			if herr != nil {
-				return nil, herr
-			}
-			return core.MustJSON(map[string]any{"session": sess, "messages": hist}), nil
+		}
+		hist, herr := a.Sess.History(ctx, sess.ID)
+		if herr != nil {
+			return nil, herr
+		}
+		return core.MustJSON(map[string]any{"session": sess, "messages": hist}), nil
 
-		case protocol.MethodGitBranch:
-			var p struct {
-				Path string `json:"path"`
-				Name string `json:"name"`
-			}
-			if err := json.Unmarshal(req.Params, &p); err != nil {
-				return nil, err
-			}
-			err := a.Git.CreateBranch(p.Path, p.Name)
-			return core.MustJSON(map[string]any{"ok": err == nil}), err
+	// ── Codebase FTS5 index ────────────────────────────────────────────────
+	case protocol.MethodIndexBuild:
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if a.Index == nil {
+			return nil, fmt.Errorf("index: not initialised")
+		}
+		go func() {
+			_ = a.Index.IndexWorkspace(context.Background(), p.Path)
+		}()
+		return core.MustJSON(map[string]any{"started": true}), nil
 
-		case protocol.MethodGitPush:
-			var p struct {
-				Path   string `json:"path"`
-				Remote string `json:"remote"`
-				Branch string `json:"branch"`
-			}
-			if err := json.Unmarshal(req.Params, &p); err != nil {
-				return nil, err
-			}
-			if p.Remote == "" {
-				p.Remote = "origin"
-			}
-			err := a.Git.PushBranch(p.Path, p.Remote, p.Branch)
-			return core.MustJSON(map[string]any{"ok": err == nil}), err
+	case protocol.MethodIndexSearch:
+		var p struct {
+			Query string `json:"query"`
+			Limit int    `json:"limit"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if a.Index == nil {
+			return nil, fmt.Errorf("index: not initialised")
+		}
+		results, err := a.Index.Search(ctx, p.Query, p.Limit)
+		return core.MustJSON(results), err
 
-		case protocol.MethodGitPR:
-				var p struct {
-					Path  string `json:"path"`
-					Title string `json:"title"`
-					Body  string `json:"body"`
-					Base  string `json:"base"`
-				}
-				if err := json.Unmarshal(req.Params, &p); err != nil {
-					return nil, err
-				}
-				url, err := a.Git.CreatePR(p.Path, p.Title, p.Body, p.Base)
-				return core.MustJSON(map[string]any{"url": url}), err
+	// ── Parallel orchestration ────────────────────────────────────────────
+	case protocol.MethodOrchParallel:
+		activeIDs := a.Orch.ActiveCards()
+		activeCount := len(activeIDs)
+		return core.MustJSON(map[string]any{
+			"activeCount": activeCount,
+			"activeCards": activeIDs,
+		}), nil
 
-			// ── Codebase FTS5 index ────────────────────────────────────────────────
-			case protocol.MethodIndexBuild:
-				var p struct {
-					Path string `json:"path"`
-				}
-				if err := json.Unmarshal(req.Params, &p); err != nil {
-					return nil, err
-				}
-				if a.Index == nil {
-					return nil, fmt.Errorf("index: not initialised")
-				}
-				go func() {
-					_ = a.Index.IndexWorkspace(context.Background(), p.Path)
-				}()
-				return core.MustJSON(map[string]any{"started": true}), nil
+	// ── PR automation ─────────────────────────────────────────────────────
+	case protocol.MethodGitBranch:
+		var p struct {
+			Path string `json:"path"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Git.CreateBranch(p.Path, p.Name)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
 
-			case protocol.MethodIndexSearch:
-				var p struct {
-					Query string `json:"query"`
-					Limit int    `json:"limit"`
-				}
-				if err := json.Unmarshal(req.Params, &p); err != nil {
-					return nil, err
-				}
-				if a.Index == nil {
-					return nil, fmt.Errorf("index: not initialised")
-				}
-				results, err := a.Index.Search(ctx, p.Query, p.Limit)
-				return core.MustJSON(results), err
+	case protocol.MethodGitPush:
+		var p struct {
+			Path   string `json:"path"`
+			Remote string `json:"remote"`
+			Branch string `json:"branch"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if p.Remote == "" {
+			p.Remote = "origin"
+		}
+		err := a.Git.PushBranch(p.Path, p.Remote, p.Branch)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
 
-			// ── Parallel orchestration ────────────────────────────────────────────
-					case protocol.MethodOrchParallel:
-						activeIDs := a.Orch.ActiveCards()
-						activeCount := len(activeIDs)
-						return core.MustJSON(map[string]any{
-							"activeCount": activeCount,
-							"activeCards": activeIDs,
-						}), nil
+	case protocol.MethodGitPR:
+		var p struct {
+			Path  string `json:"path"`
+			Title string `json:"title"`
+			Body  string `json:"body"`
+			Base  string `json:"base"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		url, err := a.Git.CreatePR(p.Path, p.Title, p.Body, p.Base)
+		return core.MustJSON(map[string]any{"url": url}), err
 
-					default:
-						return nil, fmt.Errorf("unknown method %s", req.Method)
-					}
-				}
+	// ── Cost / billing ────────────────────────────────────────────────────
+	case protocol.MethodCostGet:
+		var p struct {
+			SessionID string `json:"sessionId"`
+		}
+		_ = json.Unmarshal(req.Params, &p)
+		prompt, completion, costUSD, err := a.Store.SumUsage(ctx, p.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		return core.MustJSON(map[string]any{
+			"promptTokens":     prompt,
+			"completionTokens": completion,
+			"totalTokens":      prompt + completion,
+			"costUSD":          costUSD,
+			"sessionId":        p.SessionID,
+		}), nil
+
+	case protocol.MethodCostPriceTable:
+		return core.MustJSON(billing.PriceTable), nil
+
+	default:
+		return nil, fmt.Errorf("unknown method %s", req.Method)
+	}
+}

@@ -495,6 +495,16 @@ type WebhookRule struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// --- MCP servers ---
+
+type MCPServerConfig struct {
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
+}
+
 // --- Automation ---
 
 type AutomationKind string

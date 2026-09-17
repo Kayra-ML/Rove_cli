@@ -131,4 +131,10 @@ const (
 
 	// Parallel orchestration.
 	MethodOrchParallel = "orch.parallel"
+
+	// MCP server registry.
+	MethodMCPList     = "mcp.list"
+	MethodMCPAdd      = "mcp.add"
+	MethodMCPRemove   = "mcp.remove"
+	MethodMCPDiscover = "mcp.discover"
 )
