@@ -11,6 +11,7 @@ export type UsageSnapshot = {
   activeAgents: number;
   days: number;
   uptime?: string;
+  costUSD?: number;
 };
 
 export function compact(n: number): string {

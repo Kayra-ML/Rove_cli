@@ -50,6 +50,10 @@ export function CardDetail({ card, onClose }: Props) {
   const [gitStatus, setGitStatus] = useState<{ branch?: string; dirty?: boolean; changed?: string[]; untracked?: string[] } | null>(null);
   const [gitDiff, setGitDiff] = useState("");
   const [commitMsg, setCommitMsg] = useState("");
+  const [prTitle, setPrTitle] = useState("");
+  const [prBody, setPrBody] = useState("");
+  const [prBase, setPrBase] = useState("main");
+  const [prLoading, setPrLoading] = useState(false);
   const [artKind, setArtKind] = useState("file");
   const [artLabel, setArtLabel] = useState("");
   const [artPath, setArtPath] = useState("");

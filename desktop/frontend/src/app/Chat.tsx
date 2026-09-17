@@ -327,6 +327,20 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenBoard,
   const canSend = Boolean(input.trim() && activeSession && !sending);
   const empty = allMessages.length === 0;
 
+  async function exportSession() {
+    if (!activeSession) return;
+    const res = await rpc<{ markdown: string; filename: string }>("session.export", {
+      sessionId: activeSession.id,
+    });
+    const blob = new Blob([res.markdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = res.filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div
       className="thread"
@@ -376,6 +390,19 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenBoard,
         )}
       </div>
 
+      {activeSession && (
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 12px 4px" }}>
+          <button
+            type="button"
+            className="ghost"
+            style={{ fontSize: 11, opacity: 0.6 }}
+            onClick={() => void exportSession()}
+            aria-label="Export session as markdown"
+          >
+            ↓ export .md
+          </button>
+        </div>
+      )}
       <div className="composer-dock">
         {sendErr && <div className="status-stack" style={{ color: "var(--bad)" }}>{sendErr}</div>}
         {(live || sending) && (

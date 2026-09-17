@@ -38,6 +38,7 @@ import (
 	"github.com/aether-dev/aether/internal/terminal"
 	"github.com/aether-dev/aether/internal/tool"
 	"github.com/aether-dev/aether/internal/types"
+	"github.com/aether-dev/aether/internal/webhook"
 	"github.com/aether-dev/aether/internal/workspace"
 )
 
@@ -66,6 +67,7 @@ type App struct {
 	MCP     *mcp.Runtime
 	Leases  *lease.Coordinator
 	Auto    *automation.Engine
+	Webhook *webhook.Engine
 	Token   string
 	Checkpt *checkpoint.Manager
 	Index   *index.Indexer
