@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/aether-dev/aether/internal/agent"
+	"github.com/aether-dev/aether/internal/billing"
 	"github.com/aether-dev/aether/internal/core"
 	"github.com/aether-dev/aether/internal/harness"
 	"github.com/aether-dev/aether/internal/id"
@@ -894,6 +895,286 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		out, err := a.Auto.Tick(ctx)
 		return core.MustJSON(out), err
+
+	// ── Checkpoint / snapshot ──────────────────────────────────────────────
+	case protocol.MethodCheckpointTake:
+		var p struct {
+			Path  string `json:"path"`
+			Label string `json:"label"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		snap, err := a.Checkpt.Take(p.Path, p.Label)
+		return core.MustJSON(snap), err
+	case protocol.MethodCheckpointList:
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		snaps, err := a.Checkpt.List(p.Path)
+		return core.MustJSON(snaps), err
+	case protocol.MethodCheckpointRestore:
+		var p struct {
+			Path string `json:"path"`
+			Ref  string `json:"ref"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Checkpt.Restore(p.Path, p.Ref)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+	case protocol.MethodCheckpointDrop:
+		var p struct {
+			Path string `json:"path"`
+			Ref  string `json:"ref"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Checkpt.Drop(p.Path, p.Ref)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	// ── Diff hunk accept/reject ────────────────────────────────────────────
+	case protocol.MethodGitApplyHunk:
+		var p struct {
+			Path  string `json:"path"`
+			Patch string `json:"patch"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Git.ApplyHunk(p.Path, p.Patch)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+	case protocol.MethodGitRejectHunk:
+		var p struct {
+			Path  string `json:"path"`
+			Patch string `json:"patch"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Git.RejectHunk(p.Path, p.Patch)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	// ── Session export / import ────────────────────────────────────────────
+	case protocol.MethodSessionExport:
+		var p struct {
+			SessionID types.ID `json:"sessionId"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		msgs, err := a.Sess.History(ctx, p.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		var sb strings.Builder
+		sb.WriteString("# Session Export\n\n")
+		for _, m := range msgs {
+			sb.WriteString("## ")
+			sb.WriteString(string(m.Role))
+			sb.WriteString("\n\n")
+			sb.WriteString(m.Content)
+			sb.WriteString("\n\n---\n\n")
+		}
+		filename := "session-" + string(p.SessionID) + ".md"
+		return core.MustJSON(map[string]any{"markdown": sb.String(), "filename": filename}), nil
+
+	case protocol.MethodSessionImport:
+		var p struct {
+			AgentID     types.ID `json:"agentId"`
+			WorkspaceID types.ID `json:"workspaceId"`
+			Title       string   `json:"title"`
+			Markdown    string   `json:"markdown"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if p.Title == "" {
+			p.Title = "Imported session"
+		}
+		sess, err := a.Sess.Create(ctx, p.Title, p.AgentID, p.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		blocks := strings.Split(p.Markdown, "\n---\n")
+		for _, block := range blocks {
+			block = strings.TrimSpace(block)
+			if block == "" {
+				continue
+			}
+			lines := strings.SplitN(block, "\n", 3)
+			if len(lines) < 2 {
+				continue
+			}
+			roleLine := strings.TrimPrefix(strings.TrimSpace(lines[0]), "## ")
+			var content string
+			if len(lines) == 3 {
+				content = strings.TrimSpace(lines[2])
+			} else {
+				content = strings.TrimSpace(lines[1])
+			}
+			if roleLine == "" || content == "" {
+				continue
+			}
+			msg := types.Message{
+				SessionID: sess.ID,
+				Role:      types.MessageRole(roleLine),
+				Content:   content,
+			}
+			if _, err := a.Sess.Append(ctx, msg); err != nil {
+				return nil, err
+			}
+		}
+		hist, herr := a.Sess.History(ctx, sess.ID)
+		if herr != nil {
+			return nil, herr
+		}
+		return core.MustJSON(map[string]any{"session": sess, "messages": hist}), nil
+
+	// ── Git branch / push / PR ─────────────────────────────────────────────
+	case protocol.MethodGitBranch:
+		var p struct {
+			Path string `json:"path"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Git.CreateBranch(p.Path, p.Name)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	case protocol.MethodGitPush:
+		var p struct {
+			Path   string `json:"path"`
+			Remote string `json:"remote"`
+			Branch string `json:"branch"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if p.Remote == "" {
+			p.Remote = "origin"
+		}
+		err := a.Git.PushBranch(p.Path, p.Remote, p.Branch)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	case protocol.MethodGitPR:
+		var p struct {
+			Path  string `json:"path"`
+			Title string `json:"title"`
+			Body  string `json:"body"`
+			Base  string `json:"base"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		url, err := a.Git.CreatePR(p.Path, p.Title, p.Body, p.Base)
+		return core.MustJSON(map[string]any{"url": url}), err
+
+	// ── MCP server registry ────────────────────────────────────────────────
+	case protocol.MethodMCPList:
+		out, err := a.Store.ListMCPServers(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return core.MustJSON(out), nil
+
+	case protocol.MethodMCPAdd:
+		var srv types.MCPServerConfig
+		if err := json.Unmarshal(req.Params, &srv); err != nil {
+			return nil, err
+		}
+		if srv.ID == "" {
+			srv.ID = string(id.NewID())
+		}
+		if err := a.Store.UpsertMCPServer(ctx, srv); err != nil {
+			return nil, err
+		}
+		return core.MustJSON(srv), nil
+
+	case protocol.MethodMCPRemove:
+		var p struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Store.DeleteMCPServer(ctx, p.ID)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	case protocol.MethodMCPDiscover:
+		if a.MCP == nil {
+			return core.MustJSON([]string{}), nil
+		}
+		return core.MustJSON(a.MCP.List()), nil
+
+	// ── Webhook trigger rules ─────────────────────────────────────────────
+	case protocol.MethodWebhookList:
+		if a.Webhook == nil {
+			return core.MustJSON([]types.WebhookRule{}), nil
+		}
+		out, err := a.Webhook.List(ctx)
+		return core.MustJSON(out), err
+	case protocol.MethodWebhookUpsert:
+		if a.Webhook == nil {
+			return nil, fmt.Errorf("webhook engine not available")
+		}
+		var r types.WebhookRule
+		if err := json.Unmarshal(req.Params, &r); err != nil {
+			return nil, err
+		}
+		out, err := a.Webhook.Upsert(ctx, r)
+		return core.MustJSON(out), err
+	case protocol.MethodWebhookDelete:
+		if a.Webhook == nil {
+			return nil, fmt.Errorf("webhook engine not available")
+		}
+		var p struct {
+			ID types.ID `json:"id"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Webhook.Delete(ctx, p.ID)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	// ── Codebase FTS5 index ───────────────────────────────────────────────
+	case protocol.MethodIndexBuild:
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if a.Index == nil {
+			return nil, fmt.Errorf("index not initialised")
+		}
+		go func() {
+			_ = a.Index.IndexWorkspace(context.Background(), p.Path)
+		}()
+		return core.MustJSON(map[string]any{"started": true}), nil
+
+	case protocol.MethodIndexSearch:
+		var p struct {
+			Query string `json:"query"`
+			Limit int    `json:"limit"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if a.Index == nil {
+			return nil, fmt.Errorf("index not initialised")
+		}
+		if p.Limit <= 0 {
+			p.Limit = 10
+		}
+		results, err := a.Index.Search(ctx, p.Query, p.Limit)
+		return core.MustJSON(results), err
+
 	default:
 		return nil, fmt.Errorf("unknown method %s", req.Method)
 	}

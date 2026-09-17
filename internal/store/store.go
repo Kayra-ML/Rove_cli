@@ -223,6 +223,26 @@ func (s *Store) migrate() error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS webhook_rules (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			secret TEXT NOT NULL DEFAULT '',
+			event_type TEXT NOT NULL DEFAULT '*',
+			agent_id TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS usage_ledger (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			prompt_tokens INTEGER NOT NULL DEFAULT 0,
+			completion_tokens INTEGER NOT NULL DEFAULT 0,
+			cost_usd REAL NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		)`,
 	}
 	// Split: DDL statements run in a transaction; ALTER TABLE statements
 	// run individually outside it (SQLite ignores "duplicate column" errors).
@@ -1094,10 +1114,78 @@ func (s *Store) DeleteAutomation(ctx context.Context, id types.ID) error {
 	return err
 }
 
+// ── Webhook rules ─────────────────────────────────────────────────────────────
+
+func (s *Store) UpsertWebhookRule(ctx context.Context, r types.WebhookRule) error {
+	en := 0
+	if r.Enabled {
+		en = 1
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO webhook_rules(id,name,secret,event_type,agent_id,enabled,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET name=excluded.name, secret=excluded.secret,
+		event_type=excluded.event_type, agent_id=excluded.agent_id, enabled=excluded.enabled, updated_at=excluded.updated_at`,
+		r.ID, r.Name, r.Secret, r.EventType, r.AgentID, en, ts(r.CreatedAt), ts(r.UpdatedAt))
+	return err
+}
+
+func (s *Store) ListWebhookRules(ctx context.Context) ([]types.WebhookRule, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id,name,secret,event_type,agent_id,enabled,created_at,updated_at FROM webhook_rules ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []types.WebhookRule
+	for rows.Next() {
+		var r types.WebhookRule
+		var en int
+		var created, updated string
+		if err := rows.Scan(&r.ID, &r.Name, &r.Secret, &r.EventType, &r.AgentID, &en, &created, &updated); err != nil {
+			return nil, err
+		}
+		r.Enabled = en == 1
+		r.CreatedAt, r.UpdatedAt = parseTS(created), parseTS(updated)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteWebhookRule(ctx context.Context, id types.ID) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM webhook_rules WHERE id=?`, id)
+	return err
+}
+
 func JoinIDs(ids []types.ID) string {
 	ss := make([]string, len(ids))
 	for i, id := range ids {
 		ss[i] = string(id)
 	}
 	return strings.Join(ss, ",")
+}
+
+// ── Usage ledger ──────────────────────────────────────────────────────────────
+
+// RecordUsage inserts a cost record into the usage_ledger table.
+func (s *Store) RecordUsage(ctx context.Context, sessionID, provider, model string, promptTokens, completionTokens int, costUSD float64) error {
+	now := ts(time.Now().UTC())
+	entryID := fmt.Sprintf("ul_%d", time.Now().UnixNano())
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO usage_ledger(id,session_id,provider,model,prompt_tokens,completion_tokens,cost_usd,created_at)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		entryID, sessionID, provider, model, promptTokens, completionTokens, costUSD, now)
+	return err
+}
+
+// SumUsage returns the total cost in USD for a session (or all sessions if sessionID is empty).
+func (s *Store) SumUsage(ctx context.Context, sessionID string) (float64, error) {
+	var total float64
+	var err error
+	if sessionID == "" {
+		err = s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM usage_ledger`).Scan(&total)
+	} else {
+		err = s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd),0) FROM usage_ledger WHERE session_id=?`, sessionID).Scan(&total)
+	}
+	return total, err
 }

@@ -101,4 +101,42 @@ const (
 	MethodAutomationUpsert  = "automation.upsert"
 	MethodAutomationDelete  = "automation.delete"
 	MethodAutomationTick    = "automation.tick"
+
+	// Checkpoint / snapshot.
+	MethodCheckpointTake    = "checkpoint.take"
+	MethodCheckpointList    = "checkpoint.list"
+	MethodCheckpointRestore = "checkpoint.restore"
+	MethodCheckpointDrop    = "checkpoint.drop"
+
+	// Diff hunk accept/reject.
+	MethodGitApplyHunk  = "git.applyHunk"
+	MethodGitRejectHunk = "git.rejectHunk"
+
+	// Session export/import.
+	MethodSessionExport = "session.export"
+	MethodSessionImport = "session.import"
+
+	// Git branch / push / PR.
+	MethodGitBranch = "git.branch"
+	MethodGitPush   = "git.push"
+	MethodGitPR     = "git.pr"
+
+	// MCP server registry.
+	MethodMCPList     = "mcp.list"
+	MethodMCPAdd      = "mcp.add"
+	MethodMCPRemove   = "mcp.remove"
+	MethodMCPDiscover = "mcp.discover"
+
+	// Webhook trigger rules.
+	MethodWebhookList   = "webhook.list"
+	MethodWebhookUpsert = "webhook.upsert"
+	MethodWebhookDelete = "webhook.delete"
+
+	// Codebase FTS5 index.
+	MethodIndexBuild  = "index.build"
+	MethodIndexSearch = "index.search"
+
+	// Cost / billing.
+	MethodCostGet        = "cost.get"
+	MethodCostPriceTable = "cost.priceTable"
 )
