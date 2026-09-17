@@ -94,9 +94,16 @@ export function SessionRail({
 
       <div className="section-label section-label-row" style={{ marginTop: 8 }}>
         <span>{t("subagents", lang)}</span>
-        <button className="icon-btn" title={t("newProfile", lang)} onClick={onOpenRoster}>
-          <Icon name="plus" size={15} />
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {shown.filter((a) => a.status === "running" || Boolean(activity[a.id])).length > 1 && (
+            <span className="agent-running-pill">
+              {shown.filter((a) => a.status === "running" || Boolean(activity[a.id])).length} parallel
+            </span>
+          )}
+          <button className="icon-btn" title={t("newProfile", lang)} onClick={onOpenRoster}>
+            <Icon name="plus" size={15} />
+          </button>
+        </div>
       </div>
       {shown.length === 0 ? (
         <div style={{ padding: "4px 14px", color: "var(--faint)", fontSize: 12 }}>{t("noneYet", lang)}</div>

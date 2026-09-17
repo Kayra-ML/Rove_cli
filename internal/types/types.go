@@ -482,6 +482,29 @@ type FileLease struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
+// --- Webhook ---
+
+type WebhookRule struct {
+	ID        ID        `json:"id"`
+	Name      string    `json:"name"`
+	Secret    string    `json:"secret"`
+	EventType string    `json:"eventType"`
+	AgentID   ID        `json:"agentId"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// --- MCP servers ---
+
+type MCPServerConfig struct {
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
+}
+
 // --- Automation ---
 
 type AutomationKind string

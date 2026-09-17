@@ -39,6 +39,7 @@ func (s *Server) ServeHTTP(addr string) error {
 		writeJSON(w, http.StatusOK, s.app.Health())
 	})
 	mux.HandleFunc("/rpc", s.handleHTTPRPC)
+	mux.HandleFunc("/webhook/", s.handleWebhookTrigger)
 	mux.HandleFunc("/events", s.handleSSE)
 	s.http = &http.Server{Addr: addr, Handler: withCORS(mux)}
 	return s.http.ListenAndServe()
@@ -118,6 +119,40 @@ func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := s.Dispatch(r.Context(), req)
 	writeJSON(w, 200, resp)
+}
+
+// handleWebhookTrigger handles POST /webhook/<eventType> requests from external
+// systems (e.g. GitHub). It verifies the HMAC-SHA256 signature when a secret
+// is configured and fires matching webhook rules.
+func (s *Server) handleWebhookTrigger(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	// Extract event type from URL path: /webhook/<eventType>
+	eventType := strings.TrimPrefix(r.URL.Path, "/webhook/")
+	if eventType == "" {
+		eventType = r.Header.Get("X-GitHub-Event")
+	}
+	if eventType == "" {
+		eventType = "*"
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	sig := r.Header.Get("X-Hub-Signature-256")
+	if s.app.Webhook == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "webhook engine not initialised"})
+		return
+	}
+	results, err := s.app.Webhook.Process(r.Context(), eventType, body, sig)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "results": results})
 }
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
@@ -714,7 +749,6 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 
 	// ── Harness policy ────────────────────────────────────────────────────────
 	case protocol.MethodHarnessGet:
-		// params: {goalId?: string, cardId?: string}
 		var p struct {
 			GoalID string `json:"goalId"`
 			CardID string `json:"cardId"`
@@ -737,7 +771,6 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		return json.RawMessage(raw), nil
 
 	case protocol.MethodHarnessSet:
-		// params: {goalId?: string, cardId?: string, profile: HarnessProfile JSON}
 		var p struct {
 			GoalID  string          `json:"goalId"`
 			CardID  string          `json:"cardId"`
@@ -760,7 +793,6 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		return core.MustJSON(map[string]any{"ok": true}), nil
 
 	case protocol.MethodHarnessCompose:
-		// params: {analysis: TaskAnalysis JSON}
 		var p struct {
 			Analysis harness.TaskAnalysis `json:"analysis"`
 		}
@@ -785,7 +817,6 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}), nil
 
 	case protocol.MethodHarnessMutations:
-		// params: {goalId: string}
 		var p struct {
 			GoalID string `json:"goalId"`
 		}
@@ -815,8 +846,8 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		return core.MustJSON(c.Logs), nil
 	case protocol.MethodCardAddArtifact:
 		var p struct {
-			ID       types.ID        `json:"id"`
-			Artifact types.Artifact  `json:"artifact"`
+			ID       types.ID       `json:"id"`
+			Artifact types.Artifact `json:"artifact"`
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, err
@@ -894,6 +925,223 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		out, err := a.Auto.Tick(ctx)
 		return core.MustJSON(out), err
+
+	// ── Checkpoint / snapshot ──────────────────────────────────────────────
+	case protocol.MethodCheckpointTake:
+		var p struct {
+			Path  string `json:"path"`
+			Label string `json:"label"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		snap, err := a.Checkpt.Take(p.Path, p.Label)
+		return core.MustJSON(snap), err
+	case protocol.MethodCheckpointList:
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		snaps, err := a.Checkpt.List(p.Path)
+		return core.MustJSON(snaps), err
+	case protocol.MethodCheckpointRestore:
+		var p struct {
+			Path string `json:"path"`
+			Ref  string `json:"ref"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Checkpt.Restore(p.Path, p.Ref)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+	case protocol.MethodCheckpointDrop:
+		var p struct {
+			Path string `json:"path"`
+			Ref  string `json:"ref"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Checkpt.Drop(p.Path, p.Ref)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	// ── Diff hunk accept/reject ────────────────────────────────────────────
+	case protocol.MethodGitApplyHunk:
+		var p struct {
+			Path  string `json:"path"`
+			Patch string `json:"patch"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Git.ApplyHunk(p.Path, p.Patch)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+	case protocol.MethodGitRejectHunk:
+		var p struct {
+			Path  string `json:"path"`
+			Patch string `json:"patch"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Git.RejectHunk(p.Path, p.Patch)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	// ── Session export / import ────────────────────────────────────────────
+	case protocol.MethodSessionExport:
+		var p struct {
+			SessionID types.ID `json:"sessionId"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		msgs, err := a.Sess.History(ctx, p.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		var sb strings.Builder
+		sb.WriteString("# Session Export\n\n")
+		for _, m := range msgs {
+			sb.WriteString("## ")
+			sb.WriteString(string(m.Role))
+			sb.WriteString("\n\n")
+			sb.WriteString(m.Content)
+			sb.WriteString("\n\n---\n\n")
+		}
+		filename := "session-" + string(p.SessionID) + ".md"
+		return core.MustJSON(map[string]any{"markdown": sb.String(), "filename": filename}), nil
+
+	case protocol.MethodSessionImport:
+		var p struct {
+			AgentID     types.ID `json:"agentId"`
+			WorkspaceID types.ID `json:"workspaceId"`
+			Title       string   `json:"title"`
+			Markdown    string   `json:"markdown"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if p.Title == "" {
+			p.Title = "Imported session"
+		}
+		sess, err := a.Sess.Create(ctx, p.Title, p.AgentID, p.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		blocks := strings.Split(p.Markdown, "\n---\n")
+		for _, block := range blocks {
+			block = strings.TrimSpace(block)
+			if block == "" {
+				continue
+			}
+			lines := strings.SplitN(block, "\n", 3)
+			if len(lines) < 2 {
+				continue
+			}
+			roleLine := strings.TrimPrefix(strings.TrimSpace(lines[0]), "## ")
+			var content string
+			if len(lines) == 3 {
+				content = strings.TrimSpace(lines[2])
+			} else {
+				content = strings.TrimSpace(lines[1])
+			}
+			if roleLine == "" || content == "" {
+				continue
+			}
+			msg := types.Message{
+				SessionID: sess.ID,
+				Role:      types.MessageRole(roleLine),
+				Content:   content,
+			}
+			if _, err := a.Sess.Append(ctx, msg); err != nil {
+				return nil, err
+			}
+		}
+		hist, herr := a.Sess.History(ctx, sess.ID)
+		if herr != nil {
+			return nil, herr
+		}
+		return core.MustJSON(map[string]any{"session": sess, "messages": hist}), nil
+
+	// ── Git branch / push / PR ─────────────────────────────────────────────
+	case protocol.MethodGitBranch:
+		var p struct {
+			Path string `json:"path"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Git.CreateBranch(p.Path, p.Name)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	case protocol.MethodGitPush:
+		var p struct {
+			Path   string `json:"path"`
+			Remote string `json:"remote"`
+			Branch string `json:"branch"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if p.Remote == "" {
+			p.Remote = "origin"
+		}
+		err := a.Git.PushBranch(p.Path, p.Remote, p.Branch)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	case protocol.MethodGitPR:
+		var p struct {
+			Path  string `json:"path"`
+			Title string `json:"title"`
+			Body  string `json:"body"`
+			Base  string `json:"base"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		url, err := a.Git.CreatePR(p.Path, p.Title, p.Body, p.Base)
+		return core.MustJSON(map[string]any{"url": url}), err
+
+	// ── MCP server registry ────────────────────────────────────────────────
+	case protocol.MethodMCPList:
+		out, err := a.Store.ListMCPServers(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return core.MustJSON(out), nil
+
+	case protocol.MethodMCPAdd:
+		var srv types.MCPServerConfig
+		if err := json.Unmarshal(req.Params, &srv); err != nil {
+			return nil, err
+		}
+		if srv.ID == "" {
+			srv.ID = string(id.NewID())
+		}
+		if err := a.Store.UpsertMCPServer(ctx, srv); err != nil {
+			return nil, err
+		}
+		return core.MustJSON(srv), nil
+
+	case protocol.MethodMCPRemove:
+		var p struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Store.DeleteMCPServer(ctx, p.ID)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	case protocol.MethodMCPDiscover:
+		if a.MCP == nil {
+			return core.MustJSON([]string{}), nil
+		}
+		return core.MustJSON(a.MCP.List()), nil
+
 	default:
 		return nil, fmt.Errorf("unknown method %s", req.Method)
 	}

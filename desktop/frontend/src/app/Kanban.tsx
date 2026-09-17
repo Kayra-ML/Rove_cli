@@ -122,6 +122,11 @@ export function Kanban({ workspaceId, sessionId, onSelectCard }: Props) {
 
   return (
     <div className="kanban">
+      {cards.filter((c: Card) => c.column === "running").length > 1 && (
+        <div className="parallel-banner" style={{ position: "absolute", top: 0, left: 10, right: 10, zIndex: 10 }}>
+          ⚡ {cards.filter((c: Card) => c.column === "running").length} agents running in parallel
+        </div>
+      )}
       {COLUMNS.map(({ key, label }) => {
         const colCards = cards.filter((c: Card) => c.column === key);
         const drop = over === key;
@@ -243,9 +248,10 @@ function CardTile({
   onDelete: (id: string) => void;
   onAssign: (id: string, agentId: string) => void;
 }) {
+  const isRunning = card.column === "running";
   return (
     <div
-      className="card"
+      className={`card${isRunning ? " card-running-overlay" : ""}`}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("text/aether-card", card.id);

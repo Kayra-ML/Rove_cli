@@ -219,3 +219,62 @@ func (m *Manager) BranchForCard(cardID types.ID) string {
 func (m *Manager) WorktreePath(repo string, cardID types.ID) string {
 	return filepath.Join(repo, ".aether", "worktrees", string(cardID))
 }
+
+// CreateBranch creates a new local branch at the given repo path.
+func (m *Manager) CreateBranch(path, name string) error {
+	_, err := m.run(path, "checkout", "-b", name)
+	return err
+}
+
+// PushBranch pushes the given branch to the remote.
+func (m *Manager) PushBranch(path, remote, branch string) error {
+	_, err := m.run(path, "push", "-u", remote, branch)
+	return err
+}
+
+// CreatePR creates a pull request using the gh CLI and returns the PR URL.
+func (m *Manager) CreatePR(path, title, body, base string) (string, error) {
+	args := []string{"pr", "create",
+		"--title", title,
+		"--body", body,
+	}
+	if base != "" {
+		args = append(args, "--base", base)
+	}
+	cmd := exec.Command("gh", args...)
+	cmd.Dir = path
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("gh pr create: %w (%s)", err, stderr.String())
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// ApplyHunk applies a single unified-diff hunk patch to the given directory.
+// The patch string must be a valid unified diff (including file headers).
+func (m *Manager) ApplyHunk(dir, hunkPatch string) error {
+	cmd := exec.Command(m.GitBin, "apply", "--unidiff-zero", "-")
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(hunkPatch)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git apply: %w (%s)", err, stderr.String())
+	}
+	return nil
+}
+
+// RejectHunk reverses a single unified-diff hunk patch (i.e. undoes it).
+func (m *Manager) RejectHunk(dir, hunkPatch string) error {
+	cmd := exec.Command(m.GitBin, "apply", "--reverse", "--unidiff-zero", "-")
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(hunkPatch)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git apply --reverse: %w (%s)", err, stderr.String())
+	}
+	return nil
+}

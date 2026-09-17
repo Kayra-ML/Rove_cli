@@ -10,7 +10,7 @@ import { Icon } from "./Icons";
 import { THEMES, applyTheme, applyLang, type ThemeId } from "~/lib/themes";
 import { LANGS, t, getLang, type Lang } from "~/lib/i18n";
 
-type Section = "appearance" | "workspace" | "providers" | "goals" | "agents" | "roster" | "permissions" | "automation" | "memory";
+type Section = "appearance" | "workspace" | "providers" | "goals" | "agents" | "roster" | "permissions" | "automation" | "memory" | "mcp";
 
 interface Props {
   onClose: () => void;
@@ -32,6 +32,16 @@ export function Settings({ onClose, onSelectWorkspace, initialSection = "appeara
   const [newProvider, setNewProvider] = useState({ name: "", baseUrl: "", secretId: "", secret: "" });
   const [goalTitle, setGoalTitle] = useState("");
   const [goalCriteria, setGoalCriteria] = useState("");
+
+  // MCP state
+  type MCPServer = { id: string; name: string; command: string; args: string[]; env: Record<string, string> };
+  const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
+  const [mcpForm, setMcpForm] = useState({ name: "", command: "", args: "", env: "" });
+  const reloadMCP = useCallback(async () => {
+    const list = await rpc<MCPServer[]>("mcp.list", {});
+    setMcpServers(list ?? []);
+  }, []);
+  useEffect(() => { if (section === "mcp") void reloadMCP(); }, [section, reloadMCP]);
 
   const pickTheme = (id: ThemeId) => {
     setTheme(id);
@@ -113,6 +123,10 @@ export function Settings({ onClose, onSelectWorkspace, initialSection = "appeara
             </button>
             <button className={`rail-item${section === "memory" ? " active" : ""}`} onClick={() => setSection("memory")}>
               <Icon name="box" size={15} /> {t("memory", lang)}
+            </button>
+            <button className={`rail-item${section === "mcp" ? " active" : ""}`} onClick={() => setSection("mcp")}>
+              <Icon name="pulse" size={15} /> MCP
+              <span className="count">{mcpServers.length}</span>
             </button>
           </aside>
 
@@ -319,6 +333,66 @@ export function Settings({ onClose, onSelectWorkspace, initialSection = "appeara
                     ))}
                   </div>
                 )}
+              </>
+            )}
+
+            {section === "mcp" && (
+              <>
+                <h2>MCP Servers</h2>
+                <p className="split-lead">Model Context Protocol sunucuları. Command ile başlatılan araç sağlayıcıları.</p>
+                {mcpServers.length === 0 ? (
+                  <div className="empty">
+                    <strong>MCP sunucu yok</strong>
+                    <p>Aşağıdan bir MCP sunucusu ekle.</p>
+                  </div>
+                ) : (
+                  <div className="row-list" style={{ marginBottom: 22 }}>
+                    {mcpServers.map((srv) => (
+                      <div key={srv.id} className="row">
+                        <div className="avatar"><Icon name="pulse" size={14} /></div>
+                        <div className="meta">
+                          <strong>{srv.name}</strong>
+                          <span>{srv.command} {(srv.args ?? []).join(" ")}</span>
+                        </div>
+                        <button
+                          className="danger-btn"
+                          style={{ fontSize: 11 }}
+                          onClick={() => void rpc("mcp.remove", { id: srv.id }).then(() => reloadMCP())}
+                        >
+                          {t("delete", lang)}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="form-stack">
+                  <label>Name</label>
+                  <input placeholder="my-mcp-server" value={mcpForm.name} onChange={(e) => setMcpForm((f) => ({ ...f, name: e.target.value }))} />
+                  <label>Command</label>
+                  <input placeholder="npx @modelcontextprotocol/server-filesystem" value={mcpForm.command} onChange={(e) => setMcpForm((f) => ({ ...f, command: e.target.value }))} />
+                  <label>Args (space-separated)</label>
+                  <input placeholder="/home/user/workspace" value={mcpForm.args} onChange={(e) => setMcpForm((f) => ({ ...f, args: e.target.value }))} />
+                  <label>Env (KEY=VALUE, comma-separated)</label>
+                  <input placeholder="TOKEN=abc,DEBUG=1" value={mcpForm.env} onChange={(e) => setMcpForm((f) => ({ ...f, env: e.target.value }))} />
+                  <button
+                    className="primary"
+                    style={{ alignSelf: "flex-start", marginTop: 6 }}
+                    onClick={async () => {
+                      if (!mcpForm.name || !mcpForm.command) return;
+                      const args = mcpForm.args.trim() ? mcpForm.args.trim().split(/\s+/) : [];
+                      const env: Record<string, string> = {};
+                      for (const pair of mcpForm.env.split(",")) {
+                        const [k, ...v] = pair.trim().split("=");
+                        if (k) env[k] = v.join("=");
+                      }
+                      await rpc("mcp.add", { name: mcpForm.name, command: mcpForm.command, args, env });
+                      setMcpForm({ name: "", command: "", args: "", env: "" });
+                      await reloadMCP();
+                    }}
+                  >
+                    Add Server
+                  </button>
+                </div>
               </>
             )}
           </div>

@@ -96,9 +96,45 @@ const (
 	MethodHarnessMutations  = "harness.mutations"
 	MethodHarnessPresets    = "harness.presets"
 	MethodUsageGet          = "usage.get"
+	MethodCostGet           = "cost.get"
+	MethodCostPriceTable    = "cost.pricetable"
 
 	MethodAutomationList    = "automation.list"
 	MethodAutomationUpsert  = "automation.upsert"
 	MethodAutomationDelete  = "automation.delete"
 	MethodAutomationTick    = "automation.tick"
+
+	MethodGitBranch         = "git.branch"
+	MethodGitPush           = "git.push"
+	MethodGitPR             = "git.pr"
+
+	MethodCheckpointTake    = "checkpoint.take"
+	MethodCheckpointList    = "checkpoint.list"
+	MethodCheckpointRestore = "checkpoint.restore"
+	MethodCheckpointDrop    = "checkpoint.drop"
+
+	MethodGitApplyHunk  = "git.applyHunk"
+	MethodGitRejectHunk = "git.rejectHunk"
+
+	// Codebase RAG index methods.
+	MethodIndexBuild  = "index.build"
+	MethodIndexSearch = "index.search"
+
+	// Session export / import.
+	MethodSessionExport = "session.export"
+	MethodSessionImport = "session.import"
+
+	// Webhook trigger methods.
+	MethodWebhookList   = "webhook.list"
+	MethodWebhookUpsert = "webhook.upsert"
+	MethodWebhookDelete = "webhook.delete"
+
+	// Parallel orchestration.
+	MethodOrchParallel = "orch.parallel"
+
+	// MCP server registry.
+	MethodMCPList     = "mcp.list"
+	MethodMCPAdd      = "mcp.add"
+	MethodMCPRemove   = "mcp.remove"
+	MethodMCPDiscover = "mcp.discover"
 )

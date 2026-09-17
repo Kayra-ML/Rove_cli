@@ -16,12 +16,44 @@ interface GitLogEntry {
   subject: string;
 }
 
+interface Hunk {
+  header: string;
+  lines: string[];
+  raw: string;
+}
+
+/** Split a unified diff into per-hunk objects */
+function parseHunks(diff: string): Hunk[] {
+  const hunks: Hunk[] = [];
+  let cur: Hunk | null = null;
+  let fileHeader = "";
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("diff ") || line.startsWith("index ") ||
+        line.startsWith("--- ") || line.startsWith("+++ ")) {
+      fileHeader += line + "\n";
+      cur = null;
+    } else if (line.startsWith("@@")) {
+      if (cur) hunks.push(cur);
+      cur = { header: line, lines: [], raw: fileHeader + line + "\n" };
+    } else if (cur) {
+      cur.lines.push(line);
+      cur.raw += line + "\n";
+    }
+  }
+  if (cur) hunks.push(cur);
+  return hunks;
+}
+
 export function CardDetail({ card, onClose }: Props) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [gitLog, setGitLog] = useState<GitLogEntry[]>([]);
   const [gitStatus, setGitStatus] = useState<{ branch?: string; dirty?: boolean; changed?: string[]; untracked?: string[] } | null>(null);
   const [gitDiff, setGitDiff] = useState("");
   const [commitMsg, setCommitMsg] = useState("");
+  const [prTitle, setPrTitle] = useState("");
+  const [prBody, setPrBody] = useState("");
+  const [prBase, setPrBase] = useState("main");
+  const [prLoading, setPrLoading] = useState(false);
   const [artKind, setArtKind] = useState("file");
   const [artLabel, setArtLabel] = useState("");
   const [artPath, setArtPath] = useState("");
@@ -59,6 +91,30 @@ export function CardDetail({ card, onClose }: Props) {
     await rpc("git.commit", { path: card.worktreePath, message: commitMsg });
     setCommitMsg("");
     await loadGitLog();
+  };
+
+  const hunks = gitDiff ? parseHunks(gitDiff) : [];
+
+  const applyHunk = async (hunk: Hunk) => {
+    if (!card.worktreePath) return;
+    try {
+      await rpc("git.applyHunk", { path: card.worktreePath, patch: hunk.raw });
+      toast("Hunk accepted", "ok");
+      await loadGitLog();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "apply failed", "err");
+    }
+  };
+
+  const rejectHunk = async (hunk: Hunk) => {
+    if (!card.worktreePath) return;
+    try {
+      await rpc("git.rejectHunk", { path: card.worktreePath, patch: hunk.raw });
+      toast("Hunk rejected", "ok");
+      await loadGitLog();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "reject failed", "err");
+    }
   };
 
   return (
@@ -112,9 +168,31 @@ export function CardDetail({ card, onClose }: Props) {
                 {gitStatus.untracked?.length ? ` · ${gitStatus.untracked.length} untracked` : ""}
               </div>
             )}
-            {gitDiff && (
+            {hunks.length > 0 ? (
+              <div style={{ marginTop: 8 }}>
+                {hunks.map((hunk, i) => (
+                  <div key={i} className="hunk-block">
+                    <div className="hunk-header">
+                      <span>{hunk.header}</span>
+                      <span className="hunk-header-actions">
+                        <button className="hunk-accept" onClick={() => void applyHunk(hunk)}>✓ Accept</button>
+                        <button className="hunk-reject" onClick={() => void rejectHunk(hunk)}>✗ Reject</button>
+                      </span>
+                    </div>
+                    <pre className="hunk-pre">
+                      {hunk.lines.map((line, j) => (
+                        <span
+                          key={j}
+                          className={line.startsWith("+") ? "hunk-add" : line.startsWith("-") ? "hunk-del" : "hunk-ctx"}
+                        >{line}</span>
+                      ))}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            ) : gitDiff ? (
               <pre className="git-diff">{gitDiff.slice(0, 8000)}</pre>
-            )}
+            ) : null}
           </div>
         )}
 
@@ -147,6 +225,65 @@ export function CardDetail({ card, onClose }: Props) {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {card.worktreePath && (
+          <div style={{ marginBottom: 12 }}>
+            <div className="section-label" style={{ padding: 0, marginBottom: 4 }}>PR Oluştur</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <input
+                placeholder="PR başlığı…"
+                value={prTitle}
+                onChange={(e) => setPrTitle(e.target.value)}
+              />
+              <textarea
+                placeholder="PR açıklaması (opsiyonel)…"
+                value={prBody}
+                onChange={(e) => setPrBody(e.target.value)}
+                rows={3}
+                style={{ resize: "vertical", fontFamily: "var(--mono)", fontSize: 11 }}
+              />
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <label style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>Base branch:</label>
+                <input
+                  style={{ flex: 1 }}
+                  placeholder="main"
+                  value={prBase}
+                  onChange={(e) => setPrBase(e.target.value)}
+                />
+                <button
+                  style={{ background: "var(--accent)", color: "#fff", border: 0, whiteSpace: "nowrap" }}
+                  disabled={!prTitle || prLoading}
+                  onClick={() => {
+                    if (!card.worktreePath || !prTitle) return;
+                    setPrLoading(true);
+                    void rpc<{ url?: string }>("git.pr", {
+                      path: card.worktreePath,
+                      title: prTitle,
+                      body: prBody,
+                      base: prBase || "main",
+                    }).then((res) => {
+                      const url = res?.url ?? "";
+                      toast("PR oluşturuldu", "ok");
+                      // Save PR url as artifact
+                      void rpc("card.addArtifact", {
+                        id: card.id,
+                        artifact: { kind: "pr", label: prTitle, url, name: prTitle },
+                      });
+                      // Move card to review column
+                      void rpc("card.move", { id: card.id, column: "review" });
+                      setPrTitle("");
+                      setPrBody("");
+                    }).catch((err) => {
+                      toast(err instanceof Error ? err.message : "PR oluşturulamadı", "err");
+                    }).finally(() => setPrLoading(false));
+                  }}
+                >
+                  {prLoading ? "…" : "PR Oluştur"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

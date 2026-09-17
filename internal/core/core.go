@@ -13,11 +13,13 @@ import (
 
 	"github.com/aether-dev/aether/internal/agent"
 	"github.com/aether-dev/aether/internal/automation"
+	"github.com/aether-dev/aether/internal/checkpoint"
 	"github.com/aether-dev/aether/internal/config"
 	"github.com/aether-dev/aether/internal/eventbus"
 	"github.com/aether-dev/aether/internal/gitwt"
 	"github.com/aether-dev/aether/internal/goal"
 	"github.com/aether-dev/aether/internal/id"
+	"github.com/aether-dev/aether/internal/index"
 	"github.com/aether-dev/aether/internal/judge"
 	"github.com/aether-dev/aether/internal/kanban"
 	"github.com/aether-dev/aether/internal/lease"
@@ -36,6 +38,7 @@ import (
 	"github.com/aether-dev/aether/internal/terminal"
 	"github.com/aether-dev/aether/internal/tool"
 	"github.com/aether-dev/aether/internal/types"
+	"github.com/aether-dev/aether/internal/webhook"
 	"github.com/aether-dev/aether/internal/workspace"
 )
 
@@ -64,11 +67,14 @@ type App struct {
 	MCP     *mcp.Runtime
 	Leases  *lease.Coordinator
 	Auto    *automation.Engine
+	Webhook *webhook.Engine
 	Token   string
+	Checkpt *checkpoint.Manager
+	Index   *index.Indexer
 
-	mu       sync.Mutex
-	cancels  []context.CancelFunc
-	started  time.Time
+	mu      sync.Mutex
+	cancels []context.CancelFunc
+	started time.Time
 }
 
 func Open(cfg config.Config) (*App, error) {
@@ -132,12 +138,17 @@ func Open(cfg config.Config) (*App, error) {
 	sk := skill.New(st, filepath.Join(cfg.DataDir, "skills"))
 	market := marketplace.New(filepath.Join(cfg.DataDir, "registry"), sk)
 	mcpRt := mcp.New(tools)
+	wh := webhook.New(st)
+
+	// Codebase FTS5 indexer (best-effort — failure is non-fatal).
+	idx, _ := index.New(filepath.Join(cfg.DataDir, "codebase.db"))
 
 	app := &App{
 		Cfg: cfg, Store: st, Bus: bus, Secrets: sec, Perm: perm, Tools: tools, Router: router,
 		Agents: agents, Sess: sess, Mem: mem, Kanban: k, Judge: j, Goals: goals, Orch: orch,
 		Term: term, SSH: sshMgr, Git: git, WS: ws, Skills: sk, Market: market, MCP: mcpRt,
-		Leases: leases, Auto: auto, Token: token, started: time.Now().UTC(),
+		Leases: leases, Auto: auto, Webhook: wh, Token: token, Checkpt: checkpoint.New(), Index: idx,
+		started: time.Now().UTC(),
 	}
 	if err := app.seed(context.Background()); err != nil {
 		app.Close()
@@ -250,6 +261,9 @@ func (a *App) Close() error {
 	}
 	if a.Bus != nil {
 		a.Bus.Close()
+	}
+	if a.Index != nil {
+		_ = a.Index.Close()
 	}
 	if a.Store != nil {
 		return a.Store.Close()
