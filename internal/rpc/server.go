@@ -39,6 +39,7 @@ func (s *Server) ServeHTTP(addr string) error {
 		writeJSON(w, http.StatusOK, s.app.Health())
 	})
 	mux.HandleFunc("/rpc", s.handleHTTPRPC)
+	mux.HandleFunc("/webhook/", s.handleWebhookTrigger)
 	mux.HandleFunc("/events", s.handleSSE)
 	s.http = &http.Server{Addr: addr, Handler: withCORS(mux)}
 	return s.http.ListenAndServe()
