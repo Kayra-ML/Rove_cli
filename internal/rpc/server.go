@@ -18,6 +18,7 @@ import (
 	"github.com/aether-dev/aether/internal/core"
 	"github.com/aether-dev/aether/internal/harness"
 	"github.com/aether-dev/aether/internal/id"
+	"github.com/aether-dev/aether/internal/marketplace"
 	"github.com/aether-dev/aether/internal/orchestrator"
 	"github.com/aether-dev/aether/internal/terminal"
 	"github.com/aether-dev/aether/internal/types"
@@ -1204,6 +1205,78 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		results, err := a.Index.Search(ctx, p.Query, p.Limit)
 		return core.MustJSON(results), err
+
+	// ── Automation catalog / install / uninstall ─────────────────────────
+	case protocol.MethodAutomationCatalog:
+		jobs, _ := a.Auto.List(ctx)
+		installed := map[string]bool{}
+		for _, j := range jobs {
+			installed[strings.ToLower(j.Name)] = true
+		}
+		templates, err := marketplace.ListAutomationTemplates(installed)
+		return core.MustJSON(templates), err
+
+	case protocol.MethodAutomationInstall:
+		var p struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		// Find template in catalog
+		jobs, _ := a.Auto.List(ctx)
+		installed := map[string]bool{}
+		for _, j := range jobs {
+			installed[strings.ToLower(j.Name)] = true
+		}
+		templates, err := marketplace.ListAutomationTemplates(installed)
+		if err != nil {
+			return nil, err
+		}
+		var tmpl *types.AutomationTemplate
+		for i := range templates {
+			if strings.EqualFold(templates[i].Name, p.Name) {
+				tmpl = &templates[i]
+				break
+			}
+		}
+		if tmpl == nil {
+			return nil, fmt.Errorf("automation template %q not found", p.Name)
+		}
+		if tmpl.Installed {
+			return nil, fmt.Errorf("automation %q is already installed", p.Name)
+		}
+		kind := types.AutomationKind(strings.ReplaceAll(strings.ToLower(tmpl.Name), "-", "_"))
+		job := types.AutomationJob{
+			ID:           id.NewID(),
+			Name:         tmpl.Name,
+			Kind:         kind,
+			EverySeconds: tmpl.EverySeconds,
+			Enabled:      true,
+		}
+		out, err := a.Auto.Upsert(ctx, job)
+		return core.MustJSON(out), err
+
+	case protocol.MethodAutomationUninstall:
+		var p struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		jobs, err := a.Auto.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, j := range jobs {
+			if strings.EqualFold(j.Name, p.Name) {
+				if delErr := a.Auto.Delete(ctx, j.ID); delErr != nil {
+					return nil, delErr
+				}
+				return core.MustJSON(map[string]any{"ok": true}), nil
+			}
+		}
+		return nil, fmt.Errorf("automation %q not installed", p.Name)
 
 	default:
 		return nil, fmt.Errorf("unknown method %s", req.Method)

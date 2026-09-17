@@ -1,0 +1,13 @@
+name: daily-digest
+version: "1.0.0"
+author: Aether
+description: "Her gün sabah 09:00'da aktif kartların özetini derler ve session'a bildirim olarak yazar."
+kind: automation
+trigger:
+  every_seconds: 86400
+  cron: "0 9 * * *"
+permissions:
+  shell: false
+  network: false
+  git: false
+tags: [digest, daily, reporting]

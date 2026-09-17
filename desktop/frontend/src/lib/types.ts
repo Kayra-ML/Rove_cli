@@ -148,4 +148,16 @@ export type WebhookRule = {
   updatedAt?: string;
 };
 
+export type AutomationTemplate = {
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  kind: string;
+  tags: string[];
+  everySeconds: number;
+  permissions: { shell: boolean; network: boolean; git: boolean };
+  installed: boolean;
+};
+
 export type RpcResponse<T> = { id?: string; ok: boolean; result?: T; error?: string };

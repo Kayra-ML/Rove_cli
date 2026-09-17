@@ -1,0 +1,12 @@
+name: pr-review-bot
+version: "1.0.0"
+author: Aether
+description: "Açık PR'ları periyodik tarar, AI code review başlatır ve sonucu karta yazar."
+kind: automation
+trigger:
+  every_seconds: 300
+permissions:
+  shell: true
+  network: true
+  git: true
+tags: [git, pr, review, agents]
