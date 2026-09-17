@@ -503,3 +503,30 @@ type AutomationJob struct {
 	CreatedAt    time.Time      `json:"createdAt"`
 	UpdatedAt    time.Time      `json:"updatedAt"`
 }
+
+// --- MCP server ---
+
+type MCPServerConfig struct {
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Enabled bool              `json:"enabled"`
+}
+
+// --- Webhook ---
+
+// WebhookRule defines an incoming HTTP webhook trigger that fires an agent.
+type WebhookRule struct {
+	ID        ID        `json:"id"`
+	Name      string    `json:"name"`
+	Secret    string    `json:"secret,omitempty"`
+	EventType string    `json:"eventType"` // "*" matches all events
+	AgentID   ID        `json:"agentId"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+
