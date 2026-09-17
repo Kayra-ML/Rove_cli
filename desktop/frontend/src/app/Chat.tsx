@@ -246,6 +246,28 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenBoard,
       return;
     }
     if (!msg || !activeSession || !activeAgent || sending) return;
+
+    // @codebase mention: search the codebase index and prepend results as context.
+    let content = msg;
+    if (msg.includes("@codebase")) {
+      const query = msg.replace(/@codebase/g, "").trim();
+      try {
+        type IndexResult = { path: string; snippet: string };
+        const results = await rpc<IndexResult[]>("index.search", {
+          query: query || msg,
+          limit: 8,
+        });
+        if (results && results.length > 0) {
+          const ctx = results
+            .map((r: IndexResult) => `### ${r.path}\n${r.snippet}`)
+            .join("\n\n");
+          content = `<codebase-context>\n${ctx}\n</codebase-context>\n\n${msg}`;
+        }
+      } catch {
+        // index unavailable — send without context
+      }
+    }
+
     setInput("");
     setSending(true);
     setSendErr("");
@@ -255,7 +277,7 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenBoard,
         sessionId: activeSession.id,
         agentId: activeAgent.id,
         workspaceId: workspaceId ?? "",
-        content: msg,
+        content,
       });
       await reloadHistory();
     } catch (err) {
