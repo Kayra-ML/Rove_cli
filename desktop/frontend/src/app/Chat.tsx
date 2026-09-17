@@ -3,6 +3,7 @@ import { rpc, subscribeEvents } from "~/lib/rpc";
 import type { Agent, Message, Session } from "~/lib/types";
 import { useAgents, useHistory, useSessions } from "~/hooks/useApi";
 import { usePrefs } from "~/hooks/usePrefs";
+import { useVoice } from "~/hooks/useVoice";
 import { t } from "~/lib/i18n";
 import { Markdown } from "~/lib/markdown";
 import { filterSlash, lastUserKeep, matchSlash, SLASH, type SlashCmd, type SlashId } from "~/lib/slash";
@@ -41,6 +42,11 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenBoard,
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const streamFor = useRef<string | null>(null);
+
+  const handleTranscript = useCallback((text: string) => {
+    setInput((cur) => cur ? `${cur} ${text}` : text);
+  }, []);
+  const { listening, supported: voiceSupported, start: startVoice, stop: stopVoice } = useVoice(handleTranscript);
 
   useEffect(() => {
     if (session && session.id !== activeSession?.id) setActiveSession(session);
@@ -454,6 +460,16 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenBoard,
                   >
                     +
                   </button>
+                  {voiceSupported && (
+                    <button
+                      type="button"
+                      className={`icon-ghost mic-btn${listening ? " listening" : ""}`}
+                      aria-label={listening ? "Stop recording" : "Start voice input"}
+                      onClick={() => listening ? stopVoice() : startVoice()}
+                    >
+                      🎙
+                    </button>
+                  )}
                 </div>
                 <textarea
                   ref={taRef}

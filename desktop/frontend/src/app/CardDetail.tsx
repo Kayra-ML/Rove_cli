@@ -16,6 +16,34 @@ interface GitLogEntry {
   subject: string;
 }
 
+interface Hunk {
+  header: string;
+  lines: string[];
+  raw: string;
+}
+
+/** Split a unified diff into per-hunk objects */
+function parseHunks(diff: string): Hunk[] {
+  const hunks: Hunk[] = [];
+  let cur: Hunk | null = null;
+  let fileHeader = "";
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("diff ") || line.startsWith("index ") ||
+        line.startsWith("--- ") || line.startsWith("+++ ")) {
+      fileHeader += line + "\n";
+      cur = null;
+    } else if (line.startsWith("@@")) {
+      if (cur) hunks.push(cur);
+      cur = { header: line, lines: [], raw: fileHeader + line + "\n" };
+    } else if (cur) {
+      cur.lines.push(line);
+      cur.raw += line + "\n";
+    }
+  }
+  if (cur) hunks.push(cur);
+  return hunks;
+}
+
 export function CardDetail({ card, onClose }: Props) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [gitLog, setGitLog] = useState<GitLogEntry[]>([]);
@@ -59,6 +87,30 @@ export function CardDetail({ card, onClose }: Props) {
     await rpc("git.commit", { path: card.worktreePath, message: commitMsg });
     setCommitMsg("");
     await loadGitLog();
+  };
+
+  const hunks = gitDiff ? parseHunks(gitDiff) : [];
+
+  const applyHunk = async (hunk: Hunk) => {
+    if (!card.worktreePath) return;
+    try {
+      await rpc("git.applyHunk", { path: card.worktreePath, patch: hunk.raw });
+      toast("Hunk accepted", "ok");
+      await loadGitLog();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "apply failed", "err");
+    }
+  };
+
+  const rejectHunk = async (hunk: Hunk) => {
+    if (!card.worktreePath) return;
+    try {
+      await rpc("git.rejectHunk", { path: card.worktreePath, patch: hunk.raw });
+      toast("Hunk rejected", "ok");
+      await loadGitLog();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "reject failed", "err");
+    }
   };
 
   return (
@@ -112,9 +164,31 @@ export function CardDetail({ card, onClose }: Props) {
                 {gitStatus.untracked?.length ? ` · ${gitStatus.untracked.length} untracked` : ""}
               </div>
             )}
-            {gitDiff && (
+            {hunks.length > 0 ? (
+              <div style={{ marginTop: 8 }}>
+                {hunks.map((hunk, i) => (
+                  <div key={i} className="hunk-block">
+                    <div className="hunk-header">
+                      <span>{hunk.header}</span>
+                      <span className="hunk-header-actions">
+                        <button className="hunk-accept" onClick={() => void applyHunk(hunk)}>✓ Accept</button>
+                        <button className="hunk-reject" onClick={() => void rejectHunk(hunk)}>✗ Reject</button>
+                      </span>
+                    </div>
+                    <pre className="hunk-pre">
+                      {hunk.lines.map((line, j) => (
+                        <span
+                          key={j}
+                          className={line.startsWith("+") ? "hunk-add" : line.startsWith("-") ? "hunk-del" : "hunk-ctx"}
+                        >{line}</span>
+                      ))}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            ) : gitDiff ? (
               <pre className="git-diff">{gitDiff.slice(0, 8000)}</pre>
-            )}
+            ) : null}
           </div>
         )}
 

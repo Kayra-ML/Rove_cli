@@ -13,6 +13,7 @@ import (
 
 	"github.com/aether-dev/aether/internal/agent"
 	"github.com/aether-dev/aether/internal/automation"
+	"github.com/aether-dev/aether/internal/checkpoint"
 	"github.com/aether-dev/aether/internal/config"
 	"github.com/aether-dev/aether/internal/eventbus"
 	"github.com/aether-dev/aether/internal/gitwt"
@@ -65,10 +66,11 @@ type App struct {
 	Leases  *lease.Coordinator
 	Auto    *automation.Engine
 	Token   string
+	Checkpt *checkpoint.Manager
 
-	mu       sync.Mutex
-	cancels  []context.CancelFunc
-	started  time.Time
+	mu      sync.Mutex
+	cancels []context.CancelFunc
+	started time.Time
 }
 
 func Open(cfg config.Config) (*App, error) {
@@ -137,7 +139,7 @@ func Open(cfg config.Config) (*App, error) {
 		Cfg: cfg, Store: st, Bus: bus, Secrets: sec, Perm: perm, Tools: tools, Router: router,
 		Agents: agents, Sess: sess, Mem: mem, Kanban: k, Judge: j, Goals: goals, Orch: orch,
 		Term: term, SSH: sshMgr, Git: git, WS: ws, Skills: sk, Market: market, MCP: mcpRt,
-		Leases: leases, Auto: auto, Token: token, started: time.Now().UTC(),
+		Leases: leases, Auto: auto, Token: token, Checkpt: checkpoint.New(), started: time.Now().UTC(),
 	}
 	if err := app.seed(context.Background()); err != nil {
 		app.Close()

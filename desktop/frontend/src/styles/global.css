@@ -577,6 +577,35 @@ textarea { resize: none; }
   background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
   white-space: pre-wrap; color: var(--muted);
 }
+.hunk-block {
+  margin: 6px 0; border: 1px solid var(--border); border-radius: 6px;
+  overflow: hidden; font-family: var(--mono); font-size: 10px; line-height: 1.45;
+}
+.hunk-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 3px 8px; background: var(--bg-hover); color: var(--muted);
+  font-size: 10px;
+}
+.hunk-header-actions { display: flex; gap: 4px; }
+.hunk-accept {
+  font-size: 10px; padding: 1px 7px; border: 0;
+  background: color-mix(in srgb, var(--ok) 22%, transparent);
+  color: var(--ok); border-radius: 4px;
+}
+.hunk-accept:hover { background: color-mix(in srgb, var(--ok) 36%, transparent); }
+.hunk-reject {
+  font-size: 10px; padding: 1px 7px; border: 0;
+  background: color-mix(in srgb, var(--bad) 18%, transparent);
+  color: var(--bad); border-radius: 4px;
+}
+.hunk-reject:hover { background: color-mix(in srgb, var(--bad) 32%, transparent); }
+.hunk-pre {
+  margin: 0; padding: 6px 8px; overflow-x: auto;
+  white-space: pre; background: var(--bg);
+}
+.hunk-add { color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, transparent); display: block; }
+.hunk-del { color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, transparent); display: block; }
+.hunk-ctx { color: var(--muted); display: block; }
 .palette-scrim {
   position: fixed; inset: 0; z-index: 80;
   background: rgba(0,0,0,.45);
@@ -1082,4 +1111,94 @@ textarea { resize: none; }
 @keyframes slide-in-right {
   from { transform: translateX(60px); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ─── mic button ────────────────────────────────── */
+.mic-btn {
+  position: relative;
+  color: var(--muted);
+  transition: color 0.15s;
+}
+.mic-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.mic-btn.listening {
+  color: var(--bad);
+}
+.mic-btn.listening::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--bad) 60%, transparent);
+  animation: mic-pulse 1.2s ease-out infinite;
+}
+@keyframes mic-pulse {
+  0%   { box-shadow: 0 0 0 0   color-mix(in srgb, var(--bad) 55%, transparent); }
+  70%  { box-shadow: 0 0 0 7px color-mix(in srgb, var(--bad) 0%,  transparent); }
+  100% { box-shadow: 0 0 0 0   color-mix(in srgb, var(--bad) 0%,  transparent); }
+}
+
+/* ─── parallel agent dashboard ──────────────────── */
+.agent-running-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 560;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--accent-2) 16%, var(--bg-raised));
+  border: 1px solid color-mix(in srgb, var(--accent-2) 40%, transparent);
+  color: var(--accent-2);
+  white-space: nowrap;
+}
+.agent-running-pill::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 99px;
+  background: var(--accent-2);
+  animation: pill-pulse 1.4s ease-out infinite;
+  flex-shrink: 0;
+}
+@keyframes pill-pulse {
+  0%   { box-shadow: 0 0 0 0   color-mix(in srgb, var(--accent-2) 60%, transparent); }
+  70%  { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-2) 0%,  transparent); }
+  100% { box-shadow: 0 0 0 0   color-mix(in srgb, var(--accent-2) 0%,  transparent); }
+}
+
+.card-running-overlay {
+  position: relative;
+  overflow: hidden;
+}
+.card-running-overlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1.5px solid color-mix(in srgb, var(--accent-2) 55%, transparent);
+  animation: card-running-border 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes card-running-border {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+.parallel-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  margin: 6px 8px 2px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-2) 10%, var(--bg-raised));
+  border: 1px solid color-mix(in srgb, var(--accent-2) 35%, transparent);
+  color: var(--accent-2);
+  font-size: 11px;
+  font-weight: 560;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
 }

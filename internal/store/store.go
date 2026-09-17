@@ -223,6 +223,27 @@ func (s *Store) migrate() error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS webhook_rules (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			secret TEXT NOT NULL DEFAULT '',
+			event_type TEXT NOT NULL DEFAULT '*',
+			agent_id TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS usage_ledger (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			prompt_tokens INTEGER NOT NULL DEFAULT 0,
+			completion_tokens INTEGER NOT NULL DEFAULT 0,
+			cost_usd REAL NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_ledger_session ON usage_ledger(session_id)`,
 	}
 	// Split: DDL statements run in a transaction; ALTER TABLE statements
 	// run individually outside it (SQLite ignores "duplicate column" errors).
@@ -1092,6 +1113,87 @@ func (s *Store) ListAutomation(ctx context.Context) ([]types.AutomationJob, erro
 func (s *Store) DeleteAutomation(ctx context.Context, id types.ID) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_jobs WHERE id=?`, id)
 	return err
+}
+
+// ── Webhook rules ─────────────────────────────────────────────────────────────
+
+func (s *Store) UpsertWebhookRule(ctx context.Context, r types.WebhookRule) error {
+	en := 0
+	if r.Enabled {
+		en = 1
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO webhook_rules(id,name,secret,event_type,agent_id,enabled,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET name=excluded.name, secret=excluded.secret, event_type=excluded.event_type,
+		agent_id=excluded.agent_id, enabled=excluded.enabled, updated_at=excluded.updated_at`,
+		r.ID, r.Name, r.Secret, r.EventType, r.AgentID, en, ts(r.CreatedAt), ts(r.UpdatedAt))
+	return err
+}
+
+func (s *Store) ListWebhookRules(ctx context.Context) ([]types.WebhookRule, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,secret,event_type,agent_id,enabled,created_at,updated_at FROM webhook_rules ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []types.WebhookRule
+	for rows.Next() {
+		var r types.WebhookRule
+		var en int
+		var created, updated string
+		if err := rows.Scan(&r.ID, &r.Name, &r.Secret, &r.EventType, &r.AgentID, &en, &created, &updated); err != nil {
+			return nil, err
+		}
+		r.Enabled = en == 1
+		r.CreatedAt, r.UpdatedAt = parseTS(created), parseTS(updated)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteWebhookRule(ctx context.Context, id types.ID) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM webhook_rules WHERE id=?`, id)
+	return err
+}
+
+// ── Usage ledger ──────────────────────────────────────────────────────────────
+
+// UsageLedgerEntry is a single cost record.
+type UsageLedgerEntry struct {
+	ID               string
+	SessionID        string
+	Provider         string
+	Model            string
+	PromptTokens     int
+	CompletionTokens int
+	CostUSD          float64
+	CreatedAt        time.Time
+}
+
+// RecordUsage inserts a usage ledger entry.
+func (s *Store) RecordUsage(ctx context.Context, e UsageLedgerEntry) error {
+	if e.ID == "" {
+		e.ID = fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO usage_ledger(id,session_id,provider,model,prompt_tokens,completion_tokens,cost_usd,created_at)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		e.ID, e.SessionID, e.Provider, e.Model,
+		e.PromptTokens, e.CompletionTokens, e.CostUSD, ts(e.CreatedAt))
+	return err
+}
+
+// SumUsage returns aggregate token counts and total cost.
+// If sessionID is non-empty, results are scoped to that session.
+func (s *Store) SumUsage(ctx context.Context, sessionID string) (promptTokens, completionTokens int, costUSD float64, err error) {
+	q := `SELECT COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(completion_tokens),0), COALESCE(SUM(cost_usd),0) FROM usage_ledger`
+	args := []any{}
+	if sessionID != "" {
+		q += ` WHERE session_id=?`
+		args = append(args, sessionID)
+	}
+	err = s.db.QueryRowContext(ctx, q, args...).Scan(&promptTokens, &completionTokens, &costUSD)
+	return
 }
 
 func JoinIDs(ids []types.ID) string {

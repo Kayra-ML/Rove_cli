@@ -482,6 +482,19 @@ type FileLease struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
+// --- Webhook ---
+
+type WebhookRule struct {
+	ID        ID        `json:"id"`
+	Name      string    `json:"name"`
+	Secret    string    `json:"secret"`
+	EventType string    `json:"eventType"`
+	AgentID   ID        `json:"agentId"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 // --- Automation ---
 
 type AutomationKind string

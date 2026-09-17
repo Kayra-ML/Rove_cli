@@ -167,6 +167,24 @@ func (o *Orchestrator) Running() []types.ID {
 	return out
 }
 
+// ActiveCount returns the number of cards currently running in parallel.
+func (o *Orchestrator) ActiveCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.running)
+}
+
+// ActiveCards returns the card IDs currently running in parallel.
+func (o *Orchestrator) ActiveCards() []types.ID {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	out := make([]types.ID, 0, len(o.running))
+	for id := range o.running {
+		out = append(out, id)
+	}
+	return out
+}
+
 func cardPrompt(c types.Card) string {
 	p := c.Title + "\n" + c.Description + "\n"
 	if len(c.AcceptanceCriteria) > 0 {
