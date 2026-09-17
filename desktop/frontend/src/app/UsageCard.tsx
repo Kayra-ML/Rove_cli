@@ -47,6 +47,8 @@ export function UsageCard() {
   const tokens = u?.totalTokens ?? 0;
   const agents = u?.activeAgents ?? 0;
   const days = u?.days ?? 0;
+  const costUSD = u?.costUSD ?? 0;
+  const costLabel = `$${costUSD.toFixed(4)} bu oturum`;
 
   return (
     <div className="usage-card" title={u?.uptime ? `uptime ${u.uptime}` : undefined}>
@@ -63,6 +65,10 @@ export function UsageCard() {
         <div className="usage-cell">
           <div className="usage-val">{days}</div>
           <div className="usage-key">{t("daysLive", lang)}</div>
+        </div>
+        <div className="usage-cell">
+          <div className="usage-val">{costLabel}</div>
+          <div className="usage-key">{t("sessionCost", lang)}</div>
         </div>
       </div>
     </div>

@@ -1142,6 +1142,69 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		return core.MustJSON(a.MCP.List()), nil
 
+	// ── Webhook trigger rules ─────────────────────────────────────────────
+	case protocol.MethodWebhookList:
+		if a.Webhook == nil {
+			return core.MustJSON([]types.WebhookRule{}), nil
+		}
+		out, err := a.Webhook.List(ctx)
+		return core.MustJSON(out), err
+	case protocol.MethodWebhookUpsert:
+		if a.Webhook == nil {
+			return nil, fmt.Errorf("webhook engine not available")
+		}
+		var r types.WebhookRule
+		if err := json.Unmarshal(req.Params, &r); err != nil {
+			return nil, err
+		}
+		out, err := a.Webhook.Upsert(ctx, r)
+		return core.MustJSON(out), err
+	case protocol.MethodWebhookDelete:
+		if a.Webhook == nil {
+			return nil, fmt.Errorf("webhook engine not available")
+		}
+		var p struct {
+			ID types.ID `json:"id"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Webhook.Delete(ctx, p.ID)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	// ── Codebase FTS5 index ───────────────────────────────────────────────
+	case protocol.MethodIndexBuild:
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if a.Index == nil {
+			return nil, fmt.Errorf("index not initialised")
+		}
+		go func() {
+			_ = a.Index.IndexWorkspace(context.Background(), p.Path)
+		}()
+		return core.MustJSON(map[string]any{"started": true}), nil
+
+	case protocol.MethodIndexSearch:
+		var p struct {
+			Query string `json:"query"`
+			Limit int    `json:"limit"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if a.Index == nil {
+			return nil, fmt.Errorf("index not initialised")
+		}
+		if p.Limit <= 0 {
+			p.Limit = 10
+		}
+		results, err := a.Index.Search(ctx, p.Query, p.Limit)
+		return core.MustJSON(results), err
+
 	default:
 		return nil, fmt.Errorf("unknown method %s", req.Method)
 	}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { pickFolder, rpc } from "~/lib/rpc";
 import { useSkills, useProviders, useGoals, useWorkspaces } from "~/hooks/useApi";
-import type { Goal, InstalledSkill, Provider, Workspace } from "~/lib/types";
+import type { Agent, Goal, InstalledSkill, Provider, WebhookRule, Workspace } from "~/lib/types";
 import { AgentRoster } from "./Popovers";
 import { Permissions } from "./Permissions";
 import { Automation } from "./Automation";
@@ -10,7 +10,7 @@ import { Icon } from "./Icons";
 import { THEMES, applyTheme, applyLang, type ThemeId } from "~/lib/themes";
 import { LANGS, t, getLang, type Lang } from "~/lib/i18n";
 
-type Section = "appearance" | "workspace" | "providers" | "goals" | "agents" | "roster" | "permissions" | "automation" | "memory" | "mcp";
+type Section = "appearance" | "workspace" | "providers" | "goals" | "agents" | "roster" | "permissions" | "automation" | "memory" | "mcp" | "webhook";
 
 interface Props {
   onClose: () => void;

@@ -137,4 +137,15 @@ export type AutomationJob = {
   lastResult?: string;
 };
 
+export type WebhookRule = {
+  id: ID;
+  name: string;
+  secret: string;
+  eventType: string;
+  agentId: ID;
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type RpcResponse<T> = { id?: string; ok: boolean; result?: T; error?: string };
