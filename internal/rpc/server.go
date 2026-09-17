@@ -1070,6 +1070,43 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		url, err := a.Git.CreatePR(p.Path, p.Title, p.Body, p.Base)
 		return core.MustJSON(map[string]any{"url": url}), err
 
+	// ── MCP server registry ────────────────────────────────────────────────
+	case protocol.MethodMCPList:
+		out, err := a.Store.ListMCPServers(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return core.MustJSON(out), nil
+
+	case protocol.MethodMCPAdd:
+		var srv types.MCPServerConfig
+		if err := json.Unmarshal(req.Params, &srv); err != nil {
+			return nil, err
+		}
+		if srv.ID == "" {
+			srv.ID = string(id.NewID())
+		}
+		if err := a.Store.UpsertMCPServer(ctx, srv); err != nil {
+			return nil, err
+		}
+		return core.MustJSON(srv), nil
+
+	case protocol.MethodMCPRemove:
+		var p struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Store.DeleteMCPServer(ctx, p.ID)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	case protocol.MethodMCPDiscover:
+		if a.MCP == nil {
+			return core.MustJSON([]string{}), nil
+		}
+		return core.MustJSON(a.MCP.List()), nil
+
 	default:
 		return nil, fmt.Errorf("unknown method %s", req.Method)
 	}

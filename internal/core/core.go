@@ -138,6 +138,7 @@ func Open(cfg config.Config) (*App, error) {
 	sk := skill.New(st, filepath.Join(cfg.DataDir, "skills"))
 	market := marketplace.New(filepath.Join(cfg.DataDir, "registry"), sk)
 	mcpRt := mcp.New(tools)
+	wh := webhook.New(st)
 
 	// Codebase FTS5 indexer (best-effort — failure is non-fatal).
 	idx, _ := index.New(filepath.Join(cfg.DataDir, "codebase.db"))
@@ -146,7 +147,7 @@ func Open(cfg config.Config) (*App, error) {
 		Cfg: cfg, Store: st, Bus: bus, Secrets: sec, Perm: perm, Tools: tools, Router: router,
 		Agents: agents, Sess: sess, Mem: mem, Kanban: k, Judge: j, Goals: goals, Orch: orch,
 		Term: term, SSH: sshMgr, Git: git, WS: ws, Skills: sk, Market: market, MCP: mcpRt,
-		Leases: leases, Auto: auto, Token: token, Checkpt: checkpoint.New(), Index: idx,
+		Leases: leases, Auto: auto, Webhook: wh, Token: token, Checkpt: checkpoint.New(), Index: idx,
 		started: time.Now().UTC(),
 	}
 	if err := app.seed(context.Background()); err != nil {
