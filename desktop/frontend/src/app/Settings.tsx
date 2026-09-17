@@ -10,7 +10,7 @@ import { Icon } from "./Icons";
 import { THEMES, applyTheme, applyLang, type ThemeId } from "~/lib/themes";
 import { LANGS, t, getLang, type Lang } from "~/lib/i18n";
 
-type Section = "appearance" | "workspace" | "providers" | "goals" | "agents" | "roster" | "permissions" | "automation" | "memory";
+type Section = "appearance" | "workspace" | "providers" | "goals" | "agents" | "roster" | "permissions" | "automation" | "memory" | "mcp";
 
 interface Props {
   onClose: () => void;

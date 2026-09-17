@@ -120,6 +120,40 @@ func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, resp)
 }
 
+// handleWebhookTrigger handles POST /webhook/<eventType> requests from external
+// systems (e.g. GitHub). It verifies the HMAC-SHA256 signature when a secret
+// is configured and fires matching webhook rules.
+func (s *Server) handleWebhookTrigger(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	// Extract event type from URL path: /webhook/<eventType>
+	eventType := strings.TrimPrefix(r.URL.Path, "/webhook/")
+	if eventType == "" {
+		eventType = r.Header.Get("X-GitHub-Event")
+	}
+	if eventType == "" {
+		eventType = "*"
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	sig := r.Header.Get("X-Hub-Signature-256")
+	if s.app.Webhook == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "webhook engine not initialised"})
+		return
+	}
+	results, err := s.app.Webhook.Process(r.Context(), eventType, body, sig)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "results": results})
+}
+
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("token")
 	if tok == "" {
