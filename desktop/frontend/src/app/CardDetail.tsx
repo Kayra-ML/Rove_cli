@@ -228,6 +228,65 @@ export function CardDetail({ card, onClose }: Props) {
           </div>
         )}
 
+        {card.worktreePath && (
+          <div style={{ marginBottom: 12 }}>
+            <div className="section-label" style={{ padding: 0, marginBottom: 4 }}>PR Oluştur</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <input
+                placeholder="PR başlığı…"
+                value={prTitle}
+                onChange={(e) => setPrTitle(e.target.value)}
+              />
+              <textarea
+                placeholder="PR açıklaması (opsiyonel)…"
+                value={prBody}
+                onChange={(e) => setPrBody(e.target.value)}
+                rows={3}
+                style={{ resize: "vertical", fontFamily: "var(--mono)", fontSize: 11 }}
+              />
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <label style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>Base branch:</label>
+                <input
+                  style={{ flex: 1 }}
+                  placeholder="main"
+                  value={prBase}
+                  onChange={(e) => setPrBase(e.target.value)}
+                />
+                <button
+                  style={{ background: "var(--accent)", color: "#fff", border: 0, whiteSpace: "nowrap" }}
+                  disabled={!prTitle || prLoading}
+                  onClick={() => {
+                    if (!card.worktreePath || !prTitle) return;
+                    setPrLoading(true);
+                    void rpc<{ url?: string }>("git.pr", {
+                      path: card.worktreePath,
+                      title: prTitle,
+                      body: prBody,
+                      base: prBase || "main",
+                    }).then((res) => {
+                      const url = res?.url ?? "";
+                      toast("PR oluşturuldu", "ok");
+                      // Save PR url as artifact
+                      void rpc("card.addArtifact", {
+                        id: card.id,
+                        artifact: { kind: "pr", label: prTitle, url, name: prTitle },
+                      });
+                      // Move card to review column
+                      void rpc("card.move", { id: card.id, column: "review" });
+                      setPrTitle("");
+                      setPrBody("");
+                    }).catch((err) => {
+                      toast(err instanceof Error ? err.message : "PR oluşturulamadı", "err");
+                    }).finally(() => setPrLoading(false));
+                  }}
+                >
+                  {prLoading ? "…" : "PR Oluştur"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={{ marginBottom: 12 }}>
           <div className="section-label" style={{ padding: 0, marginBottom: 4 }}>Artifacts</div>
           {(card.artifacts ?? []).map((a: Artifact, i: number) => (
