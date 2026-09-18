@@ -7,277 +7,206 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// TodoItem is a plan step.
 type TodoItem struct {
 	Text     string
 	Done     bool
 	Current  bool
-	Priority string // "high", "low", ""
+	Priority string
 }
 
-// PlanPanel renders the plan (todo list) and usage bar in the right rail.
 type PlanPanel struct {
-	todos    []TodoItem
-	stepN    int
-	stepM    int
-	active   bool
-	width    int
-	height   int
-
-	// Timer display (set externally)
-	timerStr string
-
-	// Approval pending flag
+	todos         []TodoItem
+	stepN         int
+	stepM         int
+	active        bool
+	width         int
+	height        int
+	timerStr      string
 	needsApproval bool
 
-	// Usage stats
 	promptTokens     int64
 	completionTokens int64
 	totalTokens      int64
 	contextPct       float64
-	costUSD          float64
+	calls            int64
 	contextLimit     int64
 	modelName        string
 }
 
 func NewPlanPanel() *PlanPanel {
-	return &PlanPanel{contextLimit: 128000, modelName: "claude-sonnet-4"}
+	return &PlanPanel{contextLimit: 128000, modelName: "model not set"}
 }
 
-func (p *PlanPanel) SetSize(w, h int) {
-	p.width = w
-	p.height = h
+func (p *PlanPanel) SetSize(w, h int)          { p.width, p.height = w, h }
+func (p *PlanPanel) SetActive(active bool)     { p.active = active }
+func (p *PlanPanel) SetTodos(todos []TodoItem) { p.todos = todos }
+func (p *PlanPanel) SetStep(n, m int)          { p.stepN, p.stepM = n, m }
+func (p *PlanPanel) SetTimer(s string)         { p.timerStr = s }
+func (p *PlanPanel) SetNeedsApproval(v bool)   { p.needsApproval = v }
+
+func (p *PlanPanel) StartRun(label string) {
+	p.todos = []TodoItem{{Text: label, Current: true}}
+	p.stepN, p.stepM = 1, 0
 }
 
-func (p *PlanPanel) SetActive(active bool) {
-	p.active = active
+func (p *PlanPanel) AdvanceRun(label string) {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return
+	}
+	if len(p.todos) > 0 && p.todos[len(p.todos)-1].Text == label {
+		return
+	}
+	for i := range p.todos {
+		if p.todos[i].Current {
+			p.todos[i].Current = false
+			p.todos[i].Done = true
+		}
+	}
+	p.todos = append(p.todos, TodoItem{Text: label, Current: true})
+	p.stepN, p.stepM = len(p.todos), 0
 }
 
-func (p *PlanPanel) SetTodos(todos []TodoItem) {
-	p.todos = todos
-}
-
-func (p *PlanPanel) SetStep(n, m int) {
-	p.stepN = n
-	p.stepM = m
-}
-
-func (p *PlanPanel) SetTimer(s string) {
-	p.timerStr = s
-}
-
-func (p *PlanPanel) SetNeedsApproval(v bool) {
-	p.needsApproval = v
+func (p *PlanPanel) CompleteRun() {
+	for i := range p.todos {
+		p.todos[i].Current = false
+		p.todos[i].Done = true
+	}
+	p.stepN, p.stepM = len(p.todos), len(p.todos)
 }
 
 func (p *PlanPanel) SetModelName(s string) {
-	if s != "" {
+	if strings.TrimSpace(s) != "" {
 		p.modelName = s
 	}
 }
 
-func (p *PlanPanel) SetUsage(prompt, completion, total int64, cost float64) {
-	p.promptTokens = prompt
-	p.completionTokens = completion
-	p.totalTokens = total
-	p.costUSD = cost
+func (p *PlanPanel) SetUsage(prompt, completion, total, calls int64) {
+	p.promptTokens, p.completionTokens, p.totalTokens, p.calls = prompt, completion, total, calls
 	if p.contextLimit > 0 {
 		p.contextPct = float64(total) / float64(p.contextLimit)
-		if p.contextPct > 1.0 {
-			p.contextPct = 1.0
+		if p.contextPct > 1 {
+			p.contextPct = 1
 		}
 	}
 }
 
 func (p *PlanPanel) Render() string {
-	w := p.width
-	if w < 4 {
-		w = 4
-	}
-	h := p.height
-	if h < 6 {
-		h = 6
-	}
-
-	// Split: plan top ~65%, usage bottom ~35%
-	usageH := h * 35 / 100
-	if usageH < 5 {
-		usageH = 5
-	}
+	w := maxInt(p.width, 18)
+	h := maxInt(p.height, 10)
+	usageH := clampInt(h/3, 7, 10)
 	planH := h - usageH
-	if planH < 3 {
-		planH = 3
-	}
-
-	planSection := p.renderPlan(w, planH)
-	usageSection := p.renderUsage(w, usageH)
-
-	content := planSection + usageSection
-
-	return lipgloss.NewStyle().
-		Width(w).
-		Height(h).
-		Background(colorBg).
-		Render(content)
-}
-
-func (p *PlanPanel) renderPlan(w, h int) string {
-	innerW := w - 1
-	if innerW < 2 {
-		innerW = 2
-	}
-
-	var rows []string
-
-	// Header line: thin separator
-	rows = append(rows, styleSep.Render(strings.Repeat("─", w)))
-
-	// Title line: "plan" + optional "needs you" + step counter + timer
-	titleParts := styleDim.Render("plan")
-
-	if p.needsApproval {
-		titleParts += "  " + styleHighlight.Render("needs you")
-	}
-
-	if p.stepM > 0 {
-		titleParts += "  " + styleDim.Render(fmt.Sprintf("%d/%d", p.stepN, p.stepM))
-	}
-
-	if p.timerStr != "" {
-		titleParts += "  " + styleDim.Render(p.timerStr)
-	}
-
-	rows = append(rows, " "+titleParts)
-
-	// Items
-	if len(p.todos) == 0 {
-		rows = append(rows, " "+styleDim.Render("(waiting)"))
-	}
-
-	for _, item := range p.todos {
-		row := p.renderPlanItem(item, innerW)
-		rows = append(rows, " "+row)
-		if len(rows) >= h {
-			break
-		}
-	}
-
-	// Pad to height
+	rows := append(p.renderPlan(w, planH), p.renderUsage(w, usageH)...)
 	for len(rows) < h {
 		rows = append(rows, "")
 	}
 	if len(rows) > h {
 		rows = rows[:h]
 	}
+	return lipgloss.NewStyle().Width(w).Height(h).Background(colorBgPanel).Render(strings.Join(rows, "\n"))
+}
 
-	return strings.Join(rows, "\n") + "\n"
+func (p *PlanPanel) renderPlan(w, h int) []string {
+	meta := ""
+	if p.stepM > 0 {
+		meta = fmt.Sprintf("%d/%d", p.stepN, p.stepM)
+	} else if p.stepN > 0 {
+		meta = fmt.Sprintf("step %d", p.stepN)
+	}
+	rows := []string{ruledHeader("plan", w, meta, p.active)}
+
+	if p.needsApproval {
+		status := styleHighlight.Bold(true).Render("◆ needs you")
+		if p.timerStr != "" {
+			status += "  " + styleMeta.Render(p.timerStr)
+		}
+		rows = append(rows, "  "+truncateVisible(status, w-3), "")
+	} else if p.timerStr != "" {
+		rows = append(rows, "  "+styleSuccess.Render("● running")+"  "+styleMeta.Render(p.timerStr), "")
+	} else {
+		rows = append(rows, "")
+	}
+
+	if len(p.todos) == 0 {
+		rows = append(rows,
+			"  "+styleDim.Render("◇")+" "+styleMuted.Render("no active plan"),
+			"    "+styleMeta.Render("updates while Rove works"),
+		)
+	} else {
+		for _, item := range p.todos {
+			if len(rows) >= h {
+				break
+			}
+			rows = append(rows, "  "+p.renderPlanItem(item, w-3))
+		}
+	}
+	for len(rows) < h {
+		rows = append(rows, "")
+	}
+	if len(rows) > h {
+		rows = rows[:h]
+	}
+	return rows
 }
 
 func (p *PlanPanel) renderPlanItem(item TodoItem, maxW int) string {
-	// Diamond icons: ◆ filled = done or active, ◇ empty = pending
-	var icon string
-	var textStyle lipgloss.Style
-
-	switch {
-	case item.Done:
-		icon = lipgloss.NewStyle().Foreground(colorGreen).Render("◆")
-		textStyle = styleDim
-	case item.Current:
-		icon = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Render("◆")
+	icon := styleDim.Render("◇")
+	textStyle := styleMuted
+	if item.Done {
+		icon = styleSuccess.Render("◆")
+		textStyle = styleMeta
+	} else if item.Current {
+		icon = styleHighlight.Bold(true).Render("◆")
 		textStyle = lipgloss.NewStyle().Foreground(colorWhite)
-	default:
-		icon = styleDim.Render("◇")
-		textStyle = styleDim
 	}
-
-	// Priority tag
-	var priorityTag string
-	switch item.Priority {
-	case "high":
-		priorityTag = " " + lipgloss.NewStyle().Foreground(colorYellow).Render("high")
-	case "low":
-		// no tag, just dim text already
-	}
-
-	// Available text width: icon(1) + space(1) + priorityTag
-	tagW := 0
+	tag := ""
 	if item.Priority == "high" {
-		tagW = 5 // " high"
+		tag = " " + styleHighlight.Render("high")
+	} else if item.Priority == "low" {
+		tag = " " + styleMeta.Render("low")
 	}
-	textW := maxW - 2 - tagW
-	if textW < 4 {
-		textW = 4
+	available := maxW - 2 - lipgloss.Width(tag)
+	if available < 3 {
+		available = 3
 	}
-
-	text := item.Text
-	runes := []rune(text)
-	if len(runes) > textW {
-		text = string(runes[:textW-1]) + "…"
-	}
-
-	return icon + " " + textStyle.Render(text) + priorityTag
+	return icon + " " + textStyle.Render(truncate(item.Text, available)) + tag
 }
 
-func (p *PlanPanel) renderUsage(w, h int) string {
-	var rows []string
-
-	// Separator
-	rows = append(rows, styleSep.Render(strings.Repeat("─", w)))
-
-	// Title
-	rows = append(rows, " "+styleDim.Render("usage"))
-
-	// Context bar
-	barW := w - 3
-	if barW < 2 {
-		barW = 2
+func (p *PlanPanel) renderUsage(w, h int) []string {
+	rows := []string{ruledHeader("usage", w, fmt.Sprintf("%.0f%%", p.contextPct*100), false)}
+	barW := w - 4
+	if barW < 8 {
+		barW = 8
 	}
 	filled := int(float64(barW) * p.contextPct)
-	if filled > barW {
-		filled = barW
-	}
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", barW-filled)
-	barColor := colorBlue
-	if p.contextPct > 0.8 {
+	filled = clampInt(filled, 0, barW)
+	barColor := colorGreen
+	if p.contextPct >= .70 {
 		barColor = colorYellow
 	}
-	if p.contextPct > 0.95 {
+	if p.contextPct >= .90 {
 		barColor = colorRed
 	}
-	pctStr := fmt.Sprintf("%.1f%%", p.contextPct*100)
-	barStr := lipgloss.NewStyle().Foreground(barColor).Render(bar)
-	rows = append(rows, " "+barStr+" "+styleDim.Render(pctStr))
+	bar := lipgloss.NewStyle().Foreground(barColor).Render(strings.Repeat("━", filled))
+	bar += styleSep.Render(strings.Repeat("━", barW-filled))
+	rows = append(rows, "  "+bar)
 
-	// Tokens line: "Tokens: 6.7k  5.1k/1.6k"
-	var tokenLine string
-	if p.totalTokens > 0 {
-		tok := formatTokens(p.totalTokens)
-		prompt := formatTokens(p.promptTokens)
-		comp := formatTokens(p.completionTokens)
-		tokenLine = fmt.Sprintf("Tokens: %s  %s/%s", tok, prompt, comp)
-	} else {
-		tokenLine = "Tokens: —"
-	}
-	rows = append(rows, " "+styleDim.Render(tokenLine))
-
-	// Cost + model line
-	var costLine string
-	if p.costUSD > 0 {
-		costLine = fmt.Sprintf("Cost: $%.3f  %s", p.costUSD, p.modelName)
-	} else {
-		costLine = "Cost: —  " + p.modelName
-	}
-	rows = append(rows, " "+styleDim.Render(costLine))
-
-	// Pad
+	total := formatTokens(p.totalTokens)
+	input := formatTokens(p.promptTokens)
+	output := formatTokens(p.completionTokens)
+	rows = append(rows,
+		"  "+styleMuted.Render("tokens")+"  "+lipgloss.NewStyle().Foreground(colorWhite).Render(total),
+		"  "+styleMeta.Render("in "+input+"  ·  out "+output),
+		"  "+styleMuted.Render("calls")+"   "+lipgloss.NewStyle().Foreground(colorWhite).Render(fmt.Sprintf("%d", p.calls)),
+		"  "+styleMeta.Render(truncate(p.modelName, w-4)),
+	)
 	for len(rows) < h {
 		rows = append(rows, "")
 	}
 	if len(rows) > h {
 		rows = rows[:h]
 	}
-
-	return strings.Join(rows, "\n")
+	return rows
 }
 
 func formatTokens(n int64) string {

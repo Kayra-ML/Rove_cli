@@ -1,11 +1,10 @@
 #!/bin/sh
-set -e
+set -eu
 
-REPO="Kayra-ML/Rove_cli"
-BINARY="sextant"
-INSTALL_DIR="/usr/local/bin"
+REPO="${ROVECODE_REPO:-Kayra-ML/Rove_cli}"
+BINARY="rovecode"
+INSTALL_DIR="${ROVECODE_INSTALL_DIR:-/usr/local/bin}"
 
-# Detect OS and arch
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
@@ -13,54 +12,70 @@ case "$OS" in
   Linux)  GOOS="linux" ;;
   Darwin) GOOS="darwin" ;;
   *)
-    echo "Unsupported OS: $OS"
+    printf 'Unsupported OS: %s\n' "$OS" >&2
     exit 1
     ;;
 esac
 
 case "$ARCH" in
-  x86_64)          GOARCH="amd64" ;;
-  arm64|aarch64)   GOARCH="arm64" ;;
+  x86_64)        GOARCH="amd64" ;;
+  arm64|aarch64) GOARCH="arm64" ;;
   *)
-    echo "Unsupported architecture: $ARCH"
+    printf 'Unsupported architecture: %s\n' "$ARCH" >&2
     exit 1
     ;;
 esac
 
 ASSET="${BINARY}-${GOOS}-${GOARCH}"
-if [ "$GOOS" = "windows" ]; then
-  ASSET="${ASSET}.exe"
+if [ -n "${ROVECODE_VERSION:-}" ]; then
+  LATEST="$ROVECODE_VERSION"
+else
+  LATEST="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+    | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | sed -n '1p')"
 fi
 
-# Get latest release tag
-echo "Fetching latest release..."
-LATEST=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-
 if [ -z "$LATEST" ]; then
-  echo "Could not determine latest release. Check https://github.com/${REPO}/releases"
+  printf 'Could not determine the latest Rove Code release.\n' >&2
   exit 1
 fi
 
-echo "Installing rovecode ${LATEST} (${GOOS}/${GOARCH})..."
+BASE_URL="${ROVECODE_BASE_URL:-https://github.com/${REPO}/releases/download/${LATEST}}"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rovecode.XXXXXX")"
+trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
-URL="https://github.com/${REPO}/releases/download/${LATEST}/${ASSET}"
+printf 'Installing Rove Code %s (%s/%s)...\n' "$LATEST" "$GOOS" "$GOARCH"
+curl -fsSL "${BASE_URL}/${ASSET}" -o "${TMP_DIR}/${ASSET}"
+curl -fsSL "${BASE_URL}/SHA256SUMS" -o "${TMP_DIR}/SHA256SUMS"
 
-# Download
-TMP="$(mktemp)"
-curl -fsSL "$URL" -o "$TMP"
-chmod +x "$TMP"
-
-# Install
-if [ -w "$INSTALL_DIR" ]; then
-  mv "$TMP" "${INSTALL_DIR}/rovecode"
-else
-  echo "Installing to ${INSTALL_DIR} (may require sudo)..."
-  sudo mv "$TMP" "${INSTALL_DIR}/rovecode"
+EXPECTED="$(sed -n "s/^\([0-9a-fA-F][0-9a-fA-F]*\)[[:space:]][[:space:]]*${ASSET}$/\1/p" "${TMP_DIR}/SHA256SUMS")"
+if [ -z "$EXPECTED" ]; then
+  printf 'Checksum for %s is missing from the release.\n' "$ASSET" >&2
+  exit 1
 fi
 
-echo ""
-echo "✓ rovecode installed to ${INSTALL_DIR}/rovecode"
-echo ""
-echo "Run it:"
-echo "  rovecode"
-echo ""
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL="$(sha256sum "${TMP_DIR}/${ASSET}" | sed 's/[[:space:]].*//')"
+elif command -v shasum >/dev/null 2>&1; then
+  ACTUAL="$(shasum -a 256 "${TMP_DIR}/${ASSET}" | sed 's/[[:space:]].*//')"
+else
+  printf 'A SHA-256 tool is required (sha256sum or shasum).\n' >&2
+  exit 1
+fi
+
+if [ "$EXPECTED" != "$ACTUAL" ]; then
+  printf 'Checksum verification failed for %s.\n' "$ASSET" >&2
+  exit 1
+fi
+
+chmod 0755 "${TMP_DIR}/${ASSET}"
+if [ -d "$INSTALL_DIR" ] && [ -w "$INSTALL_DIR" ]; then
+  install -m 0755 "${TMP_DIR}/${ASSET}" "${INSTALL_DIR}/${BINARY}"
+else
+  printf 'Installing to %s (sudo required)...\n' "$INSTALL_DIR"
+  sudo mkdir -p "$INSTALL_DIR"
+  sudo install -m 0755 "${TMP_DIR}/${ASSET}" "${INSTALL_DIR}/${BINARY}"
+fi
+
+INSTALLED_VERSION="$("${INSTALL_DIR}/${BINARY}" --version)"
+printf '\nInstalled: %s\nPath: %s/%s\nRun: rovecode\n' "$INSTALLED_VERSION" "$INSTALL_DIR" "$BINARY"

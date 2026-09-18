@@ -49,6 +49,7 @@ type Model struct {
 	// State
 	focus         FocusPanel
 	currentSessID string
+	pendingPrompt string
 	agents        []types.Agent
 	escCount      int
 	escTime       time.Time
@@ -62,9 +63,9 @@ type Model struct {
 	pendingApprovalID string
 
 	// Ticker for refresh + timer display
-	tickCount   int
-	runStart    time.Time
-	runActive   bool
+	tickCount int
+	runStart  time.Time
+	runActive bool
 }
 
 // NewModel creates the root model.
@@ -90,6 +91,15 @@ func (m *Model) SetInitialTunnel(t *sshtunnel.Tunnel, alias string) {
 	m.sshPanel.SetTunnel(t, alias)
 }
 
+func (m *Model) SetStartupError(err error) {
+	if err == nil {
+		return
+	}
+	m.connected = false
+	m.pet.SetMood(PetError)
+	m.lastStatus = styleError.Render("✗ " + err.Error())
+}
+
 // Init runs initial commands.
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -97,6 +107,7 @@ func (m *Model) Init() tea.Cmd {
 		m.ipc.FetchSessions(),
 		m.ipc.FetchAgents(),
 		m.ipc.FetchProfiles(),
+		m.ipc.FetchUsage(),
 		tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg{t} }),
 	)
 }
@@ -159,9 +170,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastStatus = styleError.Render("sessions: " + msg.Err.Error())
 		} else {
 			m.sessionPanel.SetSessions(msg.Sessions)
-			if m.currentSessID == "" && len(msg.Sessions) > 0 {
+			sessionChanged := false
+			if msg.CreatedSessionID != "" {
+				m.currentSessID = msg.CreatedSessionID
+				m.sessionPanel.SelectID(msg.CreatedSessionID)
+				sessionChanged = true
+			} else if m.currentSessID == "" && len(msg.Sessions) > 0 {
 				m.currentSessID = string(msg.Sessions[0].ID)
-				cmds = append(cmds, m.ipc.FetchHistory(m.currentSessID))
+				m.sessionPanel.SelectID(m.currentSessID)
+				sessionChanged = true
+			}
+
+			if sessionChanged {
+				m.messagesPanel.SetMessages(nil)
+				if m.pendingPrompt != "" && m.currentSessID != "" {
+					prompt := m.pendingPrompt
+					m.pendingPrompt = ""
+					m.messagesPanel.AddUserMessage(prompt)
+					cmds = append(cmds,
+						m.ipc.SendMessage(m.currentSessID, prompt),
+						m.ipc.FetchLinkedSessions(m.currentSessID),
+					)
+				} else if m.currentSessID != "" {
+					cmds = append(cmds,
+						m.ipc.FetchHistory(m.currentSessID),
+						m.ipc.FetchLinkedSessions(m.currentSessID),
+					)
+				}
 			}
 		}
 
@@ -175,6 +210,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AgentListMsg:
 		if msg.Err == nil {
 			m.agents = msg.Agents
+			if len(msg.Agents) > 0 {
+				model := msg.Agents[0].Model
+				if msg.Agents[0].Provider != "" {
+					model = msg.Agents[0].Provider + "/" + model
+				}
+				m.planPanel.SetModelName(model)
+			}
+		}
+
+	case UsageMsg:
+		if msg.Err == nil {
+			m.planPanel.SetUsage(msg.PromptTokens, msg.CompletionTokens, msg.TotalTokens, msg.Calls)
 		}
 
 	case SendMsg:
@@ -183,6 +230,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pet.SetMood(PetError)
 		} else {
 			m.pet.SetMood(PetRunning)
+			m.planPanel.StartRun("Analyze request")
 			m.runActive = true
 			m.runStart = time.Now()
 			m.lastStatus = styleDim.Render("● running…")
@@ -520,20 +568,24 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
-	// Enter: send message (when input focused)
+	// Enter: send immediately, creating the first session transparently.
 	if msg.Type == tea.KeyEnter && m.focus == FocusInput {
 		content := strings.TrimSpace(m.inputBar.Value())
-		if content != "" && m.currentSessID != "" {
-			m.inputBar.Clear()
-			dm := DisplayMessage{
-				Role:    types.RoleUser,
-				Content: content,
-				At:      time.Now(),
-			}
-			m.messagesPanel.AddMessage(dm)
-			return m.ipc.SendMessage(m.currentSessID, content)
+		if content == "" {
+			return nil
 		}
-		return nil
+		m.inputBar.Clear()
+		if m.currentSessID == "" {
+			m.pendingPrompt = content
+			m.lastStatus = styleDim.Render("● creating session…")
+			agentID := ""
+			if len(m.agents) > 0 {
+				agentID = string(m.agents[0].ID)
+			}
+			return m.ipc.CreateSession(agentID)
+		}
+		m.messagesPanel.AddUserMessage(content)
+		return m.ipc.SendMessage(m.currentSessID, content)
 	}
 
 	// Panel-specific keys
@@ -555,16 +607,17 @@ func (m *Model) handleEvent(ev protocol.EventFrame) tea.Cmd {
 	case types.EventMessageDelta:
 		var payload struct {
 			Content   string `json:"content"`
+			Delta     string `json:"delta"`
 			SessionID string `json:"sessionId"`
 		}
 		if err := json.Unmarshal(ev.Payload, &payload); err == nil {
+			text := payload.Delta
+			if text == "" {
+				text = payload.Content
+			}
 			if payload.SessionID == m.currentSessID || payload.SessionID == "" {
-				dm := DisplayMessage{
-					Role:    types.RoleAssistant,
-					Content: payload.Content,
-					At:      time.Now(),
-				}
-				m.messagesPanel.AddMessage(dm)
+				m.messagesPanel.AppendAssistantDelta(text)
+				m.planPanel.AdvanceRun("Compose response")
 				m.pet.SetMood(PetRunning)
 			}
 		}
@@ -572,6 +625,7 @@ func (m *Model) handleEvent(ev protocol.EventFrame) tea.Cmd {
 	case types.EventMessageDone:
 		m.pet.SetMood(PetDone)
 		m.runActive = false
+		m.planPanel.CompleteRun()
 		m.planPanel.SetTimer("")
 		m.lastStatus = styleSuccess.Render("✓ done")
 		if m.currentSessID != "" {
@@ -602,6 +656,11 @@ func (m *Model) handleEvent(ev protocol.EventFrame) tea.Cmd {
 				}
 			}
 			m.messagesPanel.AddMessage(dm)
+			step := shortenToolName(payload.Name)
+			if dm.ToolExtra != "" {
+				step += " " + dm.ToolExtra
+			}
+			m.planPanel.AdvanceRun(step)
 		}
 
 	case types.EventToolResult:
@@ -609,22 +668,17 @@ func (m *Model) handleEvent(ev protocol.EventFrame) tea.Cmd {
 			Name      string `json:"name"`
 			Content   string `json:"content"`
 			IsError   bool   `json:"isError"`
+			Error     bool   `json:"error"`
 			SessionID string `json:"sessionId"`
 		}
 		if err := json.Unmarshal(ev.Payload, &payload); err == nil {
+			isError := payload.IsError || payload.Error
 			extra := summarizeToolResult(&types.ToolResult{
 				Name:    payload.Name,
 				Content: payload.Content,
-				IsError: payload.IsError,
+				IsError: isError,
 			})
-			dm := DisplayMessage{
-				Role:      types.RoleTool,
-				ToolName:  payload.Name,
-				ToolExtra: extra,
-				IsError:   payload.IsError,
-				At:        time.Now(),
-			}
-			m.messagesPanel.AddMessage(dm)
+			m.messagesPanel.CompleteTool(payload.Name, extra, isError)
 		}
 
 	case types.EventAgentStatus:
@@ -643,10 +697,15 @@ func (m *Model) handleEvent(ev protocol.EventFrame) tea.Cmd {
 				m.lastStatus = styleDim.Render("● agent running")
 			case types.AgentIdle:
 				m.pet.SetMood(PetDone)
+				m.runActive = false
+				m.planPanel.CompleteRun()
 				m.lastStatus = styleDim.Render("● agent idle")
+				return m.ipc.FetchUsage()
 			case types.AgentFailed:
 				m.pet.SetMood(PetError)
+				m.runActive = false
 				m.lastStatus = styleError.Render("✗ agent failed")
+				return m.ipc.FetchUsage()
 			}
 		}
 
@@ -718,135 +777,150 @@ func (m *Model) updateFocus() {
 	m.inputBar.SetActive(m.focus == FocusInput)
 }
 
-// layoutPanels distributes panel sizes based on terminal dimensions.
+type tuiLayout struct {
+	topH, statusH, inputH int
+	mainH                 int
+	chatW, rightW         int
+	dividerW              int
+	showRail              bool
+}
+
+func (m *Model) calculateLayout() tuiLayout {
+	layout := tuiLayout{topH: 1, statusH: 1, inputH: m.inputBar.DesiredHeight()}
+	layout.mainH = m.height - layout.topH - layout.statusH - layout.inputH
+	if layout.mainH < 4 {
+		layout.mainH = 4
+	}
+	layout.showRail = m.width >= 88 && layout.mainH >= 14
+	if layout.showRail {
+		layout.dividerW = 1
+		layout.rightW = clampInt(m.width*24/100, 28, 36)
+		layout.chatW = m.width - layout.rightW - layout.dividerW
+	} else {
+		layout.chatW = m.width
+	}
+	return layout
+}
+
+// layoutPanels keeps every rendered surface on the same geometry source.
 func (m *Model) layoutPanels() {
-	w := m.width
-	h := m.height
-
-	// Layout: messages left ~78%, right rail ~22%
-	rightW := w * 22 / 100
-	if rightW < 22 {
-		rightW = 22
-	}
-	chatW := w - rightW
-
-	inputH := 3
-	mainH := h - inputH - 1 // -1 for status bar
-	if mainH < 10 {
-		mainH = 10
-	}
-
-	m.messagesPanel.SetSize(chatW, mainH)
-	m.planPanel.SetSize(rightW, mainH)
-	m.inputBar.SetSize(w, inputH)
-
-	// Unused panels zeroed out
+	layout := m.calculateLayout()
+	m.messagesPanel.SetSize(layout.chatW, layout.mainH)
+	m.planPanel.SetSize(layout.rightW, layout.mainH)
+	m.inputBar.SetSize(m.width, layout.inputH)
 	m.sessionPanel.SetSize(0, 0)
 	m.fileTreePanel.SetSize(0, 0)
 	m.codePanel.SetSize(0, 0)
 }
 
-// View renders the full TUI.
 func (m *Model) View() string {
 	if m.width == 0 {
-		return "Loading…"
+		return ""
+	}
+	if m.width < 52 || m.height < 12 {
+		return lipgloss.Place(
+			m.width,
+			m.height,
+			lipgloss.Center,
+			lipgloss.Center,
+			styleBrand.Render("ROVE CODE")+"\n"+styleMeta.Render("terminal needs at least 52×12"),
+		)
 	}
 
 	m.updateFocus()
+	m.layoutPanels()
+	layout := m.calculateLayout()
 
-	w := m.width
-	h := m.height
-
-	rightW := w * 22 / 100
-	if rightW < 22 {
-		rightW = 22
+	topBar := m.renderTopBar(m.width)
+	messages := m.messagesPanel.Render()
+	mainRow := messages
+	if layout.showRail {
+		divider := lipgloss.NewStyle().
+			Width(1).
+			Height(layout.mainH).
+			Foreground(colorSep).
+			Background(colorBgPanel).
+			Render(strings.TrimSuffix(strings.Repeat("│\n", layout.mainH), "\n"))
+		mainRow = lipgloss.JoinHorizontal(lipgloss.Top, messages, divider, m.planPanel.Render())
 	}
-	chatW := w - rightW
 
-	inputH := 3
-	mainH := h - inputH - 1
-	if mainH < 10 {
-		mainH = 10
-	}
-
-	m.messagesPanel.SetSize(chatW, mainH)
-	m.planPanel.SetSize(rightW, mainH)
-	m.inputBar.SetSize(w, inputH)
-
-	msgView := m.messagesPanel.Render()
-	planView := m.planPanel.Render()
-	inputView := m.inputBar.Render()
-
-	// Right rail: pet status line + plan+usage
-	petLine := " " + m.pet.Render(rightW)
-	rightRail := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Width(rightW).Background(colorBg).Render(petLine),
-		planView,
-	)
-
-	mainRow := lipgloss.JoinHorizontal(lipgloss.Top,
-		msgView,
-		rightRail,
-	)
-
-	// Status bar — single minimal line
-	statusBar := m.renderStatusBar(w)
-
-	base := lipgloss.JoinVertical(lipgloss.Left,
+	base := lipgloss.JoinVertical(
+		lipgloss.Left,
+		topBar,
 		mainRow,
-		statusBar,
-		inputView,
+		m.renderStatusBar(m.width),
+		m.inputBar.Render(),
 	)
 
-	// Overlay profile modal if open
 	if m.profilePanel.IsOpen() {
-		base = overlayModal(base, m.profilePanel.Render(), w, h)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.profilePanel.Render())
 	}
-
-	// Overlay SSH panel modal if open
 	if m.sshPanel.IsOpen() {
-		base = overlayModal(base, m.sshPanel.Render(), w, h)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.sshPanel.Render())
 	}
-
 	return base
 }
 
-// renderStatusBar produces a single dim line at the bottom.
-// Left: keybinds  |  Right: model · status · version
-func (m *Model) renderStatusBar(w int) string {
-	leftHints := "esc stop  ^k commands  ^n new  ^p profiles  ^h ssh"
-
-	// Right side: connection status + ssh info + profile
+func (m *Model) renderTopBar(w int) string {
+	brand := styleBrandMark.Render("◆") + " " + styleBrand.Render("ROVE CODE")
 	var rightParts []string
-
-	if txt := m.sshPanel.TunnelStatusText(); txt != "" {
-		rightParts = append(rightParts, "ssh:"+txt)
-	}
-	if name := m.profilePanel.ActiveProfileName(); name != "" {
-		rightParts = append(rightParts, name)
-	}
-	if m.connected {
-		rightParts = append(rightParts, "●")
+	if m.sshPanel.TunnelStatusText() != "" {
+		rightParts = append(rightParts, m.sshPanel.TunnelStatusText())
 	} else {
-		rightParts = append(rightParts, "○")
+		rightParts = append(rightParts, "local")
 	}
-
-	right := strings.Join(rightParts, " · ")
-
-	// Pad left and right to fill width
-	leftStr := styleDim.Render(leftHints)
-	rightStr := styleDim.Render(right)
-
-	leftW := lipgloss.Width(leftStr)
-	rightW := lipgloss.Width(rightStr)
-	gap := w - leftW - rightW - 2
+	if profile := m.profilePanel.ActiveProfileName(); profile != "" {
+		rightParts = append(rightParts, profile)
+	}
+	if m.pet != nil {
+		rightParts = append(rightParts, stripSimpleANSI(m.pet.Render(0)))
+	}
+	right := styleMuted.Render(strings.Join(rightParts, "  ·  "))
+	gap := w - lipgloss.Width(brand) - lipgloss.Width(right) - 4
+	if gap < 1 {
+		right = styleMuted.Render(stripSimpleANSI(m.pet.Render(0)))
+		gap = w - lipgloss.Width(brand) - lipgloss.Width(right) - 4
+	}
 	if gap < 1 {
 		gap = 1
 	}
+	line := "  " + brand + strings.Repeat(" ", gap) + right + "  "
+	return lipgloss.NewStyle().Width(w).Background(colorBgPanel).Render(fitVisible(line, w))
+}
 
-	return styleStatusBar.
-		Width(w).
-		Render(leftStr + strings.Repeat(" ", gap) + rightStr)
+func (m *Model) renderStatusBar(w int) string {
+	shortcut := func(key, label string) string {
+		return lipgloss.NewStyle().Foreground(colorWhite).Render(key) + " " + styleMeta.Render(label)
+	}
+	left := strings.Join([]string{
+		shortcut("esc", "stop"),
+		shortcut("^k", "commands"),
+		shortcut("^n", "new"),
+		shortcut("^p", "profiles"),
+		shortcut("^h", "ssh"),
+	}, "   ")
+
+	right := m.lastStatus
+	if right == "" {
+		if m.connected {
+			right = styleSuccess.Render("● connected")
+		} else {
+			right = styleError.Render("○ offline")
+		}
+	}
+	if m.currentSessID != "" {
+		right = styleMeta.Render("session "+m.currentSessID[:min(7, len(m.currentSessID))]) + "   " + right
+	}
+	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 4
+	if gap < 1 {
+		right = ""
+		gap = w - lipgloss.Width(left) - 4
+	}
+	if gap < 1 {
+		gap = 1
+	}
+	line := "  " + left + strings.Repeat(" ", gap) + right + "  "
+	return styleStatusBar.Width(w).Render(fitVisible(line, w))
 }
 
 func shortPath(p string) string {

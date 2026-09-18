@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aether-dev/aether/internal/checkpoint"
 	"github.com/aether-dev/aether/internal/eventbus"
 	"github.com/aether-dev/aether/internal/id"
 	"github.com/aether-dev/aether/internal/memory"
@@ -16,7 +17,6 @@ import (
 	"github.com/aether-dev/aether/internal/store"
 	"github.com/aether-dev/aether/internal/tool"
 	"github.com/aether-dev/aether/internal/types"
-	"github.com/aether-dev/aether/internal/checkpoint"
 )
 
 type Runtime struct {
@@ -192,7 +192,15 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		for _, tc := range toolCalls {
 			allToolsCalled = append(allToolsCalled, tc.Name)
 			if rt.bus != nil {
-				rt.bus.Publish(types.Event{Type: types.EventToolStart, Topic: "session." + string(req.SessionID), Payload: map[string]any{"name": tc.Name}})
+				rt.bus.Publish(types.Event{
+					Type:  types.EventToolStart,
+					Topic: "session." + string(req.SessionID),
+					Payload: map[string]any{
+						"name":      tc.Name,
+						"args":      json.RawMessage(tc.ArgsJSON),
+						"sessionId": string(req.SessionID),
+					},
+				})
 			}
 			// Auto-checkpoint before any tool call that mutates the workspace.
 			if req.Workspace != "" && rt.checkpt != nil && isMutatingTool(tc.Name) {
@@ -217,7 +225,16 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 				_, _ = rt.sessions.Append(ctx, types.Message{SessionID: req.SessionID, Role: types.RoleTool, Content: out, ToolResult: tr})
 			}
 			if rt.bus != nil {
-				rt.bus.Publish(types.Event{Type: types.EventToolResult, Topic: "session." + string(req.SessionID), Payload: map[string]any{"name": tc.Name, "error": res.IsError}})
+				rt.bus.Publish(types.Event{
+					Type:  types.EventToolResult,
+					Topic: "session." + string(req.SessionID),
+					Payload: map[string]any{
+						"name":      tc.Name,
+						"content":   out,
+						"isError":   res.IsError || callErr != nil,
+						"sessionId": string(req.SessionID),
+					},
+				})
 			}
 		}
 	}

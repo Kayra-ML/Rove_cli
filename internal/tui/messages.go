@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -9,59 +11,85 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// DisplayMessage is a rendered message entry in the messages panel.
+// DisplayMessage is the compact presentation model for chat history.
 type DisplayMessage struct {
 	Role      types.MessageRole
 	Content   string
 	ToolName  string
 	ToolArgs  string
-	ToolExtra string // e.g. "+3 -1" for edits, "42 lines" for reads
-	IsCard    bool   // approval card
+	ToolExtra string
+	IsCard    bool
 	CardID    string
 	IsError   bool
 	At        time.Time
 }
 
-// MessagesPanel renders the chat + tool history.
 type MessagesPanel struct {
 	messages    []DisplayMessage
 	scrollOff   int
 	active      bool
 	width       int
 	height      int
-	pendingCard *DisplayMessage // card awaiting approval
+	pendingCard *DisplayMessage
 }
 
-func NewMessagesPanel() *MessagesPanel {
-	return &MessagesPanel{}
-}
+func NewMessagesPanel() *MessagesPanel { return &MessagesPanel{} }
 
 func (p *MessagesPanel) SetSize(w, h int) {
-	p.width = w
-	p.height = h
+	changed := p.width != w || p.height != h
+	p.width, p.height = w, h
+	if changed {
+		p.scrollToBottom()
+	}
 }
 
-func (p *MessagesPanel) SetActive(active bool) {
-	p.active = active
-}
+func (p *MessagesPanel) SetActive(active bool) { p.active = active }
 
 func (p *MessagesPanel) AddMessage(msg DisplayMessage) {
 	p.messages = append(p.messages, msg)
 	p.scrollToBottom()
 }
 
-func (p *MessagesPanel) SetMessages(msgs []types.Message) {
-	p.messages = nil
-	for _, m := range msgs {
-		dm := DisplayMessage{
-			Role:    m.Role,
-			Content: m.Content,
-			At:      m.CreatedAt,
+func (p *MessagesPanel) AddUserMessage(content string) {
+	p.AddMessage(DisplayMessage{
+		Role:    types.RoleUser,
+		Content: content,
+		At:      time.Now(),
+	})
+}
+
+func (p *MessagesPanel) AppendAssistantDelta(delta string) {
+	if delta == "" {
+		return
+	}
+	last := len(p.messages) - 1
+	if last >= 0 && p.messages[last].Role == types.RoleAssistant && !p.messages[last].IsError {
+		p.messages[last].Content += delta
+		p.scrollToBottom()
+		return
+	}
+	p.AddMessage(DisplayMessage{Role: types.RoleAssistant, Content: delta, At: time.Now()})
+}
+
+func (p *MessagesPanel) CompleteTool(name, extra string, isError bool) {
+	for i := len(p.messages) - 1; i >= 0; i-- {
+		if p.messages[i].Role == types.RoleTool && p.messages[i].ToolName == name {
+			p.messages[i].ToolExtra = extra
+			p.messages[i].IsError = isError
+			p.scrollToBottom()
+			return
 		}
+	}
+	p.AddMessage(DisplayMessage{Role: types.RoleTool, ToolName: name, ToolExtra: extra, IsError: isError, At: time.Now()})
+}
+
+func (p *MessagesPanel) SetMessages(msgs []types.Message) {
+	p.messages = p.messages[:0]
+	for _, m := range msgs {
+		dm := DisplayMessage{Role: m.Role, Content: m.Content, At: m.CreatedAt}
 		if len(m.ToolCalls) > 0 {
 			tc := m.ToolCalls[0]
-			dm.ToolName = tc.Name
-			dm.ToolArgs = tc.ArgsJSON
+			dm.ToolName, dm.ToolArgs = tc.Name, tc.ArgsJSON
 		}
 		if m.ToolResult != nil {
 			dm.Role = types.RoleTool
@@ -78,26 +106,40 @@ func summarizeToolResult(tr *types.ToolResult) string {
 	if tr == nil {
 		return ""
 	}
-	content := tr.Content
+	content := strings.TrimSpace(tr.Content)
+	if content == "" {
+		return "done"
+	}
 	lines := strings.Count(content, "\n") + 1
 	if lines > 1 {
 		return fmt.Sprintf("%d lines", lines)
 	}
-	if len(content) > 40 {
-		return content[:37] + "..."
+	if len([]rune(content)) > 42 {
+		return truncate(content, 42)
 	}
 	return content
 }
 
-func (p *MessagesPanel) scrollToBottom() {
-	inner := p.height - 3
-	if inner <= 0 {
-		inner = 1
+func (p *MessagesPanel) contentDimensions() (int, int) {
+	innerW := p.width - 6
+	if innerW < 12 {
+		innerW = 12
 	}
-	total := p.countRenderedLines()
-	if total > inner {
-		p.scrollOff = total - inner
-	} else {
+	contentH := p.height - 1
+	if p.pendingCard != nil {
+		contentH -= len(p.renderApprovalCardLines(innerW)) + 1
+	}
+	if contentH < 1 {
+		contentH = 1
+	}
+	return innerW, contentH
+}
+
+func (p *MessagesPanel) scrollToBottom() {
+	innerW, contentH := p.contentDimensions()
+	total := len(p.renderedLines(innerW))
+	p.scrollOff = total - contentH
+	if p.scrollOff < 0 {
 		p.scrollOff = 0
 	}
 }
@@ -109,72 +151,55 @@ func (p *MessagesPanel) ScrollUp() {
 }
 
 func (p *MessagesPanel) ScrollDown() {
-	p.scrollOff++
+	innerW, contentH := p.contentDimensions()
+	maxOff := len(p.renderedLines(innerW)) - contentH
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if p.scrollOff < maxOff {
+		p.scrollOff++
+	}
 }
 
-func (p *MessagesPanel) HasPendingCard() bool {
-	return p.pendingCard != nil
-}
+func (p *MessagesPanel) HasPendingCard() bool { return p.pendingCard != nil }
 
 func (p *MessagesPanel) SetPendingCard(card *DisplayMessage) {
 	p.pendingCard = card
+	p.scrollToBottom()
 }
 
 func (p *MessagesPanel) ClearPendingCard() {
 	p.pendingCard = nil
+	p.scrollToBottom()
 }
 
-func (p *MessagesPanel) countRenderedLines() int {
-	count := 0
-	innerW := p.width - 2
-	if innerW < 10 {
-		innerW = 10
-	}
-	for _, msg := range p.messages {
-		lines := p.renderMsg(msg, innerW)
-		count += len(lines)
-	}
-	return count
-}
-
-// toolIcon returns the leading character for a tool row.
-// Read/list → dot, edit/write/patch → tilde, shell → dollar, error → cross.
 func toolIcon(name string, isError bool) string {
 	if isError {
-		return styleError.Render("✗")
+		return styleError.Render("×")
 	}
+	lower := strings.ToLower(name)
 	switch {
-	case strings.Contains(name, "write") ||
-		strings.Contains(name, "patch") ||
-		strings.Contains(name, "edit") ||
-		strings.Contains(name, "create"):
-		return styleDim.Render("~")
-	case strings.Contains(name, "shell") ||
-		strings.Contains(name, "bash") ||
-		strings.Contains(name, "exec"):
-		return styleDim.Render("$")
+	case strings.Contains(lower, "write"), strings.Contains(lower, "patch"), strings.Contains(lower, "edit"), strings.Contains(lower, "create"):
+		return lipgloss.NewStyle().Foreground(colorYellow).Render("~")
+	case strings.Contains(lower, "shell"), strings.Contains(lower, "bash"), strings.Contains(lower, "exec"), strings.Contains(lower, "command"):
+		return lipgloss.NewStyle().Foreground(colorViolet).Render("$")
 	default:
 		return styleDim.Render("·")
 	}
 }
 
-// diffStat formats "+N -M" with green/red coloring inline.
 func diffStat(extra string) string {
-	// If it already contains + and -, color it
 	parts := strings.Fields(extra)
-	var out []string
-	for _, p := range parts {
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
 		switch {
-		case strings.HasPrefix(p, "+"):
-			out = append(out, lipgloss.NewStyle().Foreground(colorGreen).Render(p))
-		case strings.HasPrefix(p, "-"):
-			out = append(out, lipgloss.NewStyle().Foreground(colorRed).Render(p))
+		case strings.HasPrefix(part, "+"):
+			out = append(out, styleSuccess.Render(part))
+		case strings.HasPrefix(part, "-"):
+			out = append(out, styleError.Render(part))
 		default:
-			out = append(out, styleDim.Render(p))
+			out = append(out, styleMeta.Render(part))
 		}
-	}
-	if len(out) == 0 {
-		return styleDim.Render(extra)
 	}
 	return strings.Join(out, " ")
 }
@@ -183,187 +208,181 @@ func (p *MessagesPanel) renderMsg(msg DisplayMessage, innerW int) []string {
 	var lines []string
 	switch msg.Role {
 	case types.RoleUser:
-		// Bold white, no prefix icon clutter — clean user line
-		wrapped := wrapText(msg.Content, innerW)
-		for i, line := range wrapped {
-			if i == 0 {
-				lines = append(lines, styleUserMsg.Render(line))
-			} else {
-				lines = append(lines, styleUserMsg.Render(line))
-			}
+		lines = append(lines, lipgloss.NewStyle().Foreground(colorBlue).Bold(true).Render("you"))
+		for _, line := range wrapText(strings.TrimSpace(msg.Content), innerW) {
+			lines = append(lines, styleUserMsg.Render(line))
 		}
-		// Blank spacer after user message
 		lines = append(lines, "")
-
 	case types.RoleAssistant:
-		wrapped := wrapText(msg.Content, innerW)
-		for _, line := range wrapped {
+		lines = append(lines, styleSuccess.Bold(true).Render("rove"))
+		for _, line := range wrapText(strings.TrimSpace(msg.Content), innerW) {
 			lines = append(lines, styleAgentMsg.Render(line))
 		}
-		// Blank spacer after agent block
-		if len(wrapped) > 0 {
-			lines = append(lines, "")
-		}
-
+		lines = append(lines, "")
 	case types.RoleTool:
 		name := msg.ToolName
 		if name == "" {
 			name = "tool"
 		}
-		extra := msg.ToolExtra
-		icon := toolIcon(name, msg.IsError)
-
-		// Compact single line: "· read_file  callback.ts  16 lines"
-		//                 or:  "~ patch_file  callback.ts  +4 -1"
-		shortName := shortenToolName(name)
-		row := icon + " " + styleDim.Render(shortName)
-		if extra != "" {
-			isEdit := strings.Contains(name, "write") ||
-				strings.Contains(name, "patch") ||
-				strings.Contains(name, "edit")
+		action := shortenToolName(name)
+		subject := toolSubject(msg)
+		row := toolIcon(name, msg.IsError) + " " + styleMuted.Render(action)
+		if subject != "" {
+			row += " " + lipgloss.NewStyle().Foreground(colorWhite).Render(subject)
+		}
+		if msg.ToolExtra != "" && msg.ToolExtra != subject {
+			isEdit := strings.Contains(name, "write") || strings.Contains(name, "patch") || strings.Contains(name, "edit")
 			if isEdit {
-				row += "  " + diffStat(extra)
+				row += "  " + diffStat(msg.ToolExtra)
 			} else {
-				row += "  " + styleDim.Render(extra)
+				row += "  " + styleMeta.Render(msg.ToolExtra)
 			}
 		}
-		lines = append(lines, row)
-
+		lines = append(lines, truncateVisible(row, innerW))
 	default:
-		if msg.Content != "" {
-			wrapped := wrapText(msg.Content, innerW)
-			for _, line := range wrapped {
-				lines = append(lines, styleDim.Render(line))
-			}
+		for _, line := range wrapText(msg.Content, innerW) {
+			lines = append(lines, styleMuted.Render(line))
 		}
 	}
 	return lines
 }
 
-// shortenToolName makes tool names shorter for compact display.
+func toolSubject(msg DisplayMessage) string {
+	if msg.ToolArgs != "" {
+		var args map[string]any
+		if json.Unmarshal([]byte(msg.ToolArgs), &args) == nil {
+			for _, key := range []string{"path", "file", "command", "query", "url"} {
+				if raw, ok := args[key].(string); ok && raw != "" {
+					if key == "path" || key == "file" {
+						return shortDisplayPath(raw)
+					}
+					return truncate(raw, 42)
+				}
+			}
+		}
+	}
+	if strings.Contains(msg.ToolExtra, "/") {
+		return shortDisplayPath(msg.ToolExtra)
+	}
+	return ""
+}
+
+func shortDisplayPath(path string) string {
+	clean := filepath.ToSlash(path)
+	parts := strings.Split(clean, "/")
+	if len(parts) <= 3 {
+		return clean
+	}
+	return "…/" + strings.Join(parts[len(parts)-3:], "/")
+}
+
 func shortenToolName(name string) string {
+	lower := strings.ToLower(name)
 	replacer := strings.NewReplacer(
 		"read_file", "read",
 		"write_file", "write",
-		"patch_file", "patch",
-		"list_directory", "ls",
+		"patch_file", "edit",
+		"create_file", "create",
+		"list_directory", "list",
+		"search_files", "search",
 		"run_shell", "shell",
+		"run_command", "shell",
+		"browser_exec", "browser",
 		"bash", "shell",
 	)
-	return replacer.Replace(name)
+	return replacer.Replace(lower)
+}
+
+func (p *MessagesPanel) renderedLines(innerW int) []string {
+	var all []string
+	for _, msg := range p.messages {
+		all = append(all, p.renderMsg(msg, innerW)...)
+	}
+	return all
 }
 
 func (p *MessagesPanel) Render() string {
-	w := p.width
-	if w < 6 {
-		w = 6
-	}
-	innerW := w - 2
-	if innerW < 4 {
-		innerW = 4
-	}
-	h := p.height
-	if h < 4 {
-		h = 4
+	w := maxInt(p.width, 12)
+	h := maxInt(p.height, 4)
+	innerW, contentH := p.contentDimensions()
+	header := ruledHeader("messages", w, fmt.Sprintf("%d", len(p.messages)), p.active)
+
+	all := p.renderedLines(innerW)
+	var visible []string
+	if len(all) == 0 {
+		visible = p.emptyState(innerW, contentH)
+	} else {
+		maxOff := len(all) - contentH
+		if maxOff < 0 {
+			maxOff = 0
+		}
+		p.scrollOff = clampInt(p.scrollOff, 0, maxOff)
+		end := p.scrollOff + contentH
+		if end > len(all) {
+			end = len(all)
+		}
+		visible = append(visible, all[p.scrollOff:end]...)
+		for len(visible) < contentH {
+			visible = append(visible, "")
+		}
 	}
 
-	// Header: thin separator line + label
-	sep := styleSep.Render(strings.Repeat("─", w))
-	header := styleDim.Render("  messages")
-	headerLines := 2 // sep + label
-
-	contentH := h - headerLines
-
-	// Approval card overlay (rendered at bottom of message area)
-	var cardLines []string
+	rows := []string{header}
+	for _, line := range visible {
+		rows = append(rows, "   "+line)
+	}
 	if p.pendingCard != nil {
-		cardLines = p.renderApprovalCardLines(innerW)
-		contentH -= len(cardLines) + 1 // +1 for spacer
-	}
-
-	if contentH < 1 {
-		contentH = 1
-	}
-
-	// Collect all rendered message lines
-	var allLines []string
-	for _, msg := range p.messages {
-		allLines = append(allLines, p.renderMsg(msg, innerW)...)
-	}
-
-	// Apply scroll
-	off := p.scrollOff
-	if off > len(allLines) {
-		off = len(allLines)
-	}
-	visible := allLines[off:]
-
-	// Trim to contentH (show most recent)
-	if len(visible) > contentH {
-		visible = visible[len(visible)-contentH:]
-	}
-
-	// Pad
-	for len(visible) < contentH {
-		visible = append(visible, "")
-	}
-
-	var sb strings.Builder
-	sb.WriteString(sep)
-	sb.WriteByte('\n')
-	sb.WriteString(header)
-	sb.WriteByte('\n')
-
-	for i, line := range visible {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-		// Left-pad content by 2 for clean alignment
-		sb.WriteString("  ")
-		sb.WriteString(line)
-	}
-
-	// Append approval card at bottom
-	if len(cardLines) > 0 {
-		sb.WriteByte('\n')
-		for _, cl := range cardLines {
-			sb.WriteByte('\n')
-			sb.WriteString(cl)
+		rows = append(rows, "")
+		for _, line := range p.renderApprovalCardLines(innerW) {
+			rows = append(rows, "   "+line)
 		}
 	}
+	for len(rows) < h {
+		rows = append(rows, "")
+	}
+	if len(rows) > h {
+		rows = rows[:h]
+	}
+	return lipgloss.NewStyle().Width(w).Height(h).Background(colorBg).Render(strings.Join(rows, "\n"))
+}
 
-	return lipgloss.NewStyle().
-		Width(w).
-		Height(h).
-		Background(colorBg).
-		Render(sb.String())
+func (p *MessagesPanel) emptyState(innerW, contentH int) []string {
+	rows := make([]string, contentH)
+	if contentH < 5 {
+		return rows
+	}
+	brandText := truncate("R O V E  C O D E", innerW)
+	subtitleText := truncate("Welcome to Rove Code", innerW)
+	hintText := truncate("type a task · ctrl+k commands · ctrl+n new", innerW)
+	brand := styleBrand.Render(brandText)
+	subtitle := styleMuted.Render(subtitleText)
+	hint := styleMeta.Render(hintText)
+	start := contentH/2 - 2
+	rows[start] = centerVisible(brand, innerW)
+	rows[start+2] = centerVisible(subtitle, innerW)
+	if contentH > 7 {
+		rows[start+4] = centerVisible(hint, innerW)
+	}
+	return rows
 }
 
 func (p *MessagesPanel) renderApprovalCardLines(maxW int) []string {
-	var lines []string
-
-	// Highlighted yellow row for approval card
-	cardW := maxW
-	if cardW > maxW {
-		cardW = maxW
+	if maxW < 12 {
+		maxW = 12
 	}
-
-	title := truncate("  ◆ needs your permission", cardW)
-	content := ""
-	if p.pendingCard != nil {
-		content = truncate("  "+p.pendingCard.Content, cardW)
+	command := "waiting for approval"
+	if p.pendingCard != nil && strings.TrimSpace(p.pendingCard.Content) != "" {
+		command = strings.ReplaceAll(strings.TrimSpace(p.pendingCard.Content), "\n", " ")
 	}
-	buttons := "  " +
-		lipgloss.NewStyle().Foreground(colorGreen).Bold(true).Render("[a] allow") +
-		"  " +
-		lipgloss.NewStyle().Foreground(colorRed).Render("[d] deny")
-
-	lines = append(lines,
-		styleApprovalRow.Width(maxW).Render(title),
-		styleApprovalRow.Width(maxW).Render(content),
-		buttons,
-	)
-	return lines
+	accent := lipgloss.NewStyle().Foreground(colorYellow).Render("┃")
+	title := styleHighlight.Bold(true).Render("permission required")
+	body := lipgloss.NewStyle().Foreground(colorWhite).Render(truncate(command, maxW-3))
+	actions := styleSuccess.Bold(true).Render("a allow") + styleMeta.Render("   ") + styleError.Render("d deny")
+	return []string{
+		accent + " " + title,
+		accent + " " + body,
+		accent + " " + actions,
+	}
 }
 
 func overlayCard(bg, card string, h, w int) string {
@@ -377,13 +396,12 @@ func wrapText(text string, width int) []string {
 		width = 40
 	}
 	var lines []string
-	paragraphs := strings.Split(text, "\n")
-	for _, para := range paragraphs {
-		if para == "" {
+	for _, paragraph := range strings.Split(text, "\n") {
+		if paragraph == "" {
 			lines = append(lines, "")
 			continue
 		}
-		runes := []rune(para)
+		runes := []rune(paragraph)
 		for len(runes) > width {
 			breakAt := width
 			for i := width; i > width/2; i-- {
@@ -406,9 +424,37 @@ func wrapText(text string, width int) []string {
 }
 
 func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
+	if n <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return string(r[:n-1]) + "…"
+	if n == 1 {
+		return "…"
+	}
+	return string(runes[:n-1]) + "…"
+}
+
+func truncateVisible(s string, width int) string {
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	return truncate(stripSimpleANSI(s), width)
+}
+
+func centerVisible(s string, width int) string {
+	pad := (width - lipgloss.Width(s)) / 2
+	if pad < 0 {
+		pad = 0
+	}
+	return strings.Repeat(" ", pad) + s
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

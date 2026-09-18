@@ -3,25 +3,42 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/aether-dev/aether/internal/config"
+	"github.com/aether-dev/aether/internal/daemon"
 	"github.com/aether-dev/aether/internal/sshtunnel"
 	"github.com/aether-dev/aether/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 var (
+	version       = "dev"
+	flagVersion   = flag.Bool("version", false, "Print the Rove Code version and exit")
 	flagHost      = flag.String("host", "", "Remote host to connect to (user@host:port or saved alias)")
 	flagAddHost   = flag.String("add-host", "", "Add a saved host alias: alias=user@host:port[:note]")
 	flagListHosts = flag.Bool("list-hosts", false, "List saved SSH hosts and exit")
 )
 
 func main() {
+	// The release is one self-contained binary. A hidden child mode owns the
+	// shared daemon so `rovecode` works on a clean machine after one install.
+	if len(os.Args) > 1 && os.Args[1] == "daemon" {
+		runBundledDaemon()
+		return
+	}
+
 	flag.Parse()
+	if *flagVersion {
+		fmt.Printf("rovecode %s\n", version)
+		return
+	}
 
 	// --list-hosts: print and exit
 	if *flagListHosts {
@@ -77,12 +94,15 @@ func main() {
 		return
 	}
 
-	// Determine socket path (matches daemon default)
-	home, _ := os.UserHomeDir()
-	socketPath := filepath.Join(home, ".local", "share", "aether", "aether.sock")
+	localConfig, err := config.Load("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rovecode: config: %v\n", err)
+		os.Exit(1)
+	}
 
 	var ipc *tui.IPCClient
 	var tunnel *sshtunnel.Tunnel
+	var startupErr error
 
 	if *flagHost != "" {
 		// SSH tunnel mode — resolve alias or parse spec
@@ -108,29 +128,23 @@ func main() {
 		tok, _ := t.FetchRemoteToken()
 		ipc = tui.NewIPCClientTCP(t.LocalAddr(), tok)
 	} else {
-		// Local mode — start daemon if not running
-		if _, err := os.Stat(socketPath); os.IsNotExist(err) {
-			fmt.Println("Starting Aether daemon...")
-			cmd := exec.Command("aether", "daemon", "--background")
-			if startErr := cmd.Start(); startErr != nil {
-				fmt.Fprintf(os.Stderr, "sextant: daemon not running (could not start: %v)\n", startErr)
-			} else {
-				time.Sleep(1500 * time.Millisecond)
-			}
-		}
-
+		// Local mode — the installed rovecode binary also owns its daemon.
+		startupErr = ensureBundledDaemon(localConfig)
 		var err error
 		ipc, err = tui.NewIPCClient()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "sextant: failed to build IPC client: %v\n", err)
+			fmt.Fprintf(os.Stderr, "rovecode: IPC client: %v\n", err)
 			os.Exit(1)
 		}
 	}
 
-	// Splash screen — ROVE branding, 1.5s
+	// Show branding only for the interactive client, never the daemon child.
 	showSplash()
 
 	m := tui.NewModel(ipc)
+	if startupErr != nil {
+		m.SetStartupError(startupErr)
+	}
 
 	// If we opened a tunnel at startup, wire it into the SSH panel
 	if tunnel != nil {
@@ -164,7 +178,8 @@ func main() {
 		tunnel.Close()
 	}
 }
-// showSplash renders the ROVE splash screen for ~1.5s then clears.
+
+// showSplash renders the ROVE splash screen briefly, then clears.
 func showSplash() {
 	// Hide cursor
 	fmt.Print("\033[?25l")
@@ -205,7 +220,7 @@ func showSplash() {
 		fmt.Printf("%*s%s\n", pad, "", line)
 	}
 
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(700 * time.Millisecond)
 
 	// Clear screen before TUI takes over
 	fmt.Print("\033[2J\033[H")
@@ -230,4 +245,79 @@ func getTermCols() (int, error) {
 		return 0, fmt.Errorf("no cols")
 	}
 	return n, nil
+}
+
+func daemonHealthy(addr string) bool {
+	client := &http.Client{Timeout: 250 * time.Millisecond}
+	resp, err := client.Get("http://" + addr + "/health")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+func ensureBundledDaemon(cfg config.Config) error {
+	if daemonHealthy(cfg.ListenHTTP) {
+		return nil
+	}
+	if err := cfg.EnsureDirs(); err != nil {
+		return err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	logPath := filepath.Join(cfg.DataDir, "logs", "rovecode-daemon.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(self, "daemon")
+	cmd.Stdin = nil
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Env = os.Environ()
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return err
+	}
+	_ = cmd.Process.Release()
+	_ = logFile.Close()
+
+	deadline := time.Now().Add(7 * time.Second)
+	for time.Now().Before(deadline) {
+		if daemonHealthy(cfg.ListenHTTP) {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("daemon did not become ready; see %s", logPath)
+}
+
+func runBundledDaemon() {
+	cfg, err := config.Load("")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := cfg.EnsureDirs(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if daemonHealthy(cfg.ListenHTTP) {
+		return
+	}
+	d, err := daemon.Start(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	_ = daemon.WritePID(cfg.DataDir)
+	defer os.Remove(daemon.PIDPath(cfg.DataDir))
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt)
+	<-stop
+	_ = d.Stop()
 }

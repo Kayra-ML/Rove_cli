@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -106,7 +107,12 @@ type InputBar struct {
 
 func NewInputBar() *InputBar {
 	ti := textinput.New()
-	ti.Placeholder = "ask aether — e.g. fix the failing test"
+	ti.Prompt = "› "
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(colorViolet).Bold(true)
+	ti.TextStyle = lipgloss.NewStyle().Foreground(colorWhite)
+	ti.Placeholder = "Ask Rove Code to build, fix, or explain…"
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(colorDim)
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(colorYellow)
 	ti.Focus()
 	ti.CharLimit = 4096
 
@@ -119,7 +125,15 @@ func NewInputBar() *InputBar {
 func (b *InputBar) SetSize(w, h int) {
 	b.width = w
 	b.height = h
-	b.input.Width = w - 4
+	b.input.Width = maxInt(w-4, 8)
+}
+
+// DesiredHeight lets the root layout reserve room for the command palette.
+func (b *InputBar) DesiredHeight() int {
+	if b.slashOpen {
+		return 11
+	}
+	return 2
 }
 
 func (b *InputBar) SetActive(active bool) {
@@ -219,84 +233,70 @@ func (b *InputBar) filteredCommands() []SlashCommand {
 }
 
 func (b *InputBar) Render() string {
-	w := b.width
-	if w < 4 {
-		w = 4
-	}
-
-	// Slash command popup rendered above input line
+	w := maxInt(b.width, 12)
+	rows := make([]string, 0, b.DesiredHeight())
 	if b.slashOpen {
-		popup := b.renderSlashPopup(w)
-		inputLine := b.renderInputLine(w)
-		full := popup + "\n" + inputLine
-		return lipgloss.NewStyle().
-			Width(w).
-			Background(colorBg).
-			Border(lipgloss.NormalBorder(), true, false, false, false).
-			BorderForeground(colorSep).
-			Render(full)
+		rows = append(rows, b.renderSlashPopup(w)...)
 	}
-
-	// Normal: separator + input
-	sep := styleSep.Render(strings.Repeat("─", w))
-	inputLine := b.renderInputLine(w)
-	return lipgloss.NewStyle().
-		Width(w).
-		Background(colorBg).
-		Render(sep + "\n" + inputLine)
+	rows = append(rows, styleSep.Render(strings.Repeat("─", w)))
+	rows = append(rows, b.renderInputLine(w))
+	return lipgloss.NewStyle().Width(w).Background(colorBgPanel).Render(strings.Join(rows, "\n"))
 }
 
 func (b *InputBar) renderInputLine(w int) string {
-	// Minimal prompt: dim arrow + textinput
-	prompt := styleDim.Render("> ")
-	return prompt + b.input.View()
+	view := b.input.View()
+	if lipgloss.Width(view) > w-3 {
+		return truncateVisible(view, w-3)
+	}
+	return "  " + view
 }
 
-func (b *InputBar) renderSlashPopup(maxW int) string {
+func (b *InputBar) renderSlashPopup(maxW int) []string {
 	filtered := b.filteredCommands()
+	rows := []string{ruledHeader("commands", maxW, fmt.Sprintf("%d", len(filtered)), true)}
 	if len(filtered) == 0 {
-		return " " + styleDim.Render("no commands matched")
+		rows = append(rows, "  "+styleMeta.Render("no commands matched"))
+		for len(rows) < 9 {
+			rows = append(rows, "")
+		}
+		return rows
 	}
 
-	// Show at most 8 items to keep it compact
-	visible := filtered
-	if len(visible) > 8 {
-		// Show around cursor
-		start := b.slashCursor - 3
+	start := 0
+	if len(filtered) > 8 {
+		start = b.slashCursor - 3
 		if start < 0 {
 			start = 0
 		}
-		end := start + 8
-		if end > len(visible) {
-			end = len(visible)
-			start = end - 8
-			if start < 0 {
-				start = 0
-			}
+		if start+8 > len(filtered) {
+			start = len(filtered) - 8
 		}
-		visible = visible[start:end]
 	}
-
-	var rows []string
-	nameW := 16
-	for i, cmd := range visible {
-		line := cmd.Name
-		if len(line) < nameW {
-			line += strings.Repeat(" ", nameW-len(line))
+	end := start + 8
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	nameW := 18
+	for index := start; index < end; index++ {
+		cmd := filtered[index]
+		name := cmd.Name
+		if len(name) < nameW {
+			name += strings.Repeat(" ", nameW-len(name))
 		}
-		desc := cmd.Description
-		full := line + "  " + desc
-		if len(full) > maxW-4 {
-			full = full[:maxW-5] + "…"
-		}
-		if i == b.slashCursor%len(visible) {
-			rows = append(rows, " "+styleSelected.Width(maxW-2).Render(full))
+		description := cmd.Description
+		line := name + " " + description
+		line = truncate(line, maxW-5)
+		if index == b.slashCursor {
+			marker := lipgloss.NewStyle().Foreground(colorViolet).Bold(true).Render("›")
+			rows = append(rows, " "+marker+" "+styleSelected.Width(maxW-4).Render(line))
 		} else {
-			rows = append(rows, " "+styleDim.Render(full))
+			rows = append(rows, "   "+styleMuted.Render(line))
 		}
 	}
-
-	return strings.Join(rows, "\n")
+	for len(rows) < 9 {
+		rows = append(rows, "")
+	}
+	return rows
 }
 
 func (b *InputBar) Model() *textinput.Model {

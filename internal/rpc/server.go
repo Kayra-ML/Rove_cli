@@ -186,6 +186,10 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	// Flush headers immediately. Without an initial frame, clients block inside
+	// http.Get until the first real event and falsely remain "offline".
+	fmt.Fprint(w, ": connected\n\n")
+	flusher.Flush()
 	filter := r.URL.Query().Get("filter")
 	ch := make(chan types.Event, 64)
 	unsub := s.app.Bus.Subscribe(filter, func(ev types.Event) {
@@ -221,10 +225,10 @@ func bearer(r *http.Request) string {
 func withCORS(h http.Handler) http.Handler {
 	// Allowed origins: Wails desktop webview and local dev server.
 	allowed := map[string]struct{}{
-		"wails://wails":        {},
-		"http://localhost":     {},
+		"wails://wails":          {},
+		"http://localhost":       {},
 		"http://localhost:34115": {},
-		"http://127.0.0.1":    {},
+		"http://127.0.0.1":       {},
 		"http://127.0.0.1:34115": {},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -320,6 +324,20 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, err
+		}
+		// Session identity is authoritative. Terminal and desktop clients only
+		// need to send a session ID; infer the bound agent/workspace here.
+		if p.AgentID == "" || p.WorkspaceID == "" {
+			sess, err := a.Sess.Get(ctx, p.SessionID)
+			if err != nil {
+				return nil, err
+			}
+			if p.AgentID == "" {
+				p.AgentID = sess.AgentID
+			}
+			if p.WorkspaceID == "" {
+				p.WorkspaceID = sess.WorkspaceID
+			}
 		}
 		if p.Workspace == "" && p.WorkspaceID != "" {
 			if ws, err := a.WS.Get(ctx, p.WorkspaceID); err == nil {

@@ -1,120 +1,75 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
 
-// ── Palette ──────────────────────────────────────────────────────────────────
+	"github.com/charmbracelet/lipgloss"
+)
 
+// Night palette: restrained contrast, warm execution states, no neon boxes.
 var (
-	// Backgrounds
-	colorBg      = lipgloss.Color("#0a0a0f")
-	colorBgPanel = lipgloss.Color("#0d0d14")
+	colorBg       = lipgloss.Color("#08090D")
+	colorBgPanel  = lipgloss.Color("#0D0F15")
+	colorElevated = lipgloss.Color("#12151D")
+	colorWhite    = lipgloss.Color("#E7E9EE")
+	colorMid      = lipgloss.Color("#858A9A")
+	colorDim      = lipgloss.Color("#555B6D")
+	colorSep      = lipgloss.Color("#242833")
 
-	// Foregrounds
-	colorWhite   = lipgloss.Color("#e8e8f0")
-	colorDim     = lipgloss.Color("#4a4a5a")
-	colorMid     = lipgloss.Color("#7a7a8a")
-	colorSep     = lipgloss.Color("#1e1e2a")
+	colorGreen  = lipgloss.Color("#6BD88D")
+	colorYellow = lipgloss.Color("#E5B567")
+	colorOrange = lipgloss.Color("#E58B5B")
+	colorRed    = lipgloss.Color("#E56B6F")
+	colorBlue   = lipgloss.Color("#7AA2F7")
+	colorViolet = lipgloss.Color("#A78BFA")
 
-	// Semantic
-	colorGreen   = lipgloss.Color("#3dcc7a")   // done / success
-	colorYellow  = lipgloss.Color("#f0b840")   // active / warning / approval
-	colorOrange  = lipgloss.Color("#e87040")   // high-priority
-	colorRed     = lipgloss.Color("#e84040")   // error / deleted
-	colorBlue    = lipgloss.Color("#4888cc")   // context bar fill
-
-	// Aliases kept for compatibility
-	colorUser      = colorWhite
-	colorAgent     = colorWhite
-	colorTool      = colorMid
-	colorApproval  = colorYellow
-	colorError     = colorRed
-	colorSuccess   = colorGreen
-	colorHighlight = colorYellow
-	colorContextBar = colorBlue
-	colorBorderDim = colorSep
+	// Compatibility aliases used by the other TUI surfaces.
+	colorUser         = colorBlue
+	colorAgent        = colorWhite
+	colorTool         = colorMid
+	colorApproval     = colorYellow
+	colorError        = colorRed
+	colorSuccess      = colorGreen
+	colorHighlight    = colorYellow
+	colorContextBar   = colorBlue
+	colorBorderDim    = colorSep
 	colorBorderActive = colorMid
-	colorPet       = colorDim
-	colorSelected  = lipgloss.Color("#1a1a2e")
+	colorPet          = colorDim
+	colorSelected     = lipgloss.Color("#1A1F2B")
 
-	// ── Styles ────────────────────────────────────────────────────────────
+	stylePanelBorder       = lipgloss.NewStyle().Background(colorBg)
+	stylePanelBorderActive = lipgloss.NewStyle().Background(colorBg)
 
-	// No-border panel: just flat background, no box-drawing
-	stylePanelBorder = lipgloss.NewStyle().
-		Background(colorBg)
+	styleTitle       = lipgloss.NewStyle().Foreground(colorMid)
+	styleTitleActive = lipgloss.NewStyle().Foreground(colorWhite)
+	styleBrand       = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
+	styleBrandMark   = lipgloss.NewStyle().Foreground(colorViolet).Bold(true)
+	styleMeta        = lipgloss.NewStyle().Foreground(colorDim)
 
-	stylePanelBorderActive = lipgloss.NewStyle().
-		Background(colorBg)
+	styleUserMsg  = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
+	styleAgentMsg = lipgloss.NewStyle().Foreground(colorWhite)
+	styleToolRow  = lipgloss.NewStyle().Foreground(colorMid)
+	styleToolEdit = lipgloss.NewStyle().Foreground(colorMid)
 
-	// Panel header: dim all-caps label, thin separator below via rendering
-	styleTitle = lipgloss.NewStyle().
-		Foreground(colorDim).
-		Bold(false)
-
-	styleTitleActive = lipgloss.NewStyle().
-		Foreground(colorMid).
-		Bold(false)
-
-	// Messages
-	styleUserMsg = lipgloss.NewStyle().
-		Foreground(colorWhite).
-		Bold(true)
-
-	styleAgentMsg = lipgloss.NewStyle().
-		Foreground(colorWhite)
-
-	styleToolRow = lipgloss.NewStyle().
-		Foreground(colorMid)
-
-	styleToolEdit = lipgloss.NewStyle().
-		Foreground(colorMid)
-
-	// Approval card row — yellow background highlight
-	styleApprovalRow = lipgloss.NewStyle().
-		Foreground(colorBg).
-		Background(colorYellow).
-		Bold(true)
-
-	// Kept for modal overlays (profiles, ssh)
+	styleApprovalRow    = lipgloss.NewStyle().Foreground(colorYellow).Background(colorElevated)
 	styleApprovalBorder = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorYellow).
-		Padding(0, 1)
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorYellow).
+				Padding(0, 1)
 
-	styleError = lipgloss.NewStyle().
-		Foreground(colorRed)
-
-	styleSuccess = lipgloss.NewStyle().
-		Foreground(colorGreen)
-
-	styleDim = lipgloss.NewStyle().
-		Foreground(colorDim)
-
-	styleHighlight = lipgloss.NewStyle().
-		Foreground(colorYellow)
-
-	styleSelected = lipgloss.NewStyle().
-		Background(colorSelected).
-		Foreground(colorWhite)
-
-	stylePet = lipgloss.NewStyle().
-		Foreground(colorDim)
-
-	// Separator line style
-	styleSep = lipgloss.NewStyle().
-		Foreground(colorSep)
-
-	// Status bar
-	styleStatusBar = lipgloss.NewStyle().
-		Foreground(colorDim).
-		Background(colorBg)
-
-	styleStatusRight = lipgloss.NewStyle().
-		Foreground(colorDim).
-		Background(colorBg)
+	styleError       = lipgloss.NewStyle().Foreground(colorRed)
+	styleSuccess     = lipgloss.NewStyle().Foreground(colorGreen)
+	styleDim         = lipgloss.NewStyle().Foreground(colorDim)
+	styleMuted       = lipgloss.NewStyle().Foreground(colorMid)
+	styleHighlight   = lipgloss.NewStyle().Foreground(colorYellow)
+	styleSelected    = lipgloss.NewStyle().Background(colorSelected).Foreground(colorWhite)
+	stylePet         = lipgloss.NewStyle().Foreground(colorDim)
+	styleSep         = lipgloss.NewStyle().Foreground(colorSep)
+	styleStatusBar   = lipgloss.NewStyle().Foreground(colorDim).Background(colorBgPanel)
+	styleStatusRight = lipgloss.NewStyle().Foreground(colorMid).Background(colorBgPanel)
 )
 
 func panelStyle(active bool) lipgloss.Style {
-	// No borders — flat panels
 	return stylePanelBorder
 }
 
@@ -123,4 +78,75 @@ func titleStyle(active bool) lipgloss.Style {
 		return styleTitleActive
 	}
 	return styleTitle
+}
+
+// ruledHeader renders a title embedded into a single hairline.
+func ruledHeader(label string, width int, right string, active bool) string {
+	if width <= 0 {
+		return ""
+	}
+	left := "─ " + titleStyle(active).Render(label) + " "
+	rightText := ""
+	if right != "" {
+		rightText = " " + styleMeta.Render(right) + " ─"
+	}
+	used := lipgloss.Width(left) + lipgloss.Width(rightText)
+	fill := width - used
+	if fill < 0 {
+		fill = 0
+	}
+	line := styleSep.Render("─") + " " + titleStyle(active).Render(label) + " "
+	line += styleSep.Render(strings.Repeat("─", fill))
+	if rightText != "" {
+		line += " " + styleMeta.Render(right) + " " + styleSep.Render("─")
+	}
+	return fitVisible(line, width)
+}
+
+func fitVisible(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s + strings.Repeat(" ", width-lipgloss.Width(s))
+	}
+	// ANSI-aware hard truncation is deliberately avoided. Callers only pass
+	// compact labels here; a plain-rune fallback keeps malformed escapes out.
+	plain := []rune(stripSimpleANSI(s))
+	if len(plain) > width {
+		plain = plain[:width]
+	}
+	return string(plain) + strings.Repeat(" ", width-len(plain))
+}
+
+// stripSimpleANSI handles SGR sequences emitted by lipgloss for rare narrow
+// terminal fallbacks. Normal-width paths preserve styled text untouched.
+func stripSimpleANSI(s string) string {
+	var out strings.Builder
+	inEscape := false
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if !inEscape && b == 0x1b {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if b == 'm' {
+				inEscape = false
+			}
+			continue
+		}
+		out.WriteByte(b)
+	}
+	return out.String()
+}
+
+func clampInt(v, low, high int) int {
+	if v < low {
+		return low
+	}
+	if v > high {
+		return high
+	}
+	return v
 }

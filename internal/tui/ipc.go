@@ -31,8 +31,9 @@ type IPCClient struct {
 // --- Tea messages delivered by the IPC layer ---
 
 type SessionListMsg struct {
-	Sessions []types.Session
-	Err      error
+	Sessions         []types.Session
+	CreatedSessionID string
+	Err              error
 }
 
 type SessionHistoryMsg struct {
@@ -44,6 +45,14 @@ type SessionHistoryMsg struct {
 type AgentListMsg struct {
 	Agents []types.Agent
 	Err    error
+}
+
+type UsageMsg struct {
+	PromptTokens     int64
+	CompletionTokens int64
+	TotalTokens      int64
+	Calls            int64
+	Err              error
 }
 
 type SendMsg struct {
@@ -242,6 +251,30 @@ func (c *IPCClient) FetchAgents() tea.Cmd {
 	}
 }
 
+func (c *IPCClient) FetchUsage() tea.Cmd {
+	return func() tea.Msg {
+		raw, err := c.Call(protocol.MethodUsageGet, nil)
+		if err != nil {
+			return UsageMsg{Err: err}
+		}
+		var usage struct {
+			PromptTokens     int64 `json:"promptTokens"`
+			CompletionTokens int64 `json:"completionTokens"`
+			TotalTokens      int64 `json:"totalTokens"`
+			Calls            int64 `json:"calls"`
+		}
+		if err := json.Unmarshal(raw, &usage); err != nil {
+			return UsageMsg{Err: err}
+		}
+		return UsageMsg{
+			PromptTokens:     usage.PromptTokens,
+			CompletionTokens: usage.CompletionTokens,
+			TotalTokens:      usage.TotalTokens,
+			Calls:            usage.Calls,
+		}
+	}
+}
+
 // CreateSession returns a tea.Cmd that creates a new session.
 func (c *IPCClient) CreateSession(agentID string) tea.Cmd {
 	return func() tea.Msg {
@@ -260,13 +293,13 @@ func (c *IPCClient) CreateSession(agentID string) tea.Cmd {
 		// Re-fetch session list
 		raw2, err := c.Call(protocol.MethodSessionList, nil)
 		if err != nil {
-			return SessionListMsg{Sessions: []types.Session{sess}}
+			return SessionListMsg{Sessions: []types.Session{sess}, CreatedSessionID: string(sess.ID)}
 		}
 		var sessions []types.Session
 		if err := json.Unmarshal(raw2, &sessions); err != nil {
-			return SessionListMsg{Sessions: []types.Session{sess}}
+			return SessionListMsg{Sessions: []types.Session{sess}, CreatedSessionID: string(sess.ID)}
 		}
-		return SessionListMsg{Sessions: sessions}
+		return SessionListMsg{Sessions: sessions, CreatedSessionID: string(sess.ID)}
 	}
 }
 

@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// RemotePort is the TCP port the aether daemon listens on when started via SSH.
-const RemotePort = 34115
+// RemotePort is the loopback HTTP/JSON-RPC port of the remote daemon.
+const RemotePort = 7420
 
 // Host represents a parsed SSH host spec: user@hostname:port
 type Host struct {
@@ -180,7 +180,11 @@ func (t *Tunnel) FetchRemoteToken() (string, error) {
 // ensureRemoteDaemon starts the aether daemon on the remote host if not running.
 func (t *Tunnel) ensureRemoteDaemon() error {
 	cmd := fmt.Sprintf(
-		"aether daemon --status 2>/dev/null || nohup aether daemon --background --listen tcp://127.0.0.1:%d > /tmp/aether-daemon.log 2>&1 & sleep 1",
+		"curl -fsS http://127.0.0.1:%d/health >/dev/null 2>&1 || { "+
+			"if command -v rovecode >/dev/null 2>&1; then nohup rovecode daemon; "+
+			"elif command -v aetherd >/dev/null 2>&1; then nohup aetherd; "+
+			"elif command -v aether >/dev/null 2>&1; then nohup aether daemon start; "+
+			"else exit 127; fi > /tmp/rovecode-daemon.log 2>&1 & }; sleep 1",
 		RemotePort,
 	)
 	_, err := t.runRemote(cmd)

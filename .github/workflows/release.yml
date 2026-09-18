@@ -3,16 +3,29 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
+  test:
+    name: Verify source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./...
+      - run: go vet ./...
+
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - goos: linux
@@ -28,71 +41,72 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: go.mod
+          cache: true
 
-      - name: Build sextant binary
+      - name: Build Rove Code
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
+          VERSION: ${{ github.ref_name }}
         run: |
-          OUTNAME="sextant-${{ matrix.goos }}-${{ matrix.goarch }}"
+          OUTNAME="rovecode-${{ matrix.goos }}-${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             OUTNAME="${OUTNAME}.exe"
           fi
-          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
             -o "$OUTNAME" ./cmd/sextant/
           echo "Built: $OUTNAME"
-          ls -lh "$OUTNAME"
 
-      - name: Upload artifact
+      - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: sextant-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: sextant-${{ matrix.goos }}-${{ matrix.goarch }}*
+          name: rovecode-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: rovecode-${{ matrix.goos }}-${{ matrix.goarch }}*
+          if-no-files-found: error
 
   release:
-    name: Create GitHub Release
-    needs: build
+    name: Publish GitHub release
+    needs: [test, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download binaries
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
-      - name: List artifacts
-        run: ls -lh dist/
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum rovecode-* > SHA256SUMS
 
-      - name: Create Release
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "Rovecode ${{ github.ref_name }}"
+          name: "Rove Code ${{ github.ref_name }}"
+          generate_release_notes: true
           body: |
-            ## Rovecode ${{ github.ref_name }}
+            ## Install on macOS or Linux
 
-            ### Install (Mac / Linux)
             ```bash
             curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install.sh | sh
             ```
 
-            ### Manual download
-            Pick the binary for your platform below.
+            Run `rovecode` after installation. The correct binary is selected automatically and verified against `SHA256SUMS`.
 
-            | Platform | File |
-            |----------|------|
-            | macOS Apple Silicon | `sextant-darwin-arm64` |
-            | macOS Intel | `sextant-darwin-amd64` |
-            | Linux x64 | `sextant-linux-amd64` |
-            | Linux ARM64 | `sextant-linux-arm64` |
-            | Windows x64 | `sextant-windows-amd64.exe` |
+            | Platform | Asset |
+            |---|---|
+            | macOS Apple Silicon | `rovecode-darwin-arm64` |
+            | macOS Intel | `rovecode-darwin-amd64` |
+            | Linux x64 | `rovecode-linux-amd64` |
+            | Linux ARM64 | `rovecode-linux-arm64` |
+            | Windows x64 | `rovecode-windows-amd64.exe` |
           files: dist/*
           draft: false
           prerelease: false

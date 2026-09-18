@@ -35,6 +35,16 @@ func (p *SessionPanel) SetSessions(sessions []types.Session) {
 	}
 }
 
+func (p *SessionPanel) SelectID(id string) bool {
+	for i := range p.sessions {
+		if string(p.sessions[i].ID) == id {
+			p.cursor = i
+			return true
+		}
+	}
+	return false
+}
+
 func (p *SessionPanel) SetLinks(links []types.SessionLink) {
 	p.links = links
 }
@@ -342,6 +352,7 @@ func (p *FileTreePanel) Render() string {
 		Height(innerH).
 		Render(content)
 }
+
 // fileIcon returns a Nerd Font glyph for a file or directory.
 // Requires a Nerd Font in the terminal (JetBrainsMono NF, FiraCode NF, etc.)
 func fileIcon(f string) string {

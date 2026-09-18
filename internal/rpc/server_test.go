@@ -1,9 +1,12 @@
 package rpc
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -37,6 +40,36 @@ func TestDispatchAuthAndPing(t *testing.T) {
 	var agents []types.Agent
 	if err := json.Unmarshal(resp.Result, &agents); err != nil || len(agents) == 0 {
 		t.Fatalf("agents %v %v", agents, err)
+	}
+}
+
+func TestSSEFlushesHandshakeImmediately(t *testing.T) {
+	dir := t.TempDir()
+	app, err := core.Open(config.Config{DataDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+
+	s := New(app)
+	httpServer := httptest.NewServer(http.HandlerFunc(s.handleSSE))
+	defer httpServer.Close()
+
+	client := &http.Client{Timeout: time.Second}
+	resp, err := client.Get(httpServer.URL + "?token=" + app.Token)
+	if err != nil {
+		t.Fatalf("SSE handshake blocked: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	line, err := bufio.NewReader(resp.Body).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read handshake: %v", err)
+	}
+	if line != ": connected\n" {
+		t.Fatalf("handshake = %q", line)
 	}
 }
 
@@ -95,7 +128,6 @@ func TestSessionSendUsesCore(t *testing.T) {
 	}
 	params, _ := json.Marshal(map[string]any{
 		"sessionId": sess.ID,
-		"agentId":   agents[0].ID,
 		"content":   "hello",
 	})
 	resp := s.Dispatch(ctx, protocol.Request{Method: protocol.MethodSessionSend, Token: app.Token, Params: params})
