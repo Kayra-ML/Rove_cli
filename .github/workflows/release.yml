@@ -98,7 +98,13 @@ jobs:
             curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install.sh | sh
             ```
 
-            Run `rovecode` after installation. The correct binary is selected automatically and verified against `SHA256SUMS`.
+            ```bash
+            rovecode              # terminal
+            rovecode desktop      # desktop app
+            rovecode daemon       # shared daemon
+            ```
+
+            The installer verifies the binary against `SHA256SUMS`. Desktop is a separate macOS app (`./build-mac.sh` → Applications → `rovecode desktop`).
 
             | Platform | Asset |
             |---|---|

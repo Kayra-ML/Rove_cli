@@ -15,16 +15,24 @@ import (
 )
 
 func main() {
-	// No args or "tui" → launch sextant TUI directly
+	// No args or "tui" → cockpit. "desktop" is forwarded as a product subcommand.
 	if len(os.Args) < 2 || os.Args[1] == "tui" {
-		launchTUI(os.Args[1:])
+		tuiArgs := []string{}
+		if len(os.Args) > 2 {
+			tuiArgs = os.Args[2:]
+		}
+		launchTUI(tuiArgs)
+		return
+	}
+	if os.Args[1] == "desktop" {
+		launchTUI(append([]string{"desktop"}, os.Args[2:]...))
 		return
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
 	switch cmd {
 	case "version":
-		fmt.Println("aether 0.1.0")
+		fmt.Println("rovecode 0.1.2")
 	case "daemon":
 		runDaemon(args)
 	case "ping":
@@ -57,9 +65,10 @@ func main() {
 }
 
 func usage() {
-	fmt.Print(`aether — CLI for the Aether Go Core daemon
+	fmt.Print(`rovecode — CLI for the Rove Code daemon
 
 commands:
+  (none) | tui | desktop
   version
   daemon start|stop
   ping

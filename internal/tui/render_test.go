@@ -100,6 +100,15 @@ func TestPlanTracksRealRunPhases(t *testing.T) {
 	}
 }
 
+func TestDisplayModelHidesFakeProvider(t *testing.T) {
+	if got := displayModel(types.Agent{Provider: "fake", Model: "fake"}); got != "no model configured" {
+		t.Fatalf("fake/fake = %q", got)
+	}
+	if got := displayModel(types.Agent{Provider: "openai", Model: "gpt-5"}); got != "openai/gpt-5" {
+		t.Fatalf("named model = %q", got)
+	}
+}
+
 func TestUsageMessageFeedsRightRail(t *testing.T) {
 	m := NewModel(&IPCClient{})
 	_, _ = m.Update(UsageMsg{PromptTokens: 1200, CompletionTokens: 300, TotalTokens: 1500, Calls: 2})

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Aether — macOS build script
+# Rove Code — macOS desktop build
 # Çalıştır: chmod +x build-mac.sh && ./build-mac.sh
 set -e
 
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
-log()  { echo -e "${CYAN}[aether]${NC} $1"; }
+log()  { echo -e "${CYAN}[rovecode]${NC} $1"; }
 ok()   { echo -e "${GREEN}[ok]${NC} $1"; }
 fail() { echo -e "${RED}[fail]${NC} $1"; exit 1; }
 
@@ -65,7 +65,7 @@ log "Wails build başlıyor (bu 2-3 dakika sürebilir)..."
 wails build -platform darwin/universal -clean 2>&1
 # darwin/universal = hem arm64 (M1/M2/M3) hem amd64 (Intel) destekler
 
-APP_PATH="$SCRIPT_DIR/desktop/build/bin/Aether.app"
+APP_PATH="$SCRIPT_DIR/desktop/build/bin/Rove Code.app"
 if [ ! -d "$APP_PATH" ]; then
   # Wails bazen sadece darwin adıyla koyar
   APP_PATH=$(find "$SCRIPT_DIR/desktop/build/bin" -name "*.app" | head -1)
@@ -77,7 +77,7 @@ ok "App bundle: $APP_PATH"
 
 # ── 7. DMG oluştur ────────────────────────────────────────────────────────────
 log "DMG oluşturuluyor..."
-DMG_PATH="$SCRIPT_DIR/Aether.dmg"
+DMG_PATH="$SCRIPT_DIR/RoveCode.dmg"
 APP_NAME=$(basename "$APP_PATH")
 
 # Geçici mount klasörü
@@ -89,7 +89,7 @@ cp -R "$APP_PATH" "$TMP_DMG/"
 ln -sf /Applications "$TMP_DMG/Applications"
 
 hdiutil create \
-  -volname "Aether" \
+  -volname "Rove Code" \
   -srcfolder "$TMP_DMG" \
   -ov \
   -format UDZO \
@@ -101,7 +101,8 @@ rm -rf "$TMP_DMG"
 ok "DMG hazır: $DMG_PATH"
 echo ""
 echo -e "${GREEN}══════════════════════════════════════${NC}"
-echo -e "${GREEN}  Aether.dmg oluşturuldu!${NC}"
+echo -e "${GREEN}  RoveCode.dmg oluşturuldu!${NC}"
 echo -e "${GREEN}  Konum: $DMG_PATH${NC}"
-echo -e "${GREEN}  Aether.dmg'yi aç → uygulamayı Applications'a sürükle.${NC}"
+echo -e "${GREEN}  DMG'yi aç → Rove Code.app'i Applications'a sürükle.${NC}"
+echo -e "${GREEN}  Sonra: rovecode desktop${NC}"
 echo -e "${GREEN}══════════════════════════════════════${NC}"

@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aether-dev/aether/internal/config"
@@ -27,11 +29,22 @@ var (
 )
 
 func main() {
-	// The release is one self-contained binary. A hidden child mode owns the
-	// shared daemon so `rovecode` works on a clean machine after one install.
-	if len(os.Args) > 1 && os.Args[1] == "daemon" {
-		runBundledDaemon()
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "daemon":
+			runBundledDaemon()
+			return
+		case "desktop":
+			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+			launchDesktop()
+			return
+		case "help", "-h", "--help":
+			printUsage()
+			return
+		case "version":
+			fmt.Printf("rovecode %s\n", version)
+			return
+		}
 	}
 
 	flag.Parse()
@@ -44,7 +57,7 @@ func main() {
 	if *flagListHosts {
 		store, err := sshtunnel.LoadHosts()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "sextant: %v\n", err)
+			fmt.Fprintf(os.Stderr, "rovecode: %v\n", err)
 			os.Exit(1)
 		}
 		if len(store.Hosts) == 0 {
@@ -69,7 +82,7 @@ func main() {
 	if *flagAddHost != "" {
 		parts := strings.SplitN(*flagAddHost, "=", 2)
 		if len(parts) != 2 {
-			fmt.Fprintf(os.Stderr, "sextant: --add-host format: alias=user@host:port\n")
+			fmt.Fprintf(os.Stderr, "rovecode: --add-host format: alias=user@host:port\n")
 			os.Exit(1)
 		}
 		alias := strings.TrimSpace(parts[0])
@@ -87,7 +100,7 @@ func main() {
 			store = &sshtunnel.HostStore{}
 		}
 		if err := store.Add(alias, spec, note); err != nil {
-			fmt.Fprintf(os.Stderr, "sextant: add-host: %v\n", err)
+			fmt.Fprintf(os.Stderr, "rovecode: add-host: %v\n", err)
 			os.Exit(1)
 		}
 		fmt.Printf("saved host: %s → %s\n", alias, spec)
@@ -111,17 +124,17 @@ func main() {
 		if store != nil {
 			if saved, ok := store.Get(*flagHost); ok {
 				spec = saved.Spec
-				fmt.Fprintf(os.Stderr, "sextant: connecting to %s (%s) via SSH tunnel…\n", saved.Alias, spec)
+				fmt.Fprintf(os.Stderr, "rovecode: connecting to %s (%s) via SSH tunnel…\n", saved.Alias, spec)
 			}
 		}
 		t, err := sshtunnel.NewTunnel(spec)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "sextant: invalid host spec: %v\n", err)
+			fmt.Fprintf(os.Stderr, "rovecode: invalid host spec: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "sextant: opening SSH tunnel to %s…\n", spec)
+		fmt.Fprintf(os.Stderr, "rovecode: opening SSH tunnel to %s…\n", spec)
 		if err := t.Open(); err != nil {
-			fmt.Fprintf(os.Stderr, "sextant: SSH tunnel failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "rovecode: SSH tunnel failed: %v\n", err)
 			os.Exit(1)
 		}
 		tunnel = t
@@ -169,7 +182,7 @@ func main() {
 	ipc.SubscribeEvents(p)
 
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "sextant: %v\n", err)
+		fmt.Fprintf(os.Stderr, "rovecode: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -179,9 +192,73 @@ func main() {
 	}
 }
 
+func printUsage() {
+	fmt.Print(`Rove Code — local-first coding agent
+
+Usage:
+  rovecode                 Open the terminal cockpit
+  rovecode desktop         Open the desktop app
+  rovecode daemon          Run the shared daemon in the foreground
+  rovecode --version       Print the installed version
+  rovecode --host alias    Connect to a saved SSH host
+  rovecode --list-hosts    List saved SSH hosts
+  rovecode --add-host alias=user@host:port
+
+The terminal and desktop share the same daemon, sessions, and workspace.
+`)
+}
+
+func launchDesktop() {
+	self, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rovecode: %v\n", err)
+		os.Exit(1)
+	}
+	dir := filepath.Dir(self)
+	candidates := []string{
+		filepath.Join(dir, "Rove Code.app", "Contents", "MacOS", "Rove Code"),
+		filepath.Join(dir, "RoveCode.app", "Contents", "MacOS", "Rove Code"),
+		filepath.Join(dir, "rovecode-desktop"),
+		filepath.Join(dir, "aether-desktop"),
+	}
+	if runtime.GOOS == "darwin" {
+		candidates = append(candidates,
+			"/Applications/Rove Code.app/Contents/MacOS/Rove Code",
+			"/Applications/RoveCode.app/Contents/MacOS/Rove Code",
+		)
+	}
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			cmd := exec.Command(path)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			cmd.Env = os.Environ()
+			if err := cmd.Start(); err != nil {
+				fmt.Fprintf(os.Stderr, "rovecode: desktop: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("opened Rove Code desktop")
+			return
+		}
+	}
+	fmt.Fprintln(os.Stderr, "rovecode: desktop app is not installed yet.")
+	fmt.Fprintln(os.Stderr, "On macOS, build it with ./build-mac.sh and drag Rove Code.app into /Applications.")
+	os.Exit(1)
+}
+
 // showSplash renders the ROVE splash screen briefly, then clears.
 func showSplash() {
-	// Hide cursor
+	restore := func() { fmt.Print("\033[?25h") }
+	defer restore()
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(stop)
+	go func() {
+		<-stop
+		restore()
+		os.Exit(130)
+	}()
 	fmt.Print("\033[?25l")
 	// Clear screen, black bg
 	fmt.Print("\033[2J\033[H")

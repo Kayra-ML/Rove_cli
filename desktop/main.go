@@ -23,7 +23,7 @@ func main() {
 	}
 	app := NewApp(cfg)
 	err = wails.Run(&options.App{
-		Title:            "Aether",
+		Title:            "Rove Code",
 		Width:            1440,
 		Height:           900,
 		MinWidth:         960,
@@ -37,7 +37,7 @@ func main() {
 			Appearance: mac.NSAppearanceNameDarkAqua,
 		},
 		Windows: &windows.Options{Theme: windows.Dark},
-		Linux:   &linux.Options{ProgramName: "aether"},
+		Linux:   &linux.Options{ProgramName: "rovecode"},
 	})
 	if err != nil {
 		log.Fatal(err)

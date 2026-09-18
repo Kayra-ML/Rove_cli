@@ -26,7 +26,7 @@ func main() {
 		os.Exit(1)
 	}
 	_ = daemon.WritePID(cfg.DataDir)
-	fmt.Printf("aetherd listening http=%s ipc=%s data=%s\n", cfg.ListenHTTP, cfg.ListenIPC, cfg.DataDir)
+	fmt.Printf("rovecode daemon listening http=%s ipc=%s data=%s\n", cfg.ListenHTTP, cfg.ListenIPC, cfg.DataDir)
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	<-ch

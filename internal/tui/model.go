@@ -91,6 +91,21 @@ func (m *Model) SetInitialTunnel(t *sshtunnel.Tunnel, alias string) {
 	m.sshPanel.SetTunnel(t, alias)
 }
 
+func displayModel(agent types.Agent) string {
+	model := strings.TrimSpace(agent.Model)
+	provider := strings.TrimSpace(agent.Provider)
+	if model == "" || model == "fake" {
+		if provider == "" || provider == "fake" {
+			return "no model configured"
+		}
+		return provider
+	}
+	if provider == "" || provider == "fake" || provider == model {
+		return model
+	}
+	return provider + "/" + model
+}
+
 func (m *Model) SetStartupError(err error) {
 	if err == nil {
 		return
@@ -211,11 +226,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err == nil {
 			m.agents = msg.Agents
 			if len(msg.Agents) > 0 {
-				model := msg.Agents[0].Model
-				if msg.Agents[0].Provider != "" {
-					model = msg.Agents[0].Provider + "/" + model
-				}
-				m.planPanel.SetModelName(model)
+				m.planPanel.SetModelName(displayModel(msg.Agents[0]))
 			}
 		}
 
