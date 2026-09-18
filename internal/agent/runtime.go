@@ -16,6 +16,7 @@ import (
 	"github.com/aether-dev/aether/internal/store"
 	"github.com/aether-dev/aether/internal/tool"
 	"github.com/aether-dev/aether/internal/types"
+	"github.com/aether-dev/aether/internal/checkpoint"
 )
 
 type Runtime struct {
@@ -25,12 +26,19 @@ type Runtime struct {
 	memory   *memory.System
 	router   *provider.Router
 	tools    *tool.Runtime
+	checkpt  *checkpoint.Manager
 	mu       sync.Mutex
 	cancels  map[types.ID]context.CancelFunc
 }
 
 func New(s *store.Store, bus *eventbus.Bus, sess *session.Manager, mem *memory.System, r *provider.Router, t *tool.Runtime) *Runtime {
 	return &Runtime{store: s, bus: bus, sessions: sess, memory: mem, router: r, tools: t, cancels: map[types.ID]context.CancelFunc{}}
+}
+
+// SetCheckpointManager wires in the checkpoint manager for auto-snapshotting
+// before mutating tool calls (file writes, git commits, shell exec).
+func (rt *Runtime) SetCheckpointManager(c *checkpoint.Manager) {
+	rt.checkpt = c
 }
 
 func (rt *Runtime) Upsert(ctx context.Context, a types.Agent) (types.Agent, error) {
@@ -186,6 +194,10 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 			if rt.bus != nil {
 				rt.bus.Publish(types.Event{Type: types.EventToolStart, Topic: "session." + string(req.SessionID), Payload: map[string]any{"name": tc.Name}})
 			}
+			// Auto-checkpoint before any tool call that mutates the workspace.
+			if req.Workspace != "" && rt.checkpt != nil && isMutatingTool(tc.Name) {
+				_, _ = rt.checkpt.Take(req.Workspace, "auto:"+tc.Name)
+			}
 			res, callErr := rt.tools.Call(ctx, tc.Name, tool.Context{
 				AgentID: req.AgentID, WorkspaceID: req.WorkspaceID, Workspace: req.Workspace,
 				CardID: req.CardID, SessionID: req.SessionID,
@@ -289,6 +301,20 @@ func FormatRunError(err error) string {
 func isFileEditTool(name string) bool {
 	switch name {
 	case "write_file", "patch_file", "create_file", "edit_file", "replace_file", "append_file":
+		return true
+	}
+	return false
+}
+
+// isMutatingTool returns true for tool names that mutate the workspace:
+// file writes, git commits, and shell execution.
+func isMutatingTool(name string) bool {
+	if isFileEditTool(name) {
+		return true
+	}
+	switch name {
+	case "shell", "run_command", "exec", "bash",
+		"git_commit", "git_commit_all", "git_push":
 		return true
 	}
 	return false

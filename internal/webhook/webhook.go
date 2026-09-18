@@ -94,15 +94,18 @@ func (e *Engine) Process(ctx context.Context, eventType string, body []byte, sig
 		if r.EventType != "*" && r.EventType != eventType {
 			continue
 		}
-		// Verify HMAC signature if secret is configured.
-		if r.Secret != "" && sig != "" {
-			if !VerifySignature(body, r.Secret, sig) {
+		// Verify HMAC signature if a secret is configured.
+		// When a secret is set the signature header is REQUIRED — an absent or
+		// blank sig is treated as a verification failure so that an attacker
+		// cannot bypass HMAC by simply omitting the header.
+		if r.Secret != "" {
+			if sig == "" || !VerifySignature(body, r.Secret, sig) {
 				results = append(results, TriggerResult{
 					RuleID:    r.ID,
 					RuleName:  r.Name,
 					AgentID:   r.AgentID,
 					Triggered: false,
-					Message:   "signature mismatch",
+					Message:   "signature missing or mismatch",
 				})
 				continue
 			}

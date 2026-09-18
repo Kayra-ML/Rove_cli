@@ -126,6 +126,7 @@ func Open(cfg config.Config) (*App, error) {
 	sess := session.New(st, bus)
 	mem := memory.New(st)
 	agents := agent.New(st, bus, sess, mem, router, tools)
+	agents.SetCheckpointManager(checkpoint.New())
 	k := kanban.New(st, bus)
 	j := judge.New(qualitygate.New())
 	ws := workspace.New(st, git)
