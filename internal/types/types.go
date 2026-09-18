@@ -10,6 +10,33 @@ func (id ID) IsZero() bool { return id == "" }
 
 // --- Agent ---
 
+type AgentRole string
+
+const (
+	RoleLeader     AgentRole = "leader"
+	RoleDeveloper  AgentRole = "developer"
+	RoleReviewer   AgentRole = "reviewer"
+	RoleResearcher AgentRole = "researcher"
+	RoleTester     AgentRole = "tester"
+	RoleDesigner   AgentRole = "designer"
+)
+
+// AgentProfile is a reusable configuration template. When IsDefault is true
+// it is automatically applied to all newly opened sessions.
+type AgentProfile struct {
+	ID           ID        `json:"id"`
+	Name         string    `json:"name"`
+	Role         AgentRole `json:"role"`
+	SystemPrompt string    `json:"systemPrompt"`
+	Model        string    `json:"model"`
+	Provider     string    `json:"provider"`
+	IsDefault    bool      `json:"isDefault"`  // if true, auto-applied to new sessions
+	IsLeader     bool      `json:"isLeader"`   // only one leader per workspace
+	Color        string    `json:"color,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
 type AgentStatus string
 
 const (
@@ -20,16 +47,17 @@ const (
 )
 
 type Agent struct {
-	ID          ID          `json:"id"`
-	Name        string      `json:"name"`
-	Profile     string      `json:"profile"`
-	Model       string      `json:"model"`
-	Provider    string      `json:"provider"`
-	Status      AgentStatus `json:"status"`
-	WorkspaceID ID          `json:"workspaceId"`
-	SystemPrompt string     `json:"systemPrompt,omitempty"`
-	CreatedAt   time.Time   `json:"createdAt"`
-	UpdatedAt   time.Time   `json:"updatedAt"`
+	ID           ID          `json:"id"`
+	Name         string      `json:"name"`
+	Role         AgentRole   `json:"role"`
+	Profile      string      `json:"profile"`
+	Model        string      `json:"model"`
+	Provider     string      `json:"provider"`
+	Status       AgentStatus `json:"status"`
+	WorkspaceID  ID          `json:"workspaceId"`
+	SystemPrompt string      `json:"systemPrompt,omitempty"`
+	CreatedAt    time.Time   `json:"createdAt"`
+	UpdatedAt    time.Time   `json:"updatedAt"`
 }
 
 // --- Session / Chat ---
@@ -50,6 +78,15 @@ type Session struct {
 	WorkspaceID ID        `json:"workspaceId"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+// SessionLink connects two sessions so they can relay messages to each other.
+type SessionLink struct {
+	ID        ID        `json:"id"`
+	SessionA  ID        `json:"sessionA"`
+	SessionB  ID        `json:"sessionB"`
+	Label     string    `json:"label,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type ToolCall struct {

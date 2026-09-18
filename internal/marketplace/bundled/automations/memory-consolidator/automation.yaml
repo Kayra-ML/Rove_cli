@@ -1,0 +1,12 @@
+name: memory-consolidator
+version: "1.0.0"
+author: Aether
+description: "Aynı scope'taki benzer memory entry'leri tespit eder, tekrarları birleştirir ve gereksizleri temizler."
+kind: automation
+trigger:
+  every_seconds: 86400
+permissions:
+  shell: false
+  network: false
+  git: false
+tags: [memory, consolidate, cleanup]

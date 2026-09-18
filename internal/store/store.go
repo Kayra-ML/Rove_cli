@@ -251,6 +251,28 @@ func (s *Store) migrate() error {
 			args TEXT NOT NULL DEFAULT '[]',
 			env TEXT NOT NULL DEFAULT '{}'
 		)`,
+		`CREATE TABLE IF NOT EXISTS agent_profiles (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			role TEXT NOT NULL DEFAULT 'developer',
+			system_prompt TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			is_default INTEGER NOT NULL DEFAULT 0,
+			is_leader INTEGER NOT NULL DEFAULT 0,
+			color TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS session_links (
+			id TEXT PRIMARY KEY,
+			session_a TEXT NOT NULL,
+			session_b TEXT NOT NULL,
+			label TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			UNIQUE(session_a, session_b)
+		)`,
+		`ALTER TABLE agents ADD COLUMN role TEXT NOT NULL DEFAULT 'developer'`,
 	}
 	// Split: DDL statements run in a transaction; ALTER TABLE statements
 	// run individually outside it (SQLite ignores "duplicate column" errors).

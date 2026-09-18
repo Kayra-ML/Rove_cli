@@ -160,4 +160,28 @@ export type AutomationTemplate = {
   installed: boolean;
 };
 
+export type AgentRole = "leader" | "developer" | "reviewer" | "researcher" | "tester" | "designer";
+
+export type AgentProfile = {
+  id: ID;
+  name: string;
+  role: AgentRole;
+  systemPrompt: string;
+  model: string;
+  provider: string;
+  isDefault: boolean;
+  isLeader: boolean;
+  color?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type SessionLink = {
+  id: ID;
+  sessionA: ID;
+  sessionB: ID;
+  label?: string;
+  createdAt?: string;
+};
+
 export type RpcResponse<T> = { id?: string; ok: boolean; result?: T; error?: string };

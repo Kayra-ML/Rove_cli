@@ -1,0 +1,12 @@
+name: branch-cleanup
+version: "1.0.0"
+author: Aether
+description: "Main/master'a merge edilmiş local branch'leri siler; temizlenen branch listesini karta log olarak yazar."
+kind: automation
+trigger:
+  every_seconds: 21600
+permissions:
+  shell: true
+  network: false
+  git: true
+tags: [git, cleanup, branches]

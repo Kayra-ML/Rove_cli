@@ -1,0 +1,12 @@
+name: git-sync
+version: "1.0.0"
+author: Aether
+description: "Aktif workspace branch'lerini pull/push eder; çakışma varsa ilgili karta log yazar."
+kind: automation
+trigger:
+  every_seconds: 300
+permissions:
+  shell: true
+  network: true
+  git: true
+tags: [git, sync, branches]

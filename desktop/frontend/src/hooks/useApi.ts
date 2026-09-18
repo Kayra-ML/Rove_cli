@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { rpc, subscribeEvents } from "~/lib/rpc";
 import type {
-  Agent, Card, Goal, InstalledSkill, Message,
-  Provider, Session, Workspace,
+  Agent, AgentProfile, Card, Goal, InstalledSkill, Message,
+  Provider, Session, SessionLink, Workspace,
 } from "~/lib/types";
 
 function quiet<T>(fallback: T) {
@@ -97,6 +97,25 @@ export function useTerminals() {
     try { return await rpc<unknown[]>("terminal.list"); } catch { return quiet<unknown[]>([])(null); }
   }, []);
   return { reload };
+}
+
+export function useProfiles() {
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  const reload = useCallback(async () => {
+    try { setProfiles(await rpc<AgentProfile[]>("profile.list") ?? []); } catch { /* keep */ }
+  }, []);
+  useEffect(() => { void reload(); }, [reload]);
+  return { profiles, reload };
+}
+
+export function useSessionLinks(sessionId: string | null) {
+  const [links, setLinks] = useState<SessionLink[]>([]);
+  const reload = useCallback(async () => {
+    if (!sessionId) { setLinks([]); return; }
+    try { setLinks(await rpc<SessionLink[]>("session.linked", { sessionId }) ?? []); } catch { /* keep */ }
+  }, [sessionId]);
+  useEffect(() => { void reload(); }, [reload]);
+  return { links, reload };
 }
 
 export function useSSE(filter: string, onEvent: (ev: unknown) => void) {
