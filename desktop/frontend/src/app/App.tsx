@@ -8,6 +8,7 @@ import { Settings } from "./Settings";
 import { WorkspacePanel, SessionPanel } from "./Workspace";
 import { FileTree } from "./FileTree";
 import { SessionRail } from "./SessionRail";
+import { CheckpointPanel } from "./CheckpointPanel";
 import { SkillMarket } from "./SkillMarket";
 import { CardDetail } from "./CardDetail";
 import { Icon } from "./Icons";
@@ -325,6 +326,7 @@ export function App() {
                 <div style={{ fontSize: 10, marginTop: 2 }}>branch: {workspace.defaultBranch}</div>
               </div>
               <FileTree root={workspace.path} />
+              <CheckpointPanel workspacePath={workspace.path} />
             </>
           )}
           <div className="aux-bottom">

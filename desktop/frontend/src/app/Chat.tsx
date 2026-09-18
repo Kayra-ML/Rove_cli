@@ -191,6 +191,19 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenBoard,
         }
         undoStack.current.push(messages.slice(keep));
         await applyKeep(keep);
+        // If a workspace is active, also restore the most recent file snapshot.
+        if (workspaceId) {
+          try {
+            type Snap = { ref: string };
+            const snaps = await rpc<Snap[]>("checkpoint.list", { path: workspaceId });
+            if (Array.isArray(snaps) && snaps.length > 0) {
+              await rpc("checkpoint.restore", { path: workspaceId, ref: snaps[0].ref });
+              toast("Workspace snapshot restored", "ok");
+            }
+          } catch {
+            // checkpoint restore is best-effort; don't block undo
+          }
+        }
         return;
       }
       case "redo": {
