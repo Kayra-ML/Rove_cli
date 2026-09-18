@@ -752,21 +752,59 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		return core.MustJSON(out), err
 	case protocol.MethodFileTree:
 		var p struct {
-			Path string `json:"path"`
+			Path        string   `json:"path"`
+			WorkspaceID types.ID `json:"workspaceId"`
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, err
 		}
-		out, err := a.FileTree(p.Path, 800)
+		// Restrict tree walk to a registered workspace root so arbitrary
+		// directory enumeration is not possible via this RPC.
+		root := p.Path
+		if p.WorkspaceID != "" {
+			ws, werr := a.WS.Get(ctx, p.WorkspaceID)
+			if werr != nil {
+				return nil, fmt.Errorf("workspace not found: %w", werr)
+			}
+			root = ws.Path
+		} else if root == "" {
+			return nil, fmt.Errorf("path or workspaceId required")
+		}
+		out, err := a.FileTree(root, 800)
 		return core.MustJSON(out), err
 	case protocol.MethodFileRead:
 		var p struct {
-			Path string `json:"path"`
+			Path        string   `json:"path"`
+			WorkspaceID types.ID `json:"workspaceId"`
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, err
 		}
-		b, err := os.ReadFile(p.Path)
+		// Resolve path relative to workspace when a workspaceId is given.
+		// When no workspace is set (e.g. direct CLI use) we still validate
+		// that the path is absolute and exists, but we cannot bound it further.
+		resolved := p.Path
+		if p.WorkspaceID != "" {
+			ws, werr := a.WS.Get(ctx, p.WorkspaceID)
+			if werr != nil {
+				return nil, fmt.Errorf("workspace not found: %w", werr)
+			}
+			clean := filepath.Clean(p.Path)
+			if !filepath.IsAbs(clean) {
+				clean = filepath.Join(ws.Path, clean)
+			}
+			abs, aerr := filepath.Abs(clean)
+			if aerr != nil {
+				return nil, aerr
+			}
+			wsAbs, _ := filepath.Abs(ws.Path)
+			rel, rerr := filepath.Rel(wsAbs, abs)
+			if rerr != nil || strings.HasPrefix(rel, "..") {
+				return nil, fmt.Errorf("path escapes workspace")
+			}
+			resolved = abs
+		}
+		b, err := os.ReadFile(resolved)
 		if err != nil {
 			return nil, err
 		}
@@ -1067,6 +1105,12 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			return nil, err
 		}
 		blocks := strings.Split(p.Markdown, "\n---\n")
+		validRoles := map[types.MessageRole]struct{}{
+			types.RoleUser:      {},
+			types.RoleAssistant: {},
+			types.RoleSystem:    {},
+			types.RoleTool:      {},
+		}
 		for _, block := range blocks {
 			block = strings.TrimSpace(block)
 			if block == "" {
@@ -1086,9 +1130,15 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			if roleLine == "" || content == "" {
 				continue
 			}
+			role := types.MessageRole(roleLine)
+			if _, ok := validRoles[role]; !ok {
+				// Skip messages with unrecognised roles — prevents injection
+				// of arbitrary role strings from crafted import payloads.
+				continue
+			}
 			msg := types.Message{
 				SessionID: sess.ID,
-				Role:      types.MessageRole(roleLine),
+				Role:      role,
 				Content:   content,
 			}
 			if _, err := a.Sess.Append(ctx, msg); err != nil {
@@ -1153,6 +1203,18 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		var srv types.MCPServerConfig
 		if err := json.Unmarshal(req.Params, &srv); err != nil {
 			return nil, err
+		}
+		// Basic validation: Command must be a non-empty, non-shell-injection string.
+		// It must not contain shell metacharacters since it is passed directly to
+		// exec.CommandContext (not a shell), but a future code path might change
+		// that, so we reject obviously dangerous values early.
+		if srv.Command == "" {
+			return nil, fmt.Errorf("mcp: command is required")
+		}
+		for _, bad := range []string{";", "&&", "||", "|", "`", "$(", "${", "\n", "\r"} {
+			if strings.Contains(srv.Command, bad) {
+				return nil, fmt.Errorf("mcp: command contains disallowed characters")
+			}
 		}
 		if srv.ID == "" {
 			srv.ID = string(id.NewID())

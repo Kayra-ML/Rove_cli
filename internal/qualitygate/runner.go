@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aether-dev/aether/internal/types"
@@ -27,9 +29,26 @@ func (r *Runner) runOne(ctx context.Context, g types.QualityGate, workDir string
 		res.Error = "empty command"
 		return res
 	}
-	dir := g.WorkDir
-	if dir == "" {
-		dir = workDir
+	dir := workDir // default: caller-supplied workspace root
+	if g.WorkDir != "" {
+		// Resolve gate's WorkDir relative to the workspace root and ensure it
+		// does not escape — prevents path traversal via crafted gate configs.
+		base, _ := filepath.Abs(workDir)
+		candidate := g.WorkDir
+		if !filepath.IsAbs(candidate) {
+			candidate = filepath.Join(base, candidate)
+		}
+		abs, err := filepath.Abs(candidate)
+		if err != nil {
+			res.Error = "invalid WorkDir: " + err.Error()
+			return res
+		}
+		rel, err := filepath.Rel(base, abs)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			res.Error = "WorkDir escapes workspace root"
+			return res
+		}
+		dir = abs
 	}
 	timeout := time.Duration(g.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
