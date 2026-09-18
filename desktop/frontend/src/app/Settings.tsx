@@ -308,6 +308,8 @@ export function Settings({ onClose, onSelectWorkspace, initialSection = "appeara
 
             {section === "automation" && <Automation />}
 
+            {section === "profiles" && <ProfilePanel />}
+
             {section === "memory" && <Memory workspaceId={workspace?.id} sessionId={sessionId} />}
 
             {section === "roster" && <AgentRoster />}
