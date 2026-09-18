@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build sextant binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          OUTNAME="sextant-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            OUTNAME="${OUTNAME}.exe"
+          fi
+          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
+            -o "$OUTNAME" ./cmd/sextant/
+          echo "Built: $OUTNAME"
+          ls -lh "$OUTNAME"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sextant-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: sextant-${{ matrix.goos }}-${{ matrix.goarch }}*
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Rovecode ${{ github.ref_name }}"
+          body: |
+            ## Rovecode ${{ github.ref_name }}
+
+            ### Install (Mac / Linux)
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install.sh | sh
+            ```
+
+            ### Manual download
+            Pick the binary for your platform below.
+
+            | Platform | File |
+            |----------|------|
+            | macOS Apple Silicon | `sextant-darwin-arm64` |
+            | macOS Intel | `sextant-darwin-amd64` |
+            | Linux x64 | `sextant-linux-amd64` |
+            | Linux ARM64 | `sextant-linux-arm64` |
+            | Windows x64 | `sextant-windows-amd64.exe` |
+          files: dist/*
+          draft: false
+          prerelease: false
