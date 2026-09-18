@@ -218,66 +218,169 @@ func (p *FileTreePanel) Render() string {
 		Height(innerH).
 		Render(content)
 }
-// fileIcon returns a unicode icon for a file or directory path.
+// fileIcon returns a Nerd Font glyph for a file or directory.
+// Requires a Nerd Font in the terminal (JetBrainsMono NF, FiraCode NF, etc.)
 func fileIcon(f string) string {
+	// Directories
 	if strings.HasSuffix(f, "/") {
-		return "📁"
+		return "\uf07b" // nf-fa-folder
 	}
-	ext := ""
-	if idx := strings.LastIndex(f, "."); idx != -1 {
-		ext = strings.ToLower(f[idx:])
-	}
-	switch ext {
-	case ".go":
-		return "🐹"
-	case ".ts", ".tsx":
-		return "🔷"
-	case ".js", ".jsx", ".mjs", ".cjs":
-		return "🟨"
-	case ".py", ".pyw":
-		return "🐍"
-	case ".rs":
-		return "⚙️"
-	case ".sh", ".bash", ".zsh", ".fish":
-		return "🐚"
-	case ".json", ".jsonc":
-		return "📋"
-	case ".yaml", ".yml":
-		return "📐"
-	case ".toml":
-		return "🔧"
-	case ".env":
-		return "🔑"
-	case ".md", ".mdx":
-		return "📝"
-	case ".html", ".htm":
-		return "🌐"
-	case ".css", ".scss", ".sass", ".less":
-		return "🎨"
-	case ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp":
-		return "🖼️"
-	case ".mod", ".sum", ".lock":
-		return "📦"
-	case ".dockerfile", ".containerfile":
-		return "🐳"
-	}
+
+	// Special filenames first
 	base := f
 	if idx := strings.LastIndex(f, "/"); idx != -1 {
 		base = f[idx+1:]
 	}
 	switch strings.ToLower(base) {
-	case "dockerfile":
-		return "🐳"
+	case "dockerfile", ".dockerfile":
+		return "\uf308" // nf-linux-docker
 	case "makefile", "gnumakefile":
-		return "🔨"
-	case "readme", "readme.md", "readme.txt":
-		return "📖"
-	case "license", "licence":
-		return "⚖️"
-	case ".gitignore", ".gitattributes":
-		return "🚫"
-	case "package.json", "go.mod", "go.sum", "cargo.toml", "cargo.lock":
-		return "📦"
+		return "\uf0ad" // nf-fa-wrench
+	case "readme", "readme.md", "readme.txt", "readme.rst":
+		return "\uf48a" // nf-oct-book
+	case "license", "licence", "license.md", "licence.md":
+		return "\uf22d" // nf-fa-balance_scale
+	case ".gitignore", ".gitattributes", ".gitmodules":
+		return "\ue702" // nf-dev-git
+	case "package.json":
+		return "\ue60c" // nf-dev-nodejs_small
+	case "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb":
+		return "\uf023" // nf-fa-lock
+	case "go.mod", "go.sum":
+		return "\ue627" // nf-dev-go
+	case "cargo.toml", "cargo.lock":
+		return "\ue7a8" // nf-dev-rust
+	case "tsconfig.json", "tsconfig.node.json":
+		return "\ue628" // nf-dev-typescript
+	case ".eslintrc", ".eslintrc.js", ".eslintrc.json", ".eslintrc.yaml":
+		return "\ue655" // nf-seti-eslint
+	case ".prettierrc", ".prettierrc.json", ".prettierrc.js":
+		return "\ue6b4" // nf-seti-prettier
+	case "dockerfile.dev", "docker-compose.yml", "docker-compose.yaml":
+		return "\uf308" // nf-linux-docker
+	case ".env", ".env.local", ".env.production", ".env.development":
+		return "\uf013" // nf-fa-cog
 	}
-	return "📄"
+
+	// Extension map
+	ext := ""
+	if idx := strings.LastIndex(f, "."); idx != -1 {
+		ext = strings.ToLower(f[idx:])
+	}
+
+	switch ext {
+	// Go
+	case ".go":
+		return "\ue627" // nf-dev-go
+	// TypeScript
+	case ".ts":
+		return "\ue628" // nf-dev-typescript
+	case ".tsx":
+		return "\ue625" // nf-dev-react (tsx = react component)
+	// JavaScript
+	case ".js", ".mjs", ".cjs":
+		return "\ue60c" // nf-dev-javascript
+	case ".jsx":
+		return "\ue625" // nf-dev-react
+	// Python
+	case ".py", ".pyw", ".pyx":
+		return "\ue606" // nf-dev-python
+	// Rust
+	case ".rs":
+		return "\ue7a8" // nf-dev-rust
+	// Ruby
+	case ".rb", ".erb":
+		return "\ue21e" // nf-dev-ruby
+	// Java / Kotlin
+	case ".java":
+		return "\ue738" // nf-dev-java
+	case ".kt", ".kts":
+		return "\ue634" // nf-dev-kotlin
+	// C / C++
+	case ".c", ".h":
+		return "\ue61e" // nf-dev-c
+	case ".cpp", ".cc", ".cxx", ".hpp":
+		return "\ue61d" // nf-dev-cplusplus
+	// C#
+	case ".cs":
+		return "\uf81a" // nf-mdi-language_csharp
+	// Shell
+	case ".sh", ".bash":
+		return "\uf489" // nf-dev-terminal
+	case ".zsh":
+		return "\uf489"
+	case ".fish":
+		return "\uf489"
+	case ".ps1", ".psm1":
+		return "\uf489"
+	// Web
+	case ".html", ".htm":
+		return "\uf13b" // nf-fa-html5
+	case ".css":
+		return "\uf13c" // nf-fa-css3
+	case ".scss", ".sass":
+		return "\ue603" // nf-dev-sass
+	case ".less":
+		return "\ue758" // nf-dev-less
+	// Config / data
+	case ".json", ".jsonc":
+		return "\ue60b" // nf-seti-json
+	case ".yaml", ".yml":
+		return "\ue6a8" // nf-seti-yaml
+	case ".toml":
+		return "\ue6b2" // nf-seti-config
+	case ".xml":
+		return "\uf72d" // nf-mdi-xml
+	case ".csv":
+		return "\uf1c3" // nf-fa-file_excel_o
+	// Docs
+	case ".md", ".mdx":
+		return "\ue73e" // nf-dev-markdown
+	case ".txt":
+		return "\uf15c" // nf-fa-file_text_o
+	case ".pdf":
+		return "\uf1c1" // nf-fa-file_pdf_o
+	// Images
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff":
+		return "\uf1c5" // nf-fa-file_image_o
+	case ".svg":
+		return "\ueb8b" // nf-cod-file_media
+	case ".ico":
+		return "\uf1c5"
+	// Go module
+	case ".mod", ".sum":
+		return "\ue627"
+	// Lock files
+	case ".lock":
+		return "\uf023"
+	// Docker
+	case ".dockerfile":
+		return "\uf308"
+	// SQL
+	case ".sql":
+		return "\uf1c0" // nf-fa-database
+	// Wasm
+	case ".wasm":
+		return "\uf7a3" // nf-fa-cube
+	// Vim
+	case ".vim":
+		return "\ue62b" // nf-dev-vim
+	// Lua
+	case ".lua":
+		return "\ue620" // nf-dev-lua
+	// Dart / Flutter
+	case ".dart":
+		return "\ue798" // nf-dev-dart
+	// Swift
+	case ".swift":
+		return "\ue755" // nf-dev-swift
+	// PHP
+	case ".php":
+		return "\ue608" // nf-dev-php
+	// Binary / compiled
+	case ".exe", ".bin", ".out", ".elf":
+		return "\uf2d0" // nf-mdi-application
+	}
+
+	return "\uf15b" // nf-fa-file (default)
 }
