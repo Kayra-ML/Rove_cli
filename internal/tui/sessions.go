@@ -191,14 +191,10 @@ func (p *FileTreePanel) Render() string {
 		if strings.HasSuffix(f, "/") {
 			depth--
 		}
-		indent := strings.Repeat(" ", depth)
+		indent := strings.Repeat("  ", depth)
 
-		// Icon
-		icon := "·"
-		if strings.HasSuffix(f, "/") {
-			icon = "▸"
-			f = strings.TrimSuffix(f, "/")
-		}
+		// Icon by type / extension
+		icon := fileIcon(f)
 
 		label := fmt.Sprintf("%s%s %s", indent, icon, f)
 		if len(label) > innerW-1 {
@@ -221,4 +217,67 @@ func (p *FileTreePanel) Render() string {
 		Width(innerW).
 		Height(innerH).
 		Render(content)
+}
+// fileIcon returns a unicode icon for a file or directory path.
+func fileIcon(f string) string {
+	if strings.HasSuffix(f, "/") {
+		return "📁"
+	}
+	ext := ""
+	if idx := strings.LastIndex(f, "."); idx != -1 {
+		ext = strings.ToLower(f[idx:])
+	}
+	switch ext {
+	case ".go":
+		return "🐹"
+	case ".ts", ".tsx":
+		return "🔷"
+	case ".js", ".jsx", ".mjs", ".cjs":
+		return "🟨"
+	case ".py", ".pyw":
+		return "🐍"
+	case ".rs":
+		return "⚙️"
+	case ".sh", ".bash", ".zsh", ".fish":
+		return "🐚"
+	case ".json", ".jsonc":
+		return "📋"
+	case ".yaml", ".yml":
+		return "📐"
+	case ".toml":
+		return "🔧"
+	case ".env":
+		return "🔑"
+	case ".md", ".mdx":
+		return "📝"
+	case ".html", ".htm":
+		return "🌐"
+	case ".css", ".scss", ".sass", ".less":
+		return "🎨"
+	case ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp":
+		return "🖼️"
+	case ".mod", ".sum", ".lock":
+		return "📦"
+	case ".dockerfile", ".containerfile":
+		return "🐳"
+	}
+	base := f
+	if idx := strings.LastIndex(f, "/"); idx != -1 {
+		base = f[idx+1:]
+	}
+	switch strings.ToLower(base) {
+	case "dockerfile":
+		return "🐳"
+	case "makefile", "gnumakefile":
+		return "🔨"
+	case "readme", "readme.md", "readme.txt":
+		return "📖"
+	case "license", "licence":
+		return "⚖️"
+	case ".gitignore", ".gitattributes":
+		return "🚫"
+	case "package.json", "go.mod", "go.sum", "cargo.toml", "cargo.lock":
+		return "📦"
+	}
+	return "📄"
 }
