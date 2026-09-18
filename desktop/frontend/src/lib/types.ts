@@ -160,7 +160,7 @@ export type AutomationTemplate = {
   installed: boolean;
 };
 
-export type AgentRole = "leader" | "developer" | "reviewer" | "researcher" | "tester" | "designer";
+export type AgentRole = "leader" | "frontend" | "backend" | "developer" | "designer" | "tester" | "debugger" | "reviewer" | "researcher";
 
 export type AgentProfile = {
   id: ID;

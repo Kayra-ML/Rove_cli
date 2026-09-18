@@ -14,11 +14,14 @@ type AgentRole string
 
 const (
 	RoleLeader     AgentRole = "leader"
+	RoleFrontend   AgentRole = "frontend"
+	RoleBackend    AgentRole = "backend"
 	RoleDeveloper  AgentRole = "developer"
+	RoleDesigner   AgentRole = "designer"
+	RoleTester     AgentRole = "tester"
+	RoleDebugger   AgentRole = "debugger"
 	RoleReviewer   AgentRole = "reviewer"
 	RoleResearcher AgentRole = "researcher"
-	RoleTester     AgentRole = "tester"
-	RoleDesigner   AgentRole = "designer"
 )
 
 // AgentProfile is a reusable configuration template. When IsDefault is true
