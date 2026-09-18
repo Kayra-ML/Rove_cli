@@ -109,6 +109,25 @@ func TestDisplayModelHidesFakeProvider(t *testing.T) {
 	}
 }
 
+func TestSetupModeDoesNotSendChat(t *testing.T) {
+	m := NewModel(&IPCClient{})
+	m.setupMode = true
+	m.inputBar.input.SetValue("openai gpt-4o sk-test-key")
+	cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("setup did not schedule provider save")
+	}
+	if m.setupMode {
+		t.Fatal("setup mode should clear after enter")
+	}
+	if len(m.messagesPanel.messages) != 0 {
+		t.Fatalf("secret leaked into chat: %#v", m.messagesPanel.messages)
+	}
+	if m.pendingPrompt != "" {
+		t.Fatalf("setup treated as a prompt: %q", m.pendingPrompt)
+	}
+}
+
 func TestUsageMessageFeedsRightRail(t *testing.T) {
 	m := NewModel(&IPCClient{})
 	_, _ = m.Update(UsageMsg{PromptTokens: 1200, CompletionTokens: 300, TotalTokens: 1500, Calls: 2})

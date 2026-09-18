@@ -1,12 +1,31 @@
 package types
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type ID string
 
 func (id ID) String() string { return string(id) }
 
 func (id ID) IsZero() bool { return id == "" }
+
+func NormalizeProviderKind(k ProviderKind) ProviderKind {
+	switch strings.ToLower(strings.TrimSpace(string(k))) {
+	case "openai", "openai_compat", "openai-compat", "openai-compatible", "openai-compat-v1":
+		return ProviderOpenAICompat
+	case "anthropic":
+		return ProviderAnthropic
+	case "fake":
+		return ProviderFake
+	default:
+		if k == "" {
+			return ProviderOpenAICompat
+		}
+		return k
+	}
+}
 
 // --- Agent ---
 
@@ -33,8 +52,8 @@ type AgentProfile struct {
 	SystemPrompt string    `json:"systemPrompt"`
 	Model        string    `json:"model"`
 	Provider     string    `json:"provider"`
-	IsDefault    bool      `json:"isDefault"`  // if true, auto-applied to new sessions
-	IsLeader     bool      `json:"isLeader"`   // only one leader per workspace
+	IsDefault    bool      `json:"isDefault"` // if true, auto-applied to new sessions
+	IsLeader     bool      `json:"isLeader"`  // only one leader per workspace
 	Color        string    `json:"color,omitempty"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
@@ -161,31 +180,31 @@ type LogEntry struct {
 }
 
 type Card struct {
-	ID                 ID            `json:"id"`
-	Title              string        `json:"title"`
-	Description        string        `json:"description"`
-	Column             KanbanColumn  `json:"column"`
-	AssigneeAgentID    ID            `json:"assigneeAgentId,omitempty"`
-	Profile            string        `json:"profile"`
-	Model              string        `json:"model"`
-	Dependencies       []ID          `json:"dependencies,omitempty"`
-	AcceptanceCriteria []string      `json:"acceptanceCriteria,omitempty"`
-	GoalID             ID            `json:"goalId,omitempty"`
-	GoalMode           bool          `json:"goalMode"`
-	Status             string        `json:"status"`
-	TerminalID         ID            `json:"terminalId,omitempty"`
-	GitBranch          string        `json:"gitBranch,omitempty"`
-	WorktreePath       string        `json:"worktreePath,omitempty"`
-	ReviewState        ReviewState   `json:"reviewState,omitempty"`
-	Artifacts          []Artifact    `json:"artifacts,omitempty"`
-	Logs               []LogEntry    `json:"logs,omitempty"`
-	WorkspaceID        ID            `json:"workspaceId"`
-	SessionID          ID            `json:"sessionId,omitempty"`
-	LeaseHolder        string        `json:"leaseHolder,omitempty"`
+	ID                 ID           `json:"id"`
+	Title              string       `json:"title"`
+	Description        string       `json:"description"`
+	Column             KanbanColumn `json:"column"`
+	AssigneeAgentID    ID           `json:"assigneeAgentId,omitempty"`
+	Profile            string       `json:"profile"`
+	Model              string       `json:"model"`
+	Dependencies       []ID         `json:"dependencies,omitempty"`
+	AcceptanceCriteria []string     `json:"acceptanceCriteria,omitempty"`
+	GoalID             ID           `json:"goalId,omitempty"`
+	GoalMode           bool         `json:"goalMode"`
+	Status             string       `json:"status"`
+	TerminalID         ID           `json:"terminalId,omitempty"`
+	GitBranch          string       `json:"gitBranch,omitempty"`
+	WorktreePath       string       `json:"worktreePath,omitempty"`
+	ReviewState        ReviewState  `json:"reviewState,omitempty"`
+	Artifacts          []Artifact   `json:"artifacts,omitempty"`
+	Logs               []LogEntry   `json:"logs,omitempty"`
+	WorkspaceID        ID           `json:"workspaceId"`
+	SessionID          ID           `json:"sessionId,omitempty"`
+	LeaseHolder        string       `json:"leaseHolder,omitempty"`
 	// HarnessProfileJSON stores the JSON-serialised harness.HarnessProfile.
-	HarnessProfileJSON string        `json:"-"`
-	CreatedAt          time.Time     `json:"createdAt"`
-	UpdatedAt          time.Time     `json:"updatedAt"`
+	HarnessProfileJSON string    `json:"-"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
 // --- Goals / Judge ---
@@ -210,12 +229,12 @@ const (
 )
 
 type QualityGate struct {
-	Name            string          `json:"name"`
-	Kind            QualityGateKind `json:"kind"`
-	Command         string          `json:"command"`
-	WorkDir         string          `json:"workDir,omitempty"`
-	ExpectExitZero  bool            `json:"expectExitZero"`
-	TimeoutSeconds  int             `json:"timeoutSeconds,omitempty"`
+	Name           string          `json:"name"`
+	Kind           QualityGateKind `json:"kind"`
+	Command        string          `json:"command"`
+	WorkDir        string          `json:"workDir,omitempty"`
+	ExpectExitZero bool            `json:"expectExitZero"`
+	TimeoutSeconds int             `json:"timeoutSeconds,omitempty"`
 }
 
 type CompletionContract struct {
@@ -251,20 +270,20 @@ type JudgeVerdict struct {
 }
 
 type Goal struct {
-	ID                  ID                 `json:"id"`
-	Title               string             `json:"title"`
-	Description         string             `json:"description"`
-	CompletionContract  CompletionContract `json:"completionContract"`
-	Status              GoalStatus         `json:"status"`
-	CardID              ID                 `json:"cardId"`
-	WorkspaceID         ID                 `json:"workspaceId"`
-	AgentID             ID                 `json:"agentId"`
-	Iteration           int                `json:"iteration"`
-	LastVerdict         *JudgeVerdict      `json:"lastVerdict,omitempty"`
+	ID                 ID                 `json:"id"`
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	CompletionContract CompletionContract `json:"completionContract"`
+	Status             GoalStatus         `json:"status"`
+	CardID             ID                 `json:"cardId"`
+	WorkspaceID        ID                 `json:"workspaceId"`
+	AgentID            ID                 `json:"agentId"`
+	Iteration          int                `json:"iteration"`
+	LastVerdict        *JudgeVerdict      `json:"lastVerdict,omitempty"`
 	// Harness execution policy — persisted with the goal.
-	HarnessProfileJSON  string             `json:"-"` // raw JSON for store
-	CreatedAt           time.Time          `json:"createdAt"`
-	UpdatedAt           time.Time          `json:"updatedAt"`
+	HarnessProfileJSON string    `json:"-"` // raw JSON for store
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
 // --- Skills ---
@@ -572,14 +591,14 @@ type AutomationJob struct {
 // AutomationTemplate is a read-only blueprint that lives in the bundled
 // automations/ directory.  Installing one creates an AutomationJob record.
 type AutomationTemplate struct {
-	Name        string   `json:"name"`
-	Version     string   `json:"version"`
-	Author      string   `json:"author"`
-	Description string   `json:"description"`
-	Kind        string   `json:"kind"`
-	Tags        []string `json:"tags,omitempty"`
-	EverySeconds int     `json:"everySeconds"`
-	Permissions struct {
+	Name         string   `json:"name"`
+	Version      string   `json:"version"`
+	Author       string   `json:"author"`
+	Description  string   `json:"description"`
+	Kind         string   `json:"kind"`
+	Tags         []string `json:"tags,omitempty"`
+	EverySeconds int      `json:"everySeconds"`
+	Permissions  struct {
 		Shell   bool `json:"shell"`
 		Network bool `json:"network"`
 		Git     bool `json:"git"`

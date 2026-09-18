@@ -28,6 +28,19 @@ func TestFakeComplete_StreamsAndDone(t *testing.T) {
 	}
 }
 
+func TestRouterPrefersRealProviderOverFake(t *testing.T) {
+	r := NewRouter()
+	r.Register("fake", &Fake{NameVal: "fake", Responses: []string{"ok"}})
+	r.Register("openai", &OpenAICompat{NameVal: "openai", BaseURL: "https://api.openai.com/v1"})
+	c, _, err := r.Resolve("default", "", "gpt-4o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Name() != "openai" {
+		t.Fatalf("fallback stayed on fake: %s", c.Name())
+	}
+}
+
 func TestRouterResolve(t *testing.T) {
 	r := NewRouter()
 	r.Register("fake", &Fake{NameVal: "fake", Responses: []string{"ok"}})

@@ -55,6 +55,12 @@ type UsageMsg struct {
 	Err              error
 }
 
+type SetupMsg struct {
+	Name  string
+	Model string
+	Err   error
+}
+
 type SendMsg struct {
 	SessionID string
 	Err       error
@@ -272,6 +278,43 @@ func (c *IPCClient) FetchUsage() tea.Cmd {
 			TotalTokens:      usage.TotalTokens,
 			Calls:            usage.Calls,
 		}
+	}
+}
+
+func (c *IPCClient) ConfigureProvider(name, baseURL, model, secret string) tea.Cmd {
+	return func() tea.Msg {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			name = "openai"
+		}
+		model = strings.TrimSpace(model)
+		if model == "" {
+			model = "gpt-4o"
+		}
+		baseURL = strings.TrimSpace(baseURL)
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1"
+		}
+		secretID := name + "-key"
+		if strings.TrimSpace(secret) != "" {
+			if _, err := c.Call(protocol.MethodSecretPut, map[string]any{
+				"id":    secretID,
+				"value": secret,
+			}); err != nil {
+				return SetupMsg{Err: err}
+			}
+		}
+		if _, err := c.Call(protocol.MethodProviderUpsert, map[string]any{
+			"name":     name,
+			"kind":     "openai-compat",
+			"baseUrl":  baseURL,
+			"models":   []string{model},
+			"default":  true,
+			"secretId": secretID,
+		}); err != nil {
+			return SetupMsg{Err: err}
+		}
+		return SetupMsg{Name: name, Model: model}
 	}
 }
 

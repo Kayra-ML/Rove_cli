@@ -50,6 +50,7 @@ type Model struct {
 	focus         FocusPanel
 	currentSessID string
 	pendingPrompt string
+	setupMode     bool
 	agents        []types.Agent
 	escCount      int
 	escTime       time.Time
@@ -235,6 +236,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.planPanel.SetUsage(msg.PromptTokens, msg.CompletionTokens, msg.TotalTokens, msg.Calls)
 		}
 
+	case SetupMsg:
+		if msg.Err != nil {
+			m.lastStatus = styleError.Render("setup: " + msg.Err.Error())
+		} else {
+			m.lastStatus = styleSuccess.Render("✓ " + msg.Name + "/" + msg.Model)
+			cmds = append(cmds, m.ipc.FetchAgents())
+		}
+
 	case SendMsg:
 		if msg.Err != nil {
 			m.lastStatus = styleError.Render("send: " + msg.Err.Error())
@@ -404,6 +413,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 				case "/ssh-disconnect":
 					m.inputBar.Clear()
 					return m.disconnectSSH()
+				case "/setup":
+					m.inputBar.Clear()
+					m.setupMode = true
+					m.inputBar.input.Placeholder = "name base-url model api-key"
+					m.lastStatus = styleDim.Render("setup: openai https://api.openai.com/v1 gpt-4o sk-…")
+					return nil
+				case "/model":
+					m.inputBar.Clear()
+					if len(m.agents) == 0 {
+						m.lastStatus = styleDim.Render("no model configured — /setup")
+					} else {
+						m.lastStatus = styleDim.Render(displayModel(m.agents[0]))
+					}
+					return nil
 				}
 			}
 			return nil
@@ -586,6 +609,24 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		m.inputBar.Clear()
+		if m.setupMode {
+			m.setupMode = false
+			m.inputBar.input.Placeholder = "Ask Rove Code to build, fix, or explain…"
+			fields := strings.Fields(content)
+			name, base, model, secret := "openai", "https://api.openai.com/v1", "gpt-4o", ""
+			switch len(fields) {
+			case 1:
+				secret = fields[0]
+			case 2:
+				name, secret = fields[0], fields[1]
+			case 3:
+				name, model, secret = fields[0], fields[1], fields[2]
+			default:
+				name, base, model, secret = fields[0], fields[1], fields[2], strings.Join(fields[3:], " ")
+			}
+			m.lastStatus = styleDim.Render("● saving provider…")
+			return m.ipc.ConfigureProvider(name, base, model, secret)
+		}
 		if m.currentSessID == "" {
 			m.pendingPrompt = content
 			m.lastStatus = styleDim.Render("● creating session…")

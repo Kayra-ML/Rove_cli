@@ -227,8 +227,10 @@ func withCORS(h http.Handler) http.Handler {
 	allowed := map[string]struct{}{
 		"wails://wails":          {},
 		"http://localhost":       {},
+		"http://localhost:7420":  {},
 		"http://localhost:34115": {},
 		"http://127.0.0.1":       {},
+		"http://127.0.0.1:7420":  {},
 		"http://127.0.0.1:34115": {},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -719,13 +721,8 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, err
 		}
-		if p.ID == "" {
-			p.ID = id.NewID()
-		}
-		if err := a.Store.UpsertProvider(ctx, p); err != nil {
-			return nil, err
-		}
-		return core.MustJSON(p), nil
+		out, err := a.ApplyProvider(ctx, p)
+		return core.MustJSON(out), err
 	case protocol.MethodSecretPut:
 		var p struct {
 			ID    string `json:"id"`

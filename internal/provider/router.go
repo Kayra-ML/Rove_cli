@@ -18,10 +18,10 @@ import (
 var ErrNoProvider = errors.New("provider: none configured")
 
 type ChatMessage struct {
-	Role       string          `json:"role"`
-	Content    string          `json:"content"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content"`
 	ToolCalls  []types.ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
 }
 
 type ToolSpec struct {
@@ -38,10 +38,10 @@ type ChatRequest struct {
 }
 
 type ChatDelta struct {
-	Content   string          `json:"content,omitempty"`
+	Content   string           `json:"content,omitempty"`
 	ToolCalls []types.ToolCall `json:"toolCalls,omitempty"`
-	Done      bool            `json:"done"`
-	Usage     *Usage          `json:"usage,omitempty"`
+	Done      bool             `json:"done"`
+	Usage     *Usage           `json:"usage,omitempty"`
 }
 
 type Usage struct {
@@ -130,15 +130,18 @@ func (r *Router) Register(name string, c Completer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.providers[name] = c
-	if r.fallback == "" {
+	if r.fallback == "" || (r.fallback == "fake" && name != "fake") {
 		r.fallback = name
 	}
 }
 
 func (r *Router) SetDefault(profile, provider string) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.defaults[profile] = provider
-	r.mu.Unlock()
+	if provider != "" && provider != "fake" {
+		r.fallback = provider
+	}
 }
 
 func (r *Router) Get(name string) (Completer, error) {
@@ -283,9 +286,9 @@ func (o *OpenAICompat) Complete(ctx context.Context, req ChatRequest) (<-chan Ch
 		}
 	}
 	body := map[string]any{
-		"model":    req.Model,
-		"messages": toOpenAIMessages(req.Messages),
-		"stream":   true,
+		"model":          req.Model,
+		"messages":       toOpenAIMessages(req.Messages),
+		"stream":         true,
 		"stream_options": map[string]any{"include_usage": true},
 	}
 	if len(req.Tools) > 0 {

@@ -90,6 +90,8 @@ var defaultSlashCommands = []SlashCommand{
 	{Name: "/ssh", Description: "Manage SSH remote hosts (Ctrl+H)", Prompt: ""},
 	{Name: "/ssh-connect", Description: "Connect to a remote host via SSH tunnel", Prompt: ""},
 	{Name: "/ssh-disconnect", Description: "Disconnect from remote, return to local daemon", Prompt: ""},
+	{Name: "/setup", Description: "Configure a real model provider", Prompt: ""},
+	{Name: "/model", Description: "Show or set the active model", Prompt: ""},
 }
 
 // InputBar handles the bottom input area.

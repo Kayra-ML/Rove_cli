@@ -353,7 +353,7 @@ func (p *MessagesPanel) emptyState(innerW, contentH int) []string {
 	}
 	brandText := truncate("R O V E  C O D E", innerW)
 	subtitleText := truncate("Welcome to Rove Code", innerW)
-	hintText := truncate("type a task · ctrl+k commands · ctrl+n new", innerW)
+	hintText := truncate("type a task · /setup for a real model · ctrl+k", innerW)
 	brand := styleBrand.Render(brandText)
 	subtitle := styleMuted.Render(subtitleText)
 	hint := styleMeta.Render(hintText)

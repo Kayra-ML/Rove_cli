@@ -59,7 +59,7 @@ export function Settings({ onClose, onSelectWorkspace, initialSection = "appeara
     const secretId = newProvider.secretId || `${newProvider.name}-key`;
     await rpc("provider.upsert", {
       name: newProvider.name,
-      kind: "openai_compat",
+      kind: "openai-compat",
       baseUrl: newProvider.baseUrl,
       secretId,
       models: [],

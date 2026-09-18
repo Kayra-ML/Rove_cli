@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -208,22 +209,101 @@ func (a *App) hydrateProviders(ctx context.Context) error {
 		return err
 	}
 	for _, p := range list {
+		p.Kind = types.NormalizeProviderKind(p.Kind)
 		switch p.Kind {
 		case types.ProviderFake:
 			a.Router.Register(p.Name, &provider.Fake{NameVal: p.Name, Responses: []string{"ok"}})
-		case types.ProviderOpenAICompat:
+		case types.ProviderOpenAICompat, types.ProviderAnthropic:
+			base := strings.TrimSpace(p.BaseURL)
+			if base == "" {
+				base = "https://api.openai.com/v1"
+			}
 			a.Router.Register(p.Name, &provider.OpenAICompat{
 				NameVal:  p.Name,
-				BaseURL:  p.BaseURL,
+				BaseURL:  base,
 				SecretID: p.SecretID,
 				Keys:     a.Secrets.Get,
 			})
 		}
-		if p.Default {
+		if p.Default && p.Kind != types.ProviderFake {
 			a.Router.SetDefault("default", p.Name)
+			_ = a.retargetFakeAgents(ctx, p)
 		}
 	}
 	return nil
+}
+
+func (a *App) retargetFakeAgents(ctx context.Context, p types.Provider) error {
+	if a.Agents == nil {
+		return nil
+	}
+	model := ""
+	if len(p.Models) > 0 {
+		model = p.Models[0]
+	}
+	if model == "" {
+		model = "gpt-4o"
+	}
+	agents, err := a.Agents.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, ag := range agents {
+		if ag.Provider != "" && ag.Provider != "fake" && ag.Model != "" && ag.Model != "fake" {
+			continue
+		}
+		ag.Provider = p.Name
+		ag.Model = model
+		if _, err := a.Agents.Upsert(ctx, ag); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *App) ApplyProvider(ctx context.Context, p types.Provider) (types.Provider, error) {
+	p.Kind = types.NormalizeProviderKind(p.Kind)
+	if p.Name == "" {
+		p.Name = "openai"
+	}
+	if p.Kind == "" {
+		p.Kind = types.ProviderOpenAICompat
+	}
+	if p.BaseURL == "" && p.Kind == types.ProviderOpenAICompat {
+		p.BaseURL = "https://api.openai.com/v1"
+	}
+	if len(p.Models) == 0 {
+		p.Models = []string{"gpt-4o"}
+	}
+	if p.SecretID == "" {
+		p.SecretID = p.Name + "-key"
+	}
+	if p.ID == "" {
+		p.ID = id.NewID()
+	}
+	if !p.Default {
+		existing, err := a.Store.ListProviders(ctx)
+		if err != nil {
+			return p, err
+		}
+		hasRealDefault := false
+		for _, cur := range existing {
+			if cur.Default && types.NormalizeProviderKind(cur.Kind) != types.ProviderFake && cur.ID != p.ID {
+				hasRealDefault = true
+				break
+			}
+		}
+		if !hasRealDefault && p.Kind != types.ProviderFake {
+			p.Default = true
+		}
+	}
+	if err := a.Store.UpsertProvider(ctx, p); err != nil {
+		return p, err
+	}
+	if err := a.hydrateProviders(ctx); err != nil {
+		return p, err
+	}
+	return p, nil
 }
 
 func (a *App) recover(ctx context.Context) {

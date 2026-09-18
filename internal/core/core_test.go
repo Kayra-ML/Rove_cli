@@ -52,3 +52,50 @@ func TestOpenSeedsAndRecoversRunningCards(t *testing.T) {
 		t.Fatalf("health missing agents: %v", h)
 	}
 }
+
+func TestApplyProviderHydratesRouterAndRetargetsAgent(t *testing.T) {
+	dir := t.TempDir()
+	app, err := Open(config.Config{DataDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	ctx := context.Background()
+	if err := app.Secrets.Put("openai-key", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := app.ApplyProvider(ctx, types.Provider{
+		Name:     "openai",
+		Kind:     "openai_compat",
+		BaseURL:  "https://api.openai.com/v1",
+		Models:   []string{"gpt-4o"},
+		SecretID: "openai-key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Kind != types.ProviderOpenAICompat {
+		t.Fatalf("kind = %s", p.Kind)
+	}
+	c, err := app.Router.Get("openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Kind() != types.ProviderOpenAICompat {
+		t.Fatalf("router kind = %s", c.Kind())
+	}
+	agents, err := app.Agents.List(ctx)
+	if err != nil || len(agents) == 0 {
+		t.Fatal(err)
+	}
+	if agents[0].Provider != "openai" || agents[0].Model != "gpt-4o" {
+		t.Fatalf("agent still fake: %+v", agents[0])
+	}
+	resolved, model, err := app.Router.Resolve("default", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Name() != "openai" {
+		t.Fatalf("resolve = %s model=%s", resolved.Name(), model)
+	}
+}
