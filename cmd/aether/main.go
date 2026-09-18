@@ -15,9 +15,10 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
+	// No args or "tui" → launch sextant TUI directly
+	if len(os.Args) < 2 || os.Args[1] == "tui" {
+		launchTUI(os.Args[1:])
+		return
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]

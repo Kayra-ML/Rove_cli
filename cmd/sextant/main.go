@@ -127,6 +127,9 @@ func main() {
 		}
 	}
 
+	// Splash screen — ROVE branding, 1.5s
+	showSplash()
+
 	m := tui.NewModel(ipc)
 
 	// If we opened a tunnel at startup, wire it into the SSH panel
@@ -160,4 +163,71 @@ func main() {
 	if tunnel != nil {
 		tunnel.Close()
 	}
+}
+// showSplash renders the ROVE splash screen for ~1.5s then clears.
+func showSplash() {
+	// Hide cursor
+	fmt.Print("\033[?25l")
+	// Clear screen, black bg
+	fmt.Print("\033[2J\033[H")
+
+	// ROVE ASCII art — large block letters, premium minimal style
+	// Designed to echo the visual: dark bg, bold centered ROVE wordmark
+	// "O" has a distinctive square-rounded feel matching the logo
+	rove := []string{
+		``,
+		``,
+		``,
+		``,
+		``,
+		`  ██████╗   ██████╗  ██╗   ██╗ ███████╗`,
+		`  ██╔══██╗ ██╔═══██╗ ██║   ██║ ██╔════╝`,
+		`  ██████╔╝ ██║   ██║ ██║   ██║ █████╗  `,
+		`  ██╔══██╗ ██║   ██║ ╚██╗ ██╔╝ ██╔══╝  `,
+		`  ██║  ██║ ╚██████╔╝  ╚████╔╝  ███████╗`,
+		`  ╚═╝  ╚═╝  ╚═════╝    ╚═══╝   ╚══════╝`,
+		``,
+		`              c o d e`,
+		``,
+	}
+
+	// Get terminal width for centering
+	cols := 80
+	if c, err := getTermCols(); err == nil {
+		cols = c
+	}
+
+	for _, line := range rove {
+		pad := (cols - 42) / 2
+		if pad < 0 {
+			pad = 0
+		}
+		fmt.Printf("%*s%s\n", pad, "", line)
+	}
+
+	time.Sleep(1500 * time.Millisecond)
+
+	// Clear screen before TUI takes over
+	fmt.Print("\033[2J\033[H")
+	// Restore cursor (bubbletea will manage it from here)
+	fmt.Print("\033[?25h")
+}
+
+func getTermCols() (int, error) {
+	cmd := exec.Command("tput", "cols")
+	cmd.Stdin = os.Stdin
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, b := range out {
+		if b >= '0' && b <= '9' {
+			n = n*10 + int(b-'0')
+		}
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("no cols")
+	}
+	return n, nil
 }
