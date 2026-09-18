@@ -106,7 +106,7 @@ type InputBar struct {
 
 func NewInputBar() *InputBar {
 	ti := textinput.New()
-	ti.Placeholder = "Type a message… (/ for commands)"
+	ti.Placeholder = "ask aether — e.g. fix the failing test"
 	ti.Focus()
 	ti.CharLimit = 4096
 
@@ -191,7 +191,6 @@ func (b *InputBar) SlashSelect() (string, bool) {
 }
 
 func (b *InputBar) UpdateFilter(v string) {
-	// Extract the slash word from current input
 	if strings.HasPrefix(v, "/") {
 		space := strings.Index(v, " ")
 		if space == -1 {
@@ -220,63 +219,80 @@ func (b *InputBar) filteredCommands() []SlashCommand {
 }
 
 func (b *InputBar) Render() string {
-	w := b.width - 2
+	w := b.width
 	if w < 4 {
 		w = 4
 	}
 
-	var sb strings.Builder
-
-	// Status line
-	statusStyle := styleDim
-	if b.statusLine != "" {
-		sb.WriteString(statusStyle.Width(w).Render(b.statusLine))
-		sb.WriteString("\n")
-	}
-
-	// Input field
-	promptPrefix := lipgloss.NewStyle().Foreground(colorUser).Bold(true).Render("❯ ")
-	inputLine := promptPrefix + b.input.View()
-	sb.WriteString(inputLine)
-
-	// Slash command popup (rendered above the input)
+	// Slash command popup rendered above input line
 	if b.slashOpen {
 		popup := b.renderSlashPopup(w)
-		// Prepend popup before the input
-		full := popup + "\n" + sb.String()
+		inputLine := b.renderInputLine(w)
+		full := popup + "\n" + inputLine
 		return lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorBorderActive).
 			Width(w).
+			Background(colorBg).
+			Border(lipgloss.NormalBorder(), true, false, false, false).
+			BorderForeground(colorSep).
 			Render(full)
 	}
 
-	border := panelStyle(b.active)
-	return border.Width(w).Render(sb.String())
+	// Normal: separator + input
+	sep := styleSep.Render(strings.Repeat("─", w))
+	inputLine := b.renderInputLine(w)
+	return lipgloss.NewStyle().
+		Width(w).
+		Background(colorBg).
+		Render(sep + "\n" + inputLine)
+}
+
+func (b *InputBar) renderInputLine(w int) string {
+	// Minimal prompt: dim arrow + textinput
+	prompt := styleDim.Render("> ")
+	return prompt + b.input.View()
 }
 
 func (b *InputBar) renderSlashPopup(maxW int) string {
 	filtered := b.filteredCommands()
 	if len(filtered) == 0 {
-		return styleDim.Render("  no commands matched")
+		return " " + styleDim.Render("no commands matched")
+	}
+
+	// Show at most 8 items to keep it compact
+	visible := filtered
+	if len(visible) > 8 {
+		// Show around cursor
+		start := b.slashCursor - 3
+		if start < 0 {
+			start = 0
+		}
+		end := start + 8
+		if end > len(visible) {
+			end = len(visible)
+			start = end - 8
+			if start < 0 {
+				start = 0
+			}
+		}
+		visible = visible[start:end]
 	}
 
 	var rows []string
-	for i, cmd := range filtered {
-		desc := cmd.Description
-		nameW := 12
+	nameW := 16
+	for i, cmd := range visible {
 		line := cmd.Name
 		if len(line) < nameW {
 			line += strings.Repeat(" ", nameW-len(line))
 		}
-		line += "  " + desc
-		if len(line) > maxW-4 {
-			line = line[:maxW-5] + "…"
+		desc := cmd.Description
+		full := line + "  " + desc
+		if len(full) > maxW-4 {
+			full = full[:maxW-5] + "…"
 		}
-		if i == b.slashCursor {
-			rows = append(rows, styleSelected.Width(maxW-4).Render(line))
+		if i == b.slashCursor%len(visible) {
+			rows = append(rows, " "+styleSelected.Width(maxW-2).Render(full))
 		} else {
-			rows = append(rows, styleDim.Render(line))
+			rows = append(rows, " "+styleDim.Render(full))
 		}
 	}
 

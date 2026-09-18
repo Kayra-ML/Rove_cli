@@ -1,8 +1,6 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
-
-// PetMood represents the cloud pet's current mood.
+// PetMood represents the agent's current activity state.
 type PetMood int
 
 const (
@@ -12,7 +10,7 @@ const (
 	PetDone
 )
 
-// Pet holds the cloud pet state.
+// Pet holds the agent state indicator (replaces the cloud pet with a minimal status dot).
 type Pet struct {
 	Mood PetMood
 }
@@ -25,55 +23,18 @@ func (p *Pet) SetMood(mood PetMood) {
 	p.Mood = mood
 }
 
-// clouds indexed by mood
-var cloudFrames = [][]string{
-	// Idle ☁️
-	{
-		`  .--.   `,
-		` (    )  `,
-		`(_______)`,
-	},
-	// Running ⛅
-	{
-		`  .--.   `,
-		` (    )☀ `,
-		`(_______)`,
-	},
-	// Error ⛈️
-	{
-		`  .--. ⚡`,
-		` (    )  `,
-		`(___)~~~`,
-	},
-	// Done 🌤️
-	{
-		`  .--.  ☀`,
-		` (    )  `,
-		`(_______)`,
-	},
-}
-
-var moodLabels = []string{"idle", "running", "error", "done"}
-
+// Render returns a minimal single-line status indicator for the right rail header.
+// Width parameter kept for API compatibility.
 func (p *Pet) Render(width int) string {
-	frames := cloudFrames[p.Mood]
-	label := moodLabels[p.Mood]
-
-	style := stylePet
-	switch p.Mood {
-	case PetError:
-		style = lipgloss.NewStyle().Foreground(colorError).Bold(true)
-	case PetRunning:
-		style = lipgloss.NewStyle().Foreground(colorHighlight).Bold(true)
-	case PetDone:
-		style = lipgloss.NewStyle().Foreground(colorSuccess).Bold(true)
-	}
-
-	out := ""
-	for _, line := range frames {
-		out += style.Render(line) + "\n"
-	}
-	out += styleDim.Render("  " + label)
 	_ = width
-	return out
+	switch p.Mood {
+	case PetRunning:
+		return styleHighlight.Render("● running")
+	case PetError:
+		return styleError.Render("● error")
+	case PetDone:
+		return styleSuccess.Render("● done")
+	default:
+		return styleDim.Render("○ idle")
+	}
 }

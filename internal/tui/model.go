@@ -42,9 +42,9 @@ type Model struct {
 	sshPanel      *SSHPanel
 
 	// IPC
-	ipc           *IPCClient
-	ipcErr        error
-	connected     bool
+	ipc       *IPCClient
+	ipcErr    error
+	connected bool
 
 	// State
 	focus         FocusPanel
@@ -61,8 +61,10 @@ type Model struct {
 	// Approval
 	pendingApprovalID string
 
-	// Ticker for refresh
-	tickCount int
+	// Ticker for refresh + timer display
+	tickCount   int
+	runStart    time.Time
+	runActive   bool
 }
 
 // NewModel creates the root model.
@@ -95,7 +97,7 @@ func (m *Model) Init() tea.Cmd {
 		m.ipc.FetchSessions(),
 		m.ipc.FetchAgents(),
 		m.ipc.FetchProfiles(),
-		tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg{t} }),
+		tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg{t} }),
 	)
 }
 
@@ -119,14 +121,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.tickCount++
-		cmds = append(cmds, tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg{t} }))
-		// Periodic refresh of sessions
-		if m.tickCount%5 == 0 {
+		// Re-schedule at 500ms for smooth timer display
+		cmds = append(cmds, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg{t} }))
+		// Periodic refresh of sessions every 10 ticks (5s)
+		if m.tickCount%10 == 0 {
 			cmds = append(cmds, m.ipc.FetchSessions())
 		}
-		// Periodic refresh of profiles every 30 ticks
-		if m.tickCount%30 == 0 {
+		// Periodic refresh of profiles every 60 ticks (30s)
+		if m.tickCount%60 == 0 {
 			cmds = append(cmds, m.ipc.FetchProfiles())
+		}
+		// Update run timer
+		if m.runActive {
+			elapsed := time.Since(m.runStart)
+			mins := int(elapsed.Minutes())
+			secs := int(elapsed.Seconds()) % 60
+			tenths := int(elapsed.Milliseconds()/100) % 10
+			m.planPanel.SetTimer(fmt.Sprintf("%02d:%02d.%d", mins, secs, tenths))
 		}
 
 	case ConnectedMsg:
@@ -148,7 +159,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastStatus = styleError.Render("sessions: " + msg.Err.Error())
 		} else {
 			m.sessionPanel.SetSessions(msg.Sessions)
-			// Auto-select first if none selected
 			if m.currentSessID == "" && len(msg.Sessions) > 0 {
 				m.currentSessID = string(msg.Sessions[0].ID)
 				cmds = append(cmds, m.ipc.FetchHistory(m.currentSessID))
@@ -173,8 +183,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pet.SetMood(PetError)
 		} else {
 			m.pet.SetMood(PetRunning)
+			m.runActive = true
+			m.runStart = time.Now()
 			m.lastStatus = styleDim.Render("● running…")
-			// Refresh history after a moment
 			cmds = append(cmds, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
 				return refreshHistoryMsg{sessionID: msg.SessionID}
 			}))
@@ -201,7 +212,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Link.ID != "" {
 			m.lastStatus = styleDim.Render("↔ linked: " + string(msg.Link.Label))
 		}
-		// Refresh linked sessions for current
 		if m.currentSessID != "" {
 			cmds = append(cmds, m.ipc.FetchLinkedSessions(m.currentSessID))
 		}
@@ -230,7 +240,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case sshConnectMsg:
-		// Switch IPC to tunnel
 		m.ipc = msg.ipc
 		m.sshPanel.SetTunnel(msg.tunnel, msg.alias)
 		m.lastStatus = styleDim.Render("● ssh: " + msg.alias)
@@ -241,7 +250,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastStatus = styleError.Render("ssh: " + msg.err)
 
 	case sshDisconnectMsg:
-		// Close tunnel and reconnect to local socket
 		m.sshPanel.Disconnect()
 		if ipc, err := NewIPCClient(); err == nil {
 			m.ipc = ipc
@@ -259,7 +267,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if tiCmd != nil {
 			cmds = append(cmds, tiCmd)
 		}
-		// Check if / was typed to open slash menu
 		val := m.inputBar.Value()
 		if strings.HasPrefix(val, "/") && !m.inputBar.IsSlashOpen() {
 			m.inputBar.OpenSlash()
@@ -278,7 +285,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return tea.Quit
 	}
 
-	// Double-Esc: cancel current run
+	// Esc: cancel current run (single press)
 	if msg.Type == tea.KeyEsc {
 		now := time.Now()
 		if now.Sub(m.escTime) < 800*time.Millisecond {
@@ -290,8 +297,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if m.escCount >= 2 {
 			m.escCount = 0
 			m.pet.SetMood(PetIdle)
+			m.runActive = false
+			m.planPanel.SetTimer("")
 			m.lastStatus = styleDim.Render("● stopped")
-			// Close slash if open
 			m.inputBar.CloseSlash()
 			return nil
 		}
@@ -326,17 +334,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 					m.inputBar.Clear()
 					return m.ipc.FetchAutomations()
 				case "/run":
-									m.inputBar.Clear()
-									m.inputBar.input.SetValue("/run ")
-								case "/ssh":
-									m.inputBar.Clear()
-									m.sshPanel.Open()
-								case "/ssh-connect":
-									m.inputBar.Clear()
-									m.sshPanel.Open()
-								case "/ssh-disconnect":
-									m.inputBar.Clear()
-									return m.disconnectSSH()
+					m.inputBar.Clear()
+					m.inputBar.input.SetValue("/run ")
+				case "/ssh":
+					m.inputBar.Clear()
+					m.sshPanel.Open()
+				case "/ssh-connect":
+					m.inputBar.Clear()
+					m.sshPanel.Open()
+				case "/ssh-disconnect":
+					m.inputBar.Clear()
+					return m.disconnectSSH()
 				}
 			}
 			return nil
@@ -358,7 +366,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			case tea.KeyEnter:
 				name := m.profilePanel.CommitNewProfile()
 				if name != "" {
-					// Create a new profile via upsert RPC
 					return func() tea.Msg {
 						_, _ = m.ipc.Call("profile.upsert", map[string]any{
 							"name": name,
@@ -460,6 +467,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			cardID := m.pendingApprovalID
 			m.messagesPanel.ClearPendingCard()
 			m.pendingApprovalID = ""
+			m.planPanel.SetNeedsApproval(false)
 			if cardID != "" {
 				return m.approveCard(cardID, true)
 			}
@@ -468,6 +476,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			cardID := m.pendingApprovalID
 			m.messagesPanel.ClearPendingCard()
 			m.pendingApprovalID = ""
+			m.planPanel.SetNeedsApproval(false)
 			if cardID != "" {
 				return m.approveCard(cardID, false)
 			}
@@ -484,17 +493,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			m.sshPanel.Open()
 		}
 		return nil
-	case tea.KeyTab:
-		m.focus = (m.focus + 1) % _focusCount
-		m.updateFocus()
-		return nil
-	case tea.KeyCtrlS:
-		m.focus = FocusCode
-		m.updateFocus()
-		return nil
-	case tea.KeyCtrlE:
-		m.focus = FocusFiles
-		m.updateFocus()
+	case tea.KeyCtrlK:
+		// Open slash command palette
+		m.inputBar.OpenSlash()
 		return nil
 	case tea.KeyCtrlP:
 		m.profilePanel.Toggle()
@@ -507,6 +508,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return m.ipc.CreateSession(agentID)
 	case tea.KeyCtrlU:
 		m.inputBar.Clear()
+		return nil
+	case tea.KeyTab:
+		// Only cycle between Messages and Input (no left rail anymore)
+		if m.focus == FocusInput {
+			m.focus = FocusMessages
+		} else {
+			m.focus = FocusInput
+		}
+		m.updateFocus()
 		return nil
 	}
 
@@ -528,69 +538,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// Panel-specific keys
 	switch m.focus {
-	case FocusSessions:
-		switch msg.Type {
-		case tea.KeyUp:
-			m.sessionPanel.MoveUp()
-		case tea.KeyDown:
-			m.sessionPanel.MoveDown()
-		case tea.KeyEnter:
-			if sess := m.sessionPanel.Selected(); sess != nil {
-				m.currentSessID = string(sess.ID)
-				return m.ipc.FetchHistory(m.currentSessID)
-			}
-		case tea.KeyRunes:
-			switch msg.String() {
-			case "l":
-				if m.sessionPanel.Selected() != nil {
-					m.sessionPanel.OpenLinkPrompt()
-				}
-			case "u":
-				if linkID := m.sessionPanel.SelectedLinkID(); linkID != "" {
-					return m.ipc.UnlinkSessions(linkID)
-				}
-			case "h":
-				if sess := m.sessionPanel.Selected(); sess != nil {
-					return m.ipc.FetchHistory(string(sess.ID))
-				}
-			case "r":
-				if m.sessionPanel.Selected() != nil {
-					m.sessionPanel.OpenRelayPrompt()
-				}
-			}
-		}
-	case FocusFiles:
-		switch msg.Type {
-		case tea.KeyUp:
-			m.fileTreePanel.MoveUp()
-		case tea.KeyDown:
-			m.fileTreePanel.MoveDown()
-		case tea.KeyEnter:
-			// Could load file into code panel
-			f := m.fileTreePanel.Selected()
-			if f != "" && !strings.HasSuffix(f, "/") {
-				m.codePanel.SetFile(f, "")
-				m.focus = FocusCode
-				m.updateFocus()
-			}
-		}
 	case FocusMessages:
 		switch msg.Type {
 		case tea.KeyUp:
 			m.messagesPanel.ScrollUp()
 		case tea.KeyDown:
 			m.messagesPanel.ScrollDown()
-		}
-	case FocusCode:
-		switch msg.Type {
-		case tea.KeyUp:
-			m.codePanel.ScrollUp()
-		case tea.KeyDown:
-			m.codePanel.ScrollDown()
-		case tea.KeyRunes:
-			if msg.String() == "d" {
-				m.codePanel.ToggleDiff()
-			}
 		}
 	}
 
@@ -618,8 +571,9 @@ func (m *Model) handleEvent(ev protocol.EventFrame) tea.Cmd {
 
 	case types.EventMessageDone:
 		m.pet.SetMood(PetDone)
+		m.runActive = false
+		m.planPanel.SetTimer("")
 		m.lastStatus = styleSuccess.Render("✓ done")
-		// Refresh history to get full message
 		if m.currentSessID != "" {
 			return m.ipc.FetchHistory(m.currentSessID)
 		}
@@ -637,16 +591,14 @@ func (m *Model) handleEvent(ev protocol.EventFrame) tea.Cmd {
 				ToolArgs: string(payload.Args),
 				At:       time.Now(),
 			}
-			// Extract file info from args
 			if payload.Name == "read_file" || payload.Name == "write_file" || payload.Name == "patch_file" {
 				var args struct {
 					Path string `json:"path"`
 				}
 				if json.Unmarshal(payload.Args, &args) == nil && args.Path != "" {
 					dm.ToolExtra = shortPath(args.Path)
-					// Update code panel to show this file
 					m.codePanel.SetFile(args.Path, "")
-					m.lastStatus = styleDim.Render("● editing: " + shortPath(args.Path))
+					m.lastStatus = styleDim.Render("● " + shortPath(args.Path))
 				}
 			}
 			m.messagesPanel.AddMessage(dm)
@@ -684,6 +636,10 @@ func (m *Model) handleEvent(ev protocol.EventFrame) tea.Cmd {
 			switch types.AgentStatus(payload.Status) {
 			case types.AgentRunning:
 				m.pet.SetMood(PetRunning)
+				m.runActive = true
+				if m.runStart.IsZero() {
+					m.runStart = time.Now()
+				}
 				m.lastStatus = styleDim.Render("● agent running")
 			case types.AgentIdle:
 				m.pet.SetMood(PetDone)
@@ -695,7 +651,6 @@ func (m *Model) handleEvent(ev protocol.EventFrame) tea.Cmd {
 		}
 
 	case types.EventCardUpdated:
-		// Could show approval card
 		var payload struct {
 			Card types.Card `json:"card"`
 		}
@@ -708,6 +663,7 @@ func (m *Model) handleEvent(ev protocol.EventFrame) tea.Cmd {
 				}
 				m.messagesPanel.SetPendingCard(dm)
 				m.pendingApprovalID = string(payload.Card.ID)
+				m.planPanel.SetNeedsApproval(true)
 			}
 		}
 
@@ -767,31 +723,27 @@ func (m *Model) layoutPanels() {
 	w := m.width
 	h := m.height
 
-	// New layout: chat takes ~80%, right rail ~20%
+	// Layout: messages left ~78%, right rail ~22%
 	rightW := w * 22 / 100
-	if rightW < 20 {
-		rightW = 20
+	if rightW < 22 {
+		rightW = 22
 	}
 	chatW := w - rightW
 
-	inputH := 4
-	mainH := h - inputH - 1
+	inputH := 3
+	mainH := h - inputH - 1 // -1 for status bar
 	if mainH < 10 {
 		mainH = 10
 	}
 
-	planH := mainH * 65 / 100
-	usageH := mainH - planH
-
 	m.messagesPanel.SetSize(chatW, mainH)
-	m.planPanel.SetSize(rightW, planH)
+	m.planPanel.SetSize(rightW, mainH)
 	m.inputBar.SetSize(w, inputH)
 
-	// Keep unused panels at zero so they don't allocate/crash
+	// Unused panels zeroed out
 	m.sessionPanel.SetSize(0, 0)
 	m.fileTreePanel.SetSize(0, 0)
 	m.codePanel.SetSize(0, 0)
-	_ = usageH
 }
 
 // View renders the full TUI.
@@ -805,70 +757,40 @@ func (m *Model) View() string {
 	w := m.width
 	h := m.height
 
-	// Layout: chat left (~78%), right rail (~22%)
 	rightW := w * 22 / 100
 	if rightW < 22 {
 		rightW = 22
 	}
 	chatW := w - rightW
 
-	inputH := 4
+	inputH := 3
 	mainH := h - inputH - 1
 	if mainH < 10 {
 		mainH = 10
 	}
 
-	planH := mainH * 65 / 100
-
 	m.messagesPanel.SetSize(chatW, mainH)
-	m.planPanel.SetSize(rightW, planH)
+	m.planPanel.SetSize(rightW, mainH)
 	m.inputBar.SetSize(w, inputH)
 
-	// Render
-	msgView  := m.messagesPanel.Render()
+	msgView := m.messagesPanel.Render()
 	planView := m.planPanel.Render()
-	petView  := m.pet.Render(rightW)
 	inputView := m.inputBar.Render()
 
-	// Right rail: pet on top, plan below, usage at bottom
+	// Right rail: pet status line + plan+usage
+	petLine := " " + m.pet.Render(rightW)
 	rightRail := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().
-			Width(rightW).
-			Align(lipgloss.Center).
-			Foreground(colorAgent).
-			Render(petView),
+		lipgloss.NewStyle().Width(rightW).Background(colorBg).Render(petLine),
 		planView,
 	)
-
-	// Status line
-	connMark := styleError.Render("○")
-	if m.connected {
-		connMark = styleSuccess.Render("●")
-	}
-	sessionInfo := ""
-	if m.currentSessID != "" {
-		sessionInfo = styleDim.Render(" sess:" + m.currentSessID[:min(8, len(m.currentSessID))])
-	}
-	profileInfo := ""
-	if name := m.profilePanel.ActiveProfileName(); name != "" {
-		profileInfo = styleDim.Render("  profile:" + name)
-	}
-	sshInfo := ""
-	if txt := m.sshPanel.TunnelStatusText(); txt != "" {
-		sshInfo = lipgloss.NewStyle().Foreground(lipgloss.Color("#44cc44")).Render("  " + txt)
-	}
-	statusLine := connMark + sessionInfo + profileInfo + sshInfo + "  " + m.lastStatus
-	keybindHint := styleDim.Render(" Tab:focus  /: commands  Ctrl+N:new  Ctrl+P:profiles  Ctrl+H:ssh  Esc×2:stop  Ctrl+C:quit")
 
 	mainRow := lipgloss.JoinHorizontal(lipgloss.Top,
 		msgView,
 		rightRail,
 	)
 
-	statusBar := lipgloss.NewStyle().
-		Width(w).
-		Foreground(colorDim).
-		Render(fmt.Sprintf("%s  %s", statusLine, keybindHint))
+	// Status bar — single minimal line
+	statusBar := m.renderStatusBar(w)
 
 	base := lipgloss.JoinVertical(lipgloss.Left,
 		mainRow,
@@ -887,6 +809,44 @@ func (m *Model) View() string {
 	}
 
 	return base
+}
+
+// renderStatusBar produces a single dim line at the bottom.
+// Left: keybinds  |  Right: model · status · version
+func (m *Model) renderStatusBar(w int) string {
+	leftHints := "esc stop  ^k commands  ^n new  ^p profiles  ^h ssh"
+
+	// Right side: connection status + ssh info + profile
+	var rightParts []string
+
+	if txt := m.sshPanel.TunnelStatusText(); txt != "" {
+		rightParts = append(rightParts, "ssh:"+txt)
+	}
+	if name := m.profilePanel.ActiveProfileName(); name != "" {
+		rightParts = append(rightParts, name)
+	}
+	if m.connected {
+		rightParts = append(rightParts, "●")
+	} else {
+		rightParts = append(rightParts, "○")
+	}
+
+	right := strings.Join(rightParts, " · ")
+
+	// Pad left and right to fill width
+	leftStr := styleDim.Render(leftHints)
+	rightStr := styleDim.Render(right)
+
+	leftW := lipgloss.Width(leftStr)
+	rightW := lipgloss.Width(rightStr)
+	gap := w - leftW - rightW - 2
+	if gap < 1 {
+		gap = 1
+	}
+
+	return styleStatusBar.
+		Width(w).
+		Render(leftStr + strings.Repeat(" ", gap) + rightStr)
 }
 
 func shortPath(p string) string {
@@ -943,7 +903,6 @@ func overlayModal(base, modal string, w, h int) string {
 // handleSSHPanelKey processes keystrokes when the SSH panel is open.
 func (m *Model) handleSSHPanelKey(msg tea.KeyMsg) tea.Cmd {
 	if m.sshPanel.IsAddMode() {
-		// Route key to the active text input
 		switch msg.Type {
 		case tea.KeyEsc:
 			m.sshPanel.CancelAdd()
@@ -952,7 +911,6 @@ func (m *Model) handleSSHPanelKey(msg tea.KeyMsg) tea.Cmd {
 			m.sshPanel.NextAddField()
 			return nil
 		default:
-			// Forward to the right textinput
 			switch m.sshPanel.addField {
 			case 0:
 				newM, cmd := m.sshPanel.addAlias.Update(msg)
@@ -980,7 +938,6 @@ func (m *Model) handleSSHPanelKey(msg tea.KeyMsg) tea.Cmd {
 	case tea.KeyDown:
 		m.sshPanel.MoveDown()
 	case tea.KeyEnter:
-		// Connect to selected host
 		h := m.sshPanel.SelectedHost()
 		if h == nil {
 			return nil
@@ -993,7 +950,6 @@ func (m *Model) handleSSHPanelKey(msg tea.KeyMsg) tea.Cmd {
 		case "d":
 			m.sshPanel.DeleteSelected()
 		case "x":
-			// Disconnect and return to local socket
 			return m.disconnectSSH()
 		}
 	}
@@ -1017,7 +973,6 @@ func (m *Model) connectSSHHost(alias, spec string) tea.Cmd {
 		if err := t.Open(); err != nil {
 			return sshStatusMsg{err: "tunnel: " + err.Error()}
 		}
-		// Try to fetch remote token; fall back to empty (daemon may not require it)
 		tok, _ := t.FetchRemoteToken()
 		ipc := NewIPCClientTCP(t.LocalAddr(), tok)
 		return sshConnectMsg{alias: alias, tunnel: t, ipc: ipc}
