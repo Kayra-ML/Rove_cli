@@ -1267,3 +1267,139 @@ func (s *Store) DeleteMCPServer(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM mcp_servers WHERE id=?`, id)
 	return err
 }
+
+// ── Agent profiles ────────────────────────────────────────────────────────────
+
+func (s *Store) UpsertAgentProfile(ctx context.Context, p types.AgentProfile) (types.AgentProfile, error) {
+	now := time.Now().UTC()
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = now
+	}
+	p.UpdatedAt = now
+	isDef, isLead := 0, 0
+	if p.IsDefault {
+		isDef = 1
+	}
+	if p.IsLeader {
+		isLead = 1
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO agent_profiles(id,name,role,system_prompt,model,provider,is_default,is_leader,color,created_at,updated_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?)
+		 ON CONFLICT(id) DO UPDATE SET name=excluded.name, role=excluded.role, system_prompt=excluded.system_prompt,
+		 model=excluded.model, provider=excluded.provider, is_default=excluded.is_default, is_leader=excluded.is_leader,
+		 color=excluded.color, updated_at=excluded.updated_at`,
+		p.ID, p.Name, string(p.Role), p.SystemPrompt, p.Model, p.Provider, isDef, isLead, p.Color, ts(p.CreatedAt), ts(p.UpdatedAt))
+	return p, err
+}
+
+func (s *Store) ListAgentProfiles(ctx context.Context) ([]types.AgentProfile, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,role,system_prompt,model,provider,is_default,is_leader,color,created_at,updated_at FROM agent_profiles ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []types.AgentProfile
+	for rows.Next() {
+		var p types.AgentProfile
+		var isDef, isLead int
+		var created, updated string
+		if err := rows.Scan(&p.ID, &p.Name, &p.Role, &p.SystemPrompt, &p.Model, &p.Provider, &isDef, &isLead, &p.Color, &created, &updated); err != nil {
+			return nil, err
+		}
+		p.IsDefault = isDef == 1
+		p.IsLeader = isLead == 1
+		p.CreatedAt, p.UpdatedAt = parseTS(created), parseTS(updated)
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteAgentProfile(ctx context.Context, id types.ID) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM agent_profiles WHERE id=?`, id)
+	return err
+}
+
+// SetDefaultProfile marks profile id as the single default; all others are unset.
+func (s *Store) SetDefaultProfile(ctx context.Context, id types.ID) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_profiles SET is_default=0`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_profiles SET is_default=1 WHERE id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// GetDefaultProfile returns the profile with is_default=1, or nil if none is set.
+func (s *Store) GetDefaultProfile(ctx context.Context) (*types.AgentProfile, error) {
+	var p types.AgentProfile
+	var isDef, isLead int
+	var created, updated string
+	err := s.db.QueryRowContext(ctx, `SELECT id,name,role,system_prompt,model,provider,is_default,is_leader,color,created_at,updated_at FROM agent_profiles WHERE is_default=1 LIMIT 1`).
+		Scan(&p.ID, &p.Name, &p.Role, &p.SystemPrompt, &p.Model, &p.Provider, &isDef, &isLead, &p.Color, &created, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	p.IsDefault = isDef == 1
+	p.IsLeader = isLead == 1
+	p.CreatedAt, p.UpdatedAt = parseTS(created), parseTS(updated)
+	return &p, nil
+}
+
+// ── Session links ─────────────────────────────────────────────────────────────
+
+func (s *Store) CreateSessionLink(ctx context.Context, link types.SessionLink) (types.SessionLink, error) {
+	if link.ID == "" {
+		link.ID = types.ID(fmt.Sprintf("%d", time.Now().UnixNano()))
+	}
+	if link.CreatedAt.IsZero() {
+		link.CreatedAt = time.Now().UTC()
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO session_links(id,session_a,session_b,label,created_at) VALUES(?,?,?,?,?)
+		 ON CONFLICT(session_a,session_b) DO UPDATE SET label=excluded.label`,
+		link.ID, link.SessionA, link.SessionB, link.Label, ts(link.CreatedAt))
+	return link, err
+}
+
+func (s *Store) ListSessionLinks(ctx context.Context, sessionID types.ID) ([]types.SessionLink, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id,session_a,session_b,label,created_at FROM session_links WHERE session_a=? OR session_b=? ORDER BY created_at`,
+		sessionID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []types.SessionLink
+	for rows.Next() {
+		var l types.SessionLink
+		var created string
+		if err := rows.Scan(&l.ID, &l.SessionA, &l.SessionB, &l.Label, &created); err != nil {
+			return nil, err
+		}
+		l.CreatedAt = parseTS(created)
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteSessionLink(ctx context.Context, linkID types.ID) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM session_links WHERE id=?`, linkID)
+	return err
+}
+
+// ── Agent role ────────────────────────────────────────────────────────────────
+
+func (s *Store) SetAgentRole(ctx context.Context, agentID types.ID, role types.AgentRole) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET role=?, updated_at=? WHERE id=?`, string(role), ts(time.Now().UTC()), agentID)
+	return err
+}

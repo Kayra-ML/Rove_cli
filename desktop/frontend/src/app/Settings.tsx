@@ -10,7 +10,9 @@ import { Icon } from "./Icons";
 import { THEMES, applyTheme, applyLang, type ThemeId } from "~/lib/themes";
 import { LANGS, t, getLang, type Lang } from "~/lib/i18n";
 
-type Section = "appearance" | "workspace" | "providers" | "goals" | "agents" | "roster" | "permissions" | "automation" | "memory" | "mcp" | "webhook";
+import { ProfilePanel } from "./ProfilePanel";
+
+type Section = "appearance" | "workspace" | "providers" | "goals" | "agents" | "roster" | "permissions" | "automation" | "memory" | "mcp" | "webhook" | "profiles";
 
 interface Props {
   onClose: () => void;
@@ -120,6 +122,9 @@ export function Settings({ onClose, onSelectWorkspace, initialSection = "appeara
             </button>
             <button className={`rail-item${section === "automation" ? " active" : ""}`} onClick={() => setSection("automation")}>
               <Icon name="pulse" size={15} /> {t("automation", lang)}
+            </button>
+            <button className={`rail-item${section === "profiles" ? " active" : ""}`} onClick={() => setSection("profiles")}>
+              <Icon name="agents" size={15} /> Profiller
             </button>
             <button className={`rail-item${section === "memory" ? " active" : ""}`} onClick={() => setSection("memory")}>
               <Icon name="box" size={15} /> {t("memory", lang)}
