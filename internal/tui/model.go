@@ -535,46 +535,31 @@ func (m *Model) layoutPanels() {
 	w := m.width
 	h := m.height
 
-	// Column widths (percentages)
-	leftW := w * 20 / 100
-	centerLeftW := w * 45 / 100
-	centerRightW := w * 20 / 100
-	rightW := w - leftW - centerLeftW - centerRightW
+	// New layout: chat takes ~80%, right rail ~20%
+	rightW := w * 22 / 100
+	if rightW < 20 {
+		rightW = 20
+	}
+	chatW := w - rightW
 
-	// Minimum sizes
-	if leftW < 18 {
-		leftW = 18
-	}
-	if centerLeftW < 30 {
-		centerLeftW = 30
-	}
-	if centerRightW < 18 {
-		centerRightW = 18
-	}
-	if rightW < 14 {
-		rightW = 14
-	}
-
-	// Row heights
 	inputH := 4
-	petH := 5
 	mainH := h - inputH - 1
 	if mainH < 10 {
 		mainH = 10
 	}
 
-	// Left rail: sessions top half, files bottom half
-	sessH := mainH / 2
-	fileH := mainH - sessH
+	planH := mainH * 65 / 100
+	usageH := mainH - planH
 
-	m.sessionPanel.SetSize(leftW, sessH)
-	m.fileTreePanel.SetSize(leftW, fileH)
-	m.messagesPanel.SetSize(centerLeftW, mainH)
-	m.codePanel.SetSize(centerRightW, mainH)
-	m.planPanel.SetSize(rightW-petH, mainH) // subtract pet width
+	m.messagesPanel.SetSize(chatW, mainH)
+	m.planPanel.SetSize(rightW, planH)
 	m.inputBar.SetSize(w, inputH)
 
-	_ = petH
+	// Keep unused panels at zero so they don't allocate/crash
+	m.sessionPanel.SetSize(0, 0)
+	m.fileTreePanel.SetSize(0, 0)
+	m.codePanel.SetSize(0, 0)
+	_ = usageH
 }
 
 // View renders the full TUI.
@@ -588,23 +573,12 @@ func (m *Model) View() string {
 	w := m.width
 	h := m.height
 
-	// Column widths
-	leftW := w * 20 / 100
-	centerLeftW := w * 45 / 100
-	centerRightW := w * 20 / 100
-	rightW := w - leftW - centerLeftW - centerRightW
-	if leftW < 18 {
-		leftW = 18
+	// Layout: chat left (~78%), right rail (~22%)
+	rightW := w * 22 / 100
+	if rightW < 22 {
+		rightW = 22
 	}
-	if centerLeftW < 30 {
-		centerLeftW = 30
-	}
-	if centerRightW < 18 {
-		centerRightW = 18
-	}
-	if rightW < 14 {
-		rightW = 14
-	}
+	chatW := w - rightW
 
 	inputH := 4
 	mainH := h - inputH - 1
@@ -612,24 +586,27 @@ func (m *Model) View() string {
 		mainH = 10
 	}
 
-	sessH := mainH / 2
-	fileH := mainH - sessH
+	planH := mainH * 65 / 100
 
-	m.sessionPanel.SetSize(leftW, sessH)
-	m.fileTreePanel.SetSize(leftW, fileH)
-	m.messagesPanel.SetSize(centerLeftW, mainH)
-	m.codePanel.SetSize(centerRightW, mainH)
-	m.planPanel.SetSize(rightW, mainH-5)
+	m.messagesPanel.SetSize(chatW, mainH)
+	m.planPanel.SetSize(rightW, planH)
 	m.inputBar.SetSize(w, inputH)
 
-	// Render panels
-	sessView := m.sessionPanel.Render()
-	fileView := m.fileTreePanel.Render()
-	msgView := m.messagesPanel.Render()
-	codeView := m.codePanel.Render()
+	// Render
+	msgView  := m.messagesPanel.Render()
 	planView := m.planPanel.Render()
-	petView := m.pet.Render(rightW)
+	petView  := m.pet.Render(rightW)
 	inputView := m.inputBar.Render()
+
+	// Right rail: pet on top, plan below, usage at bottom
+	rightRail := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().
+			Width(rightW).
+			Align(lipgloss.Center).
+			Foreground(colorAgent).
+			Render(petView),
+		planView,
+	)
 
 	// Status line
 	connMark := styleError.Render("○")
@@ -641,26 +618,13 @@ func (m *Model) View() string {
 		sessionInfo = styleDim.Render(" sess:" + m.currentSessID[:min(8, len(m.currentSessID))])
 	}
 	statusLine := connMark + sessionInfo + "  " + m.lastStatus
-	keybindHint := styleDim.Render(" Tab:focus  Ctrl+N:new  Ctrl+S:code  Ctrl+E:files  Esc×2:stop  Ctrl+C:quit")
+	keybindHint := styleDim.Render(" Tab:focus  /: commands  Ctrl+N:new  Esc×2:stop  Ctrl+C:quit")
 
-	// Build right rail: pet on top, plan below
-	rightRail := lipgloss.JoinVertical(lipgloss.Left,
-		stylePanelBorder.Width(rightW-2).Render(petView),
-		planView,
-	)
-
-	// Build left rail
-	leftRail := lipgloss.JoinVertical(lipgloss.Left, sessView, fileView)
-
-	// Build main row
 	mainRow := lipgloss.JoinHorizontal(lipgloss.Top,
-		leftRail,
 		msgView,
-		codeView,
 		rightRail,
 	)
 
-	// Bottom bar
 	statusBar := lipgloss.NewStyle().
 		Width(w).
 		Foreground(colorDim).
