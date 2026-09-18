@@ -34,6 +34,9 @@ type Server struct {
 
 func New(app *core.App) *Server { return &Server{app: app} }
 
+// maxBodyBytes caps incoming request bodies to 4 MiB to prevent OOM DoS.
+const maxBodyBytes = 4 << 20 // 4 MiB
+
 func (s *Server) ServeHTTP(addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +45,15 @@ func (s *Server) ServeHTTP(addr string) error {
 	mux.HandleFunc("/rpc", s.handleHTTPRPC)
 	mux.HandleFunc("/webhook/", s.handleWebhookTrigger)
 	mux.HandleFunc("/events", s.handleSSE)
-	s.http = &http.Server{Addr: addr, Handler: withCORS(mux)}
+	s.http = &http.Server{
+		Addr:    addr,
+		Handler: withCORS(mux),
+		// Reasonable timeouts — prevents slow-loris and hung connections.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	return s.http.ListenAndServe()
 }
 
@@ -110,6 +121,7 @@ func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST required", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req protocol.Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, protocol.Response{OK: false, Error: err.Error()})
@@ -138,6 +150,7 @@ func (s *Server) handleWebhookTrigger(w http.ResponseWriter, r *http.Request) {
 	if eventType == "" {
 		eventType = "*"
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
@@ -200,13 +213,35 @@ func bearer(r *http.Request) string {
 	return strings.TrimPrefix(h, "Bearer ")
 }
 
+// withCORS adds CORS headers. The HTTP server only listens on 127.0.0.1 so
+// in production only the Wails webview (which uses a wails:// or localhost
+// origin) can reach it. We still restrict the allowed origin explicitly so
+// that an arbitrary browser tab on the same machine cannot make credentialed
+// cross-origin requests.
 func withCORS(h http.Handler) http.Handler {
+	// Allowed origins: Wails desktop webview and local dev server.
+	allowed := map[string]struct{}{
+		"wails://wails":        {},
+		"http://localhost":     {},
+		"http://localhost:34115": {},
+		"http://127.0.0.1":    {},
+		"http://127.0.0.1:34115": {},
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			// No Origin header → direct/native call, no CORS needed.
+			h.ServeHTTP(w, r)
+			return
+		}
+		if _, ok := allowed[origin]; ok {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		}
 		if r.Method == http.MethodOptions {
-			w.WriteHeader(204)
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		h.ServeHTTP(w, r)
@@ -1398,7 +1433,7 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		return core.MustJSON(map[string]any{"ok": err == nil}), err
 
 	case protocol.MethodAgentRoles:
-		roles := []string{"leader", "developer", "reviewer", "researcher", "tester", "designer"}
+		roles := []string{"leader", "frontend", "backend", "developer", "designer", "tester", "debugger", "reviewer", "researcher"}
 		return core.MustJSON(roles), nil
 
 	default:
