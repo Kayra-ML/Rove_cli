@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { rpc } from "~/lib/rpc";
 import { usePrefs } from "~/hooks/usePrefs";
 import { t } from "~/lib/i18n";
+import { FileIcon } from "~/components/FileIcon";
 
 interface Props {
   root: string;
@@ -51,6 +52,9 @@ function Row({
   active: string | null;
 }) {
   const expanded = open.has(n.path);
+  const iconName = n.dir
+    ? (expanded ? "folder-open/" : "folder/")
+    : n.name;
   return (
     <>
       <button
@@ -59,7 +63,9 @@ function Row({
         onClick={() => (n.dir ? toggle(n.path) : onFile(n.path))}
         title={n.path}
       >
-        <span className="file-ico">{n.dir ? (expanded ? "▾" : "▸") : "·"}</span>
+        <span className="file-ico" style={{ display: "inline-flex", alignItems: "center", marginRight: 4 }}>
+          <FileIcon filename={iconName} size={14} />
+        </span>
         {n.name}
       </button>
       {n.dir && expanded && n.kids?.map((c) => (
