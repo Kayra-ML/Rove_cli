@@ -23,6 +23,7 @@ const (
 	FocusPlan
 	FocusInput
 	FocusFiles
+	FocusProfiles
 	_focusCount
 )
 
@@ -36,6 +37,7 @@ type Model struct {
 	planPanel     *PlanPanel
 	inputBar      *InputBar
 	pet           *Pet
+	profilePanel  *ProfilePanel
 
 	// IPC
 	ipc           *IPCClient
@@ -71,6 +73,7 @@ func NewModel(ipc *IPCClient) *Model {
 		planPanel:     NewPlanPanel(),
 		inputBar:      NewInputBar(),
 		pet:           NewPet(),
+		profilePanel:  NewProfilePanel(),
 		ipc:           ipc,
 		focus:         FocusInput,
 	}
@@ -83,6 +86,7 @@ func (m *Model) Init() tea.Cmd {
 		textinput.Blink,
 		m.ipc.FetchSessions(),
 		m.ipc.FetchAgents(),
+		m.ipc.FetchProfiles(),
 		tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg{t} }),
 	)
 }
@@ -111,6 +115,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Periodic refresh of sessions
 		if m.tickCount%5 == 0 {
 			cmds = append(cmds, m.ipc.FetchSessions())
+		}
+		// Periodic refresh of profiles every 30 ticks
+		if m.tickCount%30 == 0 {
+			cmds = append(cmds, m.ipc.FetchProfiles())
 		}
 
 	case ConnectedMsg:
@@ -173,6 +181,44 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.handleEvent(msg.Frame)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
+		}
+
+	case ProfilesMsg:
+		m.profilePanel.SetProfiles(msg.Profiles)
+
+	case LinkedSessionsMsg:
+		m.sessionPanel.SetLinks(msg.Links)
+
+	case SessionLinkedMsg:
+		if msg.Link.ID != "" {
+			m.lastStatus = styleDim.Render("↔ linked: " + string(msg.Link.Label))
+		}
+		// Refresh linked sessions for current
+		if m.currentSessID != "" {
+			cmds = append(cmds, m.ipc.FetchLinkedSessions(m.currentSessID))
+		}
+
+	case AutomationsMsg:
+		if msg.Err != nil {
+			m.lastStatus = styleError.Render("automations: " + msg.Err.Error())
+		} else {
+			var lines []string
+			for _, j := range msg.Jobs {
+				status := "disabled"
+				if j.Enabled {
+					status = "enabled"
+				}
+				lines = append(lines, fmt.Sprintf("  %s (%s)", j.Name, status))
+			}
+			if len(lines) == 0 {
+				lines = append(lines, "  (no automations)")
+			}
+			dm := DisplayMessage{
+				Role:    types.RoleAssistant,
+				Content: "Automations:\n" + strings.Join(lines, "\n"),
+				At:      time.Now(),
+			}
+			m.messagesPanel.AddMessage(dm)
 		}
 	}
 
@@ -239,15 +285,129 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		case tea.KeyEnter:
 			name, ok := m.inputBar.SlashSelect()
-			if ok && name == "/clear" {
-				m.messagesPanel.messages = nil
-				m.inputBar.Clear()
+			if ok {
+				switch name {
+				case "/clear":
+					m.messagesPanel.messages = nil
+					m.inputBar.Clear()
+				case "/undo":
+					m.inputBar.Clear()
+					return m.ipc.RestoreCheckpoint(m.currentSessID)
+				case "/automations":
+					m.inputBar.Clear()
+					return m.ipc.FetchAutomations()
+				case "/run":
+					m.inputBar.Clear()
+					m.inputBar.input.SetValue("/run ")
+				}
 			}
 			return nil
 		case tea.KeyEsc:
 			m.inputBar.CloseSlash()
 			return nil
 		}
+	}
+
+	// Profile panel key handling
+	if m.profilePanel.IsOpen() {
+		if m.profilePanel.IsEnteringName() {
+			switch msg.Type {
+			case tea.KeyEnter:
+				name := m.profilePanel.CommitNewProfile()
+				if name != "" {
+					// Create a new profile via upsert RPC
+					return func() tea.Msg {
+						_, _ = m.ipc.Call("profile.upsert", map[string]any{
+							"name": name,
+							"role": "developer",
+						})
+						raw, err := m.ipc.Call("profile.list", nil)
+						if err != nil {
+							return ProfilesMsg{}
+						}
+						var profiles []types.AgentProfile
+						if err2 := json.Unmarshal(raw, &profiles); err2 != nil {
+							return ProfilesMsg{}
+						}
+						return ProfilesMsg{Profiles: profiles}
+					}
+				}
+				return nil
+			case tea.KeyEsc:
+				m.profilePanel.CancelNewProfile()
+				return nil
+			case tea.KeyBackspace:
+				m.profilePanel.BackspaceName()
+				return nil
+			case tea.KeyRunes:
+				for _, r := range msg.Runes {
+					m.profilePanel.AppendNameChar(r)
+				}
+				return nil
+			}
+			return nil
+		}
+		switch msg.Type {
+		case tea.KeyUp:
+			m.profilePanel.MoveUp()
+			return nil
+		case tea.KeyDown:
+			m.profilePanel.MoveDown()
+			return nil
+		case tea.KeyEnter:
+			if id := m.profilePanel.SelectedID(); id != "" {
+				return m.ipc.SetDefaultProfile(id)
+			}
+			return nil
+		case tea.KeyEsc:
+			m.profilePanel.Close()
+			return nil
+		case tea.KeyRunes:
+			switch msg.String() {
+			case "n":
+				m.profilePanel.StartNewProfile()
+			case "d":
+				if id := m.profilePanel.SelectedID(); id != "" {
+					return func() tea.Msg {
+						_, _ = m.ipc.Call("profile.delete", map[string]any{"profileId": id})
+						return m.ipc.FetchProfiles()()
+					}
+				}
+			}
+			return nil
+		}
+		return nil
+	}
+
+	// Session panel inline prompt handling
+	if m.sessionPanel.IsPromptOpen() {
+		switch msg.Type {
+		case tea.KeyEnter:
+			if m.sessionPanel.IsLinkPromptOpen() {
+				targetID := m.sessionPanel.CommitLinkPrompt()
+				if targetID != "" && m.currentSessID != "" {
+					return m.ipc.LinkSessions(m.currentSessID, targetID, "")
+				}
+			} else if m.sessionPanel.IsRelayPromptOpen() {
+				content := m.sessionPanel.CommitRelayPrompt()
+				if content != "" && m.currentSessID != "" {
+					return m.ipc.RelayMessage(m.currentSessID, content)
+				}
+			}
+			return nil
+		case tea.KeyEsc:
+			m.sessionPanel.ClosePrompts()
+			return nil
+		case tea.KeyBackspace:
+			m.sessionPanel.BackspacePrompt()
+			return nil
+		case tea.KeyRunes:
+			for _, r := range msg.Runes {
+				m.sessionPanel.AppendPromptChar(r)
+			}
+			return nil
+		}
+		return nil
 	}
 
 	// Approval card handling
@@ -285,6 +445,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case tea.KeyCtrlE:
 		m.focus = FocusFiles
 		m.updateFocus()
+		return nil
+	case tea.KeyCtrlP:
+		m.profilePanel.Toggle()
 		return nil
 	case tea.KeyCtrlN:
 		agentID := ""
@@ -325,6 +488,25 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			if sess := m.sessionPanel.Selected(); sess != nil {
 				m.currentSessID = string(sess.ID)
 				return m.ipc.FetchHistory(m.currentSessID)
+			}
+		case tea.KeyRunes:
+			switch msg.String() {
+			case "l":
+				if m.sessionPanel.Selected() != nil {
+					m.sessionPanel.OpenLinkPrompt()
+				}
+			case "u":
+				if linkID := m.sessionPanel.SelectedLinkID(); linkID != "" {
+					return m.ipc.UnlinkSessions(linkID)
+				}
+			case "h":
+				if sess := m.sessionPanel.Selected(); sess != nil {
+					return m.ipc.FetchHistory(string(sess.ID))
+				}
+			case "r":
+				if m.sessionPanel.Selected() != nil {
+					m.sessionPanel.OpenRelayPrompt()
+				}
 			}
 		}
 	case FocusFiles:
@@ -617,8 +799,12 @@ func (m *Model) View() string {
 	if m.currentSessID != "" {
 		sessionInfo = styleDim.Render(" sess:" + m.currentSessID[:min(8, len(m.currentSessID))])
 	}
-	statusLine := connMark + sessionInfo + "  " + m.lastStatus
-	keybindHint := styleDim.Render(" Tab:focus  /: commands  Ctrl+N:new  Esc×2:stop  Ctrl+C:quit")
+	profileInfo := ""
+	if name := m.profilePanel.ActiveProfileName(); name != "" {
+		profileInfo = styleDim.Render("  profile:" + name)
+	}
+	statusLine := connMark + sessionInfo + profileInfo + "  " + m.lastStatus
+	keybindHint := styleDim.Render(" Tab:focus  /: commands  Ctrl+N:new  Ctrl+P:profiles  Esc×2:stop  Ctrl+C:quit")
 
 	mainRow := lipgloss.JoinHorizontal(lipgloss.Top,
 		msgView,
@@ -630,11 +816,62 @@ func (m *Model) View() string {
 		Foreground(colorDim).
 		Render(fmt.Sprintf("%s  %s", statusLine, keybindHint))
 
-	return lipgloss.JoinVertical(lipgloss.Left,
+	base := lipgloss.JoinVertical(lipgloss.Left,
 		mainRow,
 		statusBar,
 		inputView,
 	)
+
+	// Overlay profile modal if open
+	if m.profilePanel.IsOpen() {
+		modal := m.profilePanel.Render()
+		// Center the modal overlay
+		modalLines := strings.Split(modal, "\n")
+		modalH := len(modalLines)
+		modalW := 0
+		for _, l := range modalLines {
+			if lw := lipgloss.Width(l); lw > modalW {
+				modalW = lw
+			}
+		}
+		topPad := (h - modalH) / 2
+		if topPad < 0 {
+			topPad = 0
+		}
+		leftPad := (w - modalW) / 2
+		if leftPad < 0 {
+			leftPad = 0
+		}
+		// Build overlay: pad above + left-padded modal rows
+		baseLines := strings.Split(base, "\n")
+		// Ensure baseLines is long enough
+		for len(baseLines) < h {
+			baseLines = append(baseLines, strings.Repeat(" ", w))
+		}
+		for i, ml := range modalLines {
+			row := topPad + i
+			if row >= len(baseLines) {
+				break
+			}
+			bl := baseLines[row]
+			// Pad bl to width if needed
+			blRunes := []rune(bl)
+			for len(blRunes) < w {
+				blRunes = append(blRunes, ' ')
+			}
+			// Insert modal line at leftPad position
+			mlRunes := []rune(ml)
+			end := leftPad + len(mlRunes)
+			if end > len(blRunes) {
+				end = len(blRunes)
+			}
+			copy(blRunes[leftPad:end], mlRunes[:end-leftPad])
+			baseLines[row] = string(blRunes)
+		}
+		return strings.Join(baseLines, "\n")
+	}
+
+	return base
 }
 
 func shortPath(p string) string {

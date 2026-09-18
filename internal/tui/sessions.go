@@ -11,10 +11,17 @@ import (
 // SessionPanel renders the session list.
 type SessionPanel struct {
 	sessions []types.Session
+	links    []types.SessionLink // all links for current sessions
 	cursor   int
 	active   bool
 	width    int
 	height   int
+
+	// Inline prompts
+	linkPromptOpen   bool
+	linkPromptInput  string
+	relayPromptOpen  bool
+	relayPromptInput string
 }
 
 func NewSessionPanel() *SessionPanel {
@@ -26,6 +33,101 @@ func (p *SessionPanel) SetSessions(sessions []types.Session) {
 	if p.cursor >= len(sessions) && len(sessions) > 0 {
 		p.cursor = len(sessions) - 1
 	}
+}
+
+func (p *SessionPanel) SetLinks(links []types.SessionLink) {
+	p.links = links
+}
+
+// linksForSession returns the links involving the given session ID.
+func (p *SessionPanel) linksForSession(sessionID string) []types.SessionLink {
+	var out []types.SessionLink
+	for _, l := range p.links {
+		if string(l.SessionA) == sessionID || string(l.SessionB) == sessionID {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// OpenLinkPrompt opens the inline link-session input.
+func (p *SessionPanel) OpenLinkPrompt() {
+	p.linkPromptOpen = true
+	p.linkPromptInput = ""
+	p.relayPromptOpen = false
+}
+
+// OpenRelayPrompt opens the inline relay-message input.
+func (p *SessionPanel) OpenRelayPrompt() {
+	p.relayPromptOpen = true
+	p.relayPromptInput = ""
+	p.linkPromptOpen = false
+}
+
+// IsPromptOpen returns true when any inline prompt is open.
+func (p *SessionPanel) IsPromptOpen() bool {
+	return p.linkPromptOpen || p.relayPromptOpen
+}
+
+// IsLinkPromptOpen returns true when the link prompt is open.
+func (p *SessionPanel) IsLinkPromptOpen() bool { return p.linkPromptOpen }
+
+// IsRelayPromptOpen returns true when the relay prompt is open.
+func (p *SessionPanel) IsRelayPromptOpen() bool { return p.relayPromptOpen }
+
+// AppendPromptChar appends a char to the active prompt input.
+func (p *SessionPanel) AppendPromptChar(ch rune) {
+	if p.linkPromptOpen {
+		p.linkPromptInput += string(ch)
+	} else if p.relayPromptOpen {
+		p.relayPromptInput += string(ch)
+	}
+}
+
+// BackspacePrompt removes the last char from the active prompt.
+func (p *SessionPanel) BackspacePrompt() {
+	if p.linkPromptOpen && len(p.linkPromptInput) > 0 {
+		p.linkPromptInput = p.linkPromptInput[:len(p.linkPromptInput)-1]
+	} else if p.relayPromptOpen && len(p.relayPromptInput) > 0 {
+		p.relayPromptInput = p.relayPromptInput[:len(p.relayPromptInput)-1]
+	}
+}
+
+// CommitLinkPrompt finalises the link prompt and returns the target session ID.
+func (p *SessionPanel) CommitLinkPrompt() string {
+	v := strings.TrimSpace(p.linkPromptInput)
+	p.linkPromptOpen = false
+	p.linkPromptInput = ""
+	return v
+}
+
+// CommitRelayPrompt finalises the relay prompt and returns the message content.
+func (p *SessionPanel) CommitRelayPrompt() string {
+	v := strings.TrimSpace(p.relayPromptInput)
+	p.relayPromptOpen = false
+	p.relayPromptInput = ""
+	return v
+}
+
+// ClosePrompts closes any open inline prompt.
+func (p *SessionPanel) ClosePrompts() {
+	p.linkPromptOpen = false
+	p.linkPromptInput = ""
+	p.relayPromptOpen = false
+	p.relayPromptInput = ""
+}
+
+// SelectedLinkID returns the link ID of the first link for the selected session, if any.
+func (p *SessionPanel) SelectedLinkID() string {
+	sel := p.Selected()
+	if sel == nil {
+		return ""
+	}
+	links := p.linksForSession(string(sel.ID))
+	if len(links) > 0 {
+		return string(links[0].ID)
+	}
+	return ""
 }
 
 func (p *SessionPanel) SetSize(w, h int) {
@@ -77,24 +179,46 @@ func (p *SessionPanel) Render() string {
 	}
 
 	for i, sess := range p.sessions {
+		sessLinks := p.linksForSession(string(sess.ID))
 		label := sess.Title
 		if label == "" {
 			label = string(sess.ID)[:8]
 		}
-		if len(label) > innerW-2 {
-			label = label[:innerW-2]
+		// Age (simplified: just show ID prefix)
+		dot := styleDim.Render("○")
+		linkSuffix := ""
+		if len(sessLinks) > 0 {
+			linkSuffix = styleDim.Render(fmt.Sprintf(" ↔%d", len(sessLinks)))
 		}
-		label = fmt.Sprintf(" %s", label)
+		maxLabel := innerW - 6 - len(linkSuffix)
+		if maxLabel < 1 {
+			maxLabel = 1
+		}
+		if len(label) > maxLabel {
+			label = label[:maxLabel]
+		}
+		line := fmt.Sprintf("%s %s%s", dot, label, linkSuffix)
 
 		if i == p.cursor {
-			rows = append(rows, styleSelected.Width(innerW).Render(label))
+			rows = append(rows, styleSelected.Width(innerW).Render(line))
 		} else {
-			rows = append(rows, styleDim.Render(label))
+			rows = append(rows, styleDim.Render(line))
 		}
 
 		if len(rows) >= innerH {
 			break
 		}
+	}
+
+	// Inline link prompt
+	if p.linkPromptOpen {
+		rows = append(rows, "")
+		rows = append(rows, styleDim.Render("  Link to session ID: ")+p.linkPromptInput+"█")
+	}
+	// Inline relay prompt
+	if p.relayPromptOpen {
+		rows = append(rows, "")
+		rows = append(rows, styleDim.Render("  Relay message: ")+p.relayPromptInput+"█")
 	}
 
 	// Pad to fill height

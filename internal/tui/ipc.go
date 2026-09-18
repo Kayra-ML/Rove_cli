@@ -56,6 +56,13 @@ type EventMsg struct {
 type ConnectedMsg struct{}
 type DisconnectedMsg struct{ Err error }
 
+type ProfilesMsg struct{ Profiles []types.AgentProfile }
+type LinkedSessionsMsg struct {
+	Links    []types.SessionLink
+	Sessions []types.Session
+}
+type SessionLinkedMsg struct{ Link types.SessionLink }
+
 // NewIPCClient creates a client using config defaults.
 func NewIPCClient() (*IPCClient, error) {
 	cfg, err := config.Load("")
@@ -273,6 +280,129 @@ func (c *IPCClient) SubscribeEvents(p *tea.Program) {
 			p.Send(EventMsg{Frame: ev})
 		}
 	}()
+}
+
+// FetchProfiles fetches profile list via profile.list RPC.
+func (c *IPCClient) FetchProfiles() tea.Cmd {
+	return func() tea.Msg {
+		raw, err := c.Call(protocol.MethodProfileList, nil)
+		if err != nil {
+			return ProfilesMsg{}
+		}
+		var profiles []types.AgentProfile
+		if err := json.Unmarshal(raw, &profiles); err != nil {
+			return ProfilesMsg{}
+		}
+		return ProfilesMsg{Profiles: profiles}
+	}
+}
+
+// FetchLinkedSessions fetches sessions linked to a given sessionID via session.linked RPC.
+func (c *IPCClient) FetchLinkedSessions(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		raw, err := c.Call(protocol.MethodSessionLinked, map[string]any{"sessionId": sessionID})
+		if err != nil {
+			return LinkedSessionsMsg{}
+		}
+		var result struct {
+			Links    []types.SessionLink `json:"links"`
+			Sessions []types.Session     `json:"sessions"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return LinkedSessionsMsg{}
+		}
+		return LinkedSessionsMsg{Links: result.Links, Sessions: result.Sessions}
+	}
+}
+
+// LinkSessions links two sessions via session.link RPC.
+func (c *IPCClient) LinkSessions(sessionA, sessionB, label string) tea.Cmd {
+	return func() tea.Msg {
+		raw, err := c.Call(protocol.MethodSessionLink, map[string]any{
+			"sessionA": sessionA,
+			"sessionB": sessionB,
+			"label":    label,
+		})
+		if err != nil {
+			return SessionLinkedMsg{}
+		}
+		var link types.SessionLink
+		if err := json.Unmarshal(raw, &link); err != nil {
+			return SessionLinkedMsg{}
+		}
+		return SessionLinkedMsg{Link: link}
+	}
+}
+
+// UnlinkSessions unlinks two sessions via session.unlink RPC.
+func (c *IPCClient) UnlinkSessions(linkID string) tea.Cmd {
+	return func() tea.Msg {
+		_, _ = c.Call(protocol.MethodSessionUnlink, map[string]any{"linkId": linkID})
+		return nil
+	}
+}
+
+// SetDefaultProfile sets a profile as default via profile.setDefault RPC.
+func (c *IPCClient) SetDefaultProfile(profileID string) tea.Cmd {
+	return func() tea.Msg {
+		_, _ = c.Call(protocol.MethodProfileSetDefault, map[string]any{"profileId": profileID})
+		// Re-fetch profiles after setting default
+		raw, err := c.Call(protocol.MethodProfileList, nil)
+		if err != nil {
+			return ProfilesMsg{}
+		}
+		var profiles []types.AgentProfile
+		if err := json.Unmarshal(raw, &profiles); err != nil {
+			return ProfilesMsg{}
+		}
+		return ProfilesMsg{Profiles: profiles}
+	}
+}
+
+// RelayMessage sends a message to a linked session via session.relay RPC.
+func (c *IPCClient) RelayMessage(sessionID, content string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := c.Call(protocol.MethodSessionRelay, map[string]any{
+			"sessionId": sessionID,
+			"content":   content,
+		})
+		return SendMsg{SessionID: sessionID, Err: err}
+	}
+}
+
+// FetchAutomations fetches automation list via automation.list RPC.
+func (c *IPCClient) FetchAutomations() tea.Cmd {
+	return func() tea.Msg {
+		raw, err := c.Call(protocol.MethodAutomationList, nil)
+		if err != nil {
+			return AutomationsMsg{Err: err}
+		}
+		var jobs []types.AutomationJob
+		if err := json.Unmarshal(raw, &jobs); err != nil {
+			return AutomationsMsg{Err: err}
+		}
+		return AutomationsMsg{Jobs: jobs}
+	}
+}
+
+// RestoreCheckpoint restores the last checkpoint via checkpoint.restore RPC.
+func (c *IPCClient) RestoreCheckpoint(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		params := map[string]any{}
+		if sessionID != "" {
+			params["sessionId"] = sessionID
+		}
+		_, err := c.Call(protocol.MethodCheckpointRestore, params)
+		if err != nil {
+			return SendMsg{SessionID: sessionID, Err: err}
+		}
+		return SendMsg{SessionID: sessionID}
+	}
+}
+
+type AutomationsMsg struct {
+	Jobs []types.AutomationJob
+	Err  error
 }
 
 func trimSSEData(s string) string {
