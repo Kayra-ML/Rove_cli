@@ -189,11 +189,100 @@ func (c *Catalog) Install(name, version string) (types.InstalledSkill, error) {
 	return c.runtime.InstallFromDir(src)
 }
 
-func (c *Catalog) Search(q string) ([]IndexEntry, error) {
-	all, err := c.List()
-	if err != nil {
-		return nil, err
+// bundledEntries builds a catalog directly from the embedded FS without
+// touching the disk registry. This ensures the marketplace is always
+// populated even on first launch before SeedBundled has written index.json.
+func bundledEntries() []IndexEntry {
+	var out []IndexEntry
+	add := func(embedDir, kind, plugin, name string) {
+		data, err := bundled.ReadFile(embedDir + "/skill.yaml")
+		if err != nil {
+			return
+		}
+		var m struct {
+			Name        string `yaml:"name"`
+			Version     string `yaml:"version"`
+			Author      string `yaml:"author"`
+			Description string `yaml:"description"`
+			Homepage    string `yaml:"homepage"`
+			License     string `yaml:"license"`
+		}
+		// simple YAML key:value parse — avoid pulling in yaml pkg here
+		for _, line := range strings.Split(string(data), "\n") {
+			kv := strings.SplitN(line, ":", 2)
+			if len(kv) != 2 {
+				continue
+			}
+			k := strings.TrimSpace(kv[0])
+			v := strings.Trim(strings.TrimSpace(kv[1]), `"`)
+			switch k {
+			case "name":
+				m.Name = v
+			case "version":
+				m.Version = v
+			case "author":
+				m.Author = v
+			case "description":
+				m.Description = v
+			case "homepage":
+				m.Homepage = v
+			case "license":
+				m.License = v
+			}
+		}
+		if m.Name == "" || m.Version == "" {
+			return
+		}
+		ms := types.MarketSkill{
+			Manifest: types.SkillManifest{
+				Name:        m.Name,
+				Version:     m.Version,
+				Author:      m.Author,
+				Description: m.Description,
+				Homepage:    m.Homepage,
+				License:     m.License,
+			},
+			Source: "rovecode",
+			Kind:   kind,
+			Plugin: plugin,
+		}
+		out = append(out, IndexEntry{MarketSkill: ms, Versions: []string{m.Version}})
 	}
+	_ = fs.WalkDir(bundled, "bundled/plugins", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || d.Name() != "skill.yaml" {
+			return err
+		}
+		plugin := filepath.Base(filepath.Dir(path))
+		add(filepath.Dir(path), "plugin", plugin, plugin)
+		return nil
+	})
+	_ = fs.WalkDir(bundled, "bundled/skills", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || d.Name() != "skill.yaml" {
+			return err
+		}
+		plugin := filepath.Base(filepath.Dir(filepath.Dir(path)))
+		add(filepath.Dir(path), "skill", plugin, filepath.Base(filepath.Dir(path)))
+		return nil
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].Manifest.Name < out[j].Manifest.Name })
+	return out
+}
+
+func (c *Catalog) Search(q string) ([]IndexEntry, error) {
+	// Merge disk index (installed/published) with embedded bundled catalog.
+	disk, _ := c.List()
+	have := map[string]bool{}
+	for _, e := range disk {
+		have[e.Manifest.Name] = true
+	}
+	all := append([]IndexEntry{}, disk...)
+	for _, e := range bundledEntries() {
+		if !have[e.Manifest.Name] {
+			all = append(all, e)
+			have[e.Manifest.Name] = true
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Manifest.Name < all[j].Manifest.Name })
 	if q == "" {
 		return all, nil
 	}
