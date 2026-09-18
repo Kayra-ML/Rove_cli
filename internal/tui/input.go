@@ -84,6 +84,11 @@ var defaultSlashCommands = []SlashCommand{
 	{Name: "/ci", Description: "Generate CI/CD pipeline config", Prompt: "Generate a CI/CD pipeline configuration (GitHub Actions) for this project including build, test, lint, and deploy stages."},
 	{Name: "/env", Description: "List all required environment variables", Prompt: "List all environment variables this project requires, their purpose, example values, and whether they are required or optional."},
 	{Name: "/deploy", Description: "Deployment checklist and steps", Prompt: "Generate a deployment checklist for this project. Include pre-deploy checks, migration steps, and rollback procedure."},
+
+	// ── SSH Remote ─────────────────────────────────────────────────────────
+	{Name: "/ssh", Description: "Manage SSH remote hosts (Ctrl+H)", Prompt: ""},
+	{Name: "/ssh-connect", Description: "Connect to a remote host via SSH tunnel", Prompt: ""},
+	{Name: "/ssh-disconnect", Description: "Disconnect from remote, return to local daemon", Prompt: ""},
 }
 
 // InputBar handles the bottom input area.

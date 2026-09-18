@@ -24,6 +24,8 @@ type IPCClient struct {
 	httpBase string
 	token    string
 	reqID    atomic.Int64
+	// tcpAddr is non-empty when connected via SSH tunnel (overrides ipcPath)
+	tcpAddr string
 }
 
 // --- Tea messages delivered by the IPC layer ---
@@ -102,11 +104,21 @@ func NewIPCClient() (*IPCClient, error) {
 	}, nil
 }
 
+// NewIPCClientTCP creates an IPC client that connects via TCP (for SSH tunnels).
+// addr is "localhost:port", token is the remote daemon token.
+func NewIPCClientTCP(addr string, token string) *IPCClient {
+	return &IPCClient{
+		tcpAddr:  addr,
+		httpBase: "http://" + addr,
+		token:    token,
+	}
+}
+
 func (c *IPCClient) nextID() string {
 	return fmt.Sprintf("tui-%d", c.reqID.Add(1))
 }
 
-// Call sends a JSON-RPC request over the unix socket and returns the raw result.
+// Call sends a JSON-RPC request over the unix socket (or TCP tunnel) and returns the raw result.
 func (c *IPCClient) Call(method string, params any) (json.RawMessage, error) {
 	raw, _ := json.Marshal(params)
 	req := protocol.Request{
@@ -114,6 +126,27 @@ func (c *IPCClient) Call(method string, params any) (json.RawMessage, error) {
 		Method: method,
 		Params: raw,
 		Token:  c.token,
+	}
+
+	// If using SSH tunnel, connect via TCP
+	if c.tcpAddr != "" {
+		conn, err := net.DialTimeout("tcp", c.tcpAddr, 5*time.Second)
+		if err != nil {
+			return nil, fmt.Errorf("ipc tcp dial %s: %w", c.tcpAddr, err)
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+		if err := json.NewEncoder(conn).Encode(req); err != nil {
+			return nil, fmt.Errorf("ipc encode: %w", err)
+		}
+		var resp protocol.Response
+		if err := json.NewDecoder(bufio.NewReader(conn)).Decode(&resp); err != nil {
+			return nil, fmt.Errorf("ipc decode: %w", err)
+		}
+		if !resp.OK {
+			return nil, fmt.Errorf("rpc error: %s", resp.Error)
+		}
+		return resp.Result, nil
 	}
 
 	// Try IPC first

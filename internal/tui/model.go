@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aether-dev/aether/internal/sshtunnel"
 	"github.com/aether-dev/aether/internal/types"
 	"github.com/aether-dev/aether/pkg/protocol"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -38,6 +39,7 @@ type Model struct {
 	inputBar      *InputBar
 	pet           *Pet
 	profilePanel  *ProfilePanel
+	sshPanel      *SSHPanel
 
 	// IPC
 	ipc           *IPCClient
@@ -74,10 +76,16 @@ func NewModel(ipc *IPCClient) *Model {
 		inputBar:      NewInputBar(),
 		pet:           NewPet(),
 		profilePanel:  NewProfilePanel(),
+		sshPanel:      NewSSHPanel(),
 		ipc:           ipc,
 		focus:         FocusInput,
 	}
 	return m
+}
+
+// SetInitialTunnel wires a pre-opened SSH tunnel (e.g. from --host flag) into the model.
+func (m *Model) SetInitialTunnel(t *sshtunnel.Tunnel, alias string) {
+	m.sshPanel.SetTunnel(t, alias)
 }
 
 // Init runs initial commands.
@@ -220,6 +228,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.messagesPanel.AddMessage(dm)
 		}
+
+	case sshConnectMsg:
+		// Switch IPC to tunnel
+		m.ipc = msg.ipc
+		m.sshPanel.SetTunnel(msg.tunnel, msg.alias)
+		m.lastStatus = styleDim.Render("● ssh: " + msg.alias)
+		m.currentSessID = ""
+		cmds = append(cmds, m.ipc.FetchSessions(), m.ipc.FetchAgents())
+
+	case sshStatusMsg:
+		m.lastStatus = styleError.Render("ssh: " + msg.err)
+
+	case sshDisconnectMsg:
+		// Close tunnel and reconnect to local socket
+		m.sshPanel.Disconnect()
+		if ipc, err := NewIPCClient(); err == nil {
+			m.ipc = ipc
+		}
+		m.lastStatus = styleDim.Render("○ local")
+		m.currentSessID = ""
+		cmds = append(cmds, m.ipc.FetchSessions(), m.ipc.FetchAgents())
 	}
 
 	// Forward key events to input bar when focused
@@ -297,8 +326,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 					m.inputBar.Clear()
 					return m.ipc.FetchAutomations()
 				case "/run":
-					m.inputBar.Clear()
-					m.inputBar.input.SetValue("/run ")
+									m.inputBar.Clear()
+									m.inputBar.input.SetValue("/run ")
+								case "/ssh":
+									m.inputBar.Clear()
+									m.sshPanel.Open()
+								case "/ssh-connect":
+									m.inputBar.Clear()
+									m.sshPanel.Open()
+								case "/ssh-disconnect":
+									m.inputBar.Clear()
+									return m.disconnectSSH()
 				}
 			}
 			return nil
@@ -306,6 +344,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			m.inputBar.CloseSlash()
 			return nil
 		}
+	}
+
+	// SSH panel key handling
+	if m.sshPanel.IsOpen() {
+		return m.handleSSHPanelKey(msg)
 	}
 
 	// Profile panel key handling
@@ -434,6 +477,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// Global panel switching
 	switch msg.Type {
+	case tea.KeyCtrlH:
+		if m.sshPanel.IsOpen() {
+			m.sshPanel.Close()
+		} else {
+			m.sshPanel.Open()
+		}
+		return nil
 	case tea.KeyTab:
 		m.focus = (m.focus + 1) % _focusCount
 		m.updateFocus()
@@ -803,8 +853,12 @@ func (m *Model) View() string {
 	if name := m.profilePanel.ActiveProfileName(); name != "" {
 		profileInfo = styleDim.Render("  profile:" + name)
 	}
-	statusLine := connMark + sessionInfo + profileInfo + "  " + m.lastStatus
-	keybindHint := styleDim.Render(" Tab:focus  /: commands  Ctrl+N:new  Ctrl+P:profiles  Esc×2:stop  Ctrl+C:quit")
+	sshInfo := ""
+	if txt := m.sshPanel.TunnelStatusText(); txt != "" {
+		sshInfo = lipgloss.NewStyle().Foreground(lipgloss.Color("#44cc44")).Render("  " + txt)
+	}
+	statusLine := connMark + sessionInfo + profileInfo + sshInfo + "  " + m.lastStatus
+	keybindHint := styleDim.Render(" Tab:focus  /: commands  Ctrl+N:new  Ctrl+P:profiles  Ctrl+H:ssh  Esc×2:stop  Ctrl+C:quit")
 
 	mainRow := lipgloss.JoinHorizontal(lipgloss.Top,
 		msgView,
@@ -824,51 +878,12 @@ func (m *Model) View() string {
 
 	// Overlay profile modal if open
 	if m.profilePanel.IsOpen() {
-		modal := m.profilePanel.Render()
-		// Center the modal overlay
-		modalLines := strings.Split(modal, "\n")
-		modalH := len(modalLines)
-		modalW := 0
-		for _, l := range modalLines {
-			if lw := lipgloss.Width(l); lw > modalW {
-				modalW = lw
-			}
-		}
-		topPad := (h - modalH) / 2
-		if topPad < 0 {
-			topPad = 0
-		}
-		leftPad := (w - modalW) / 2
-		if leftPad < 0 {
-			leftPad = 0
-		}
-		// Build overlay: pad above + left-padded modal rows
-		baseLines := strings.Split(base, "\n")
-		// Ensure baseLines is long enough
-		for len(baseLines) < h {
-			baseLines = append(baseLines, strings.Repeat(" ", w))
-		}
-		for i, ml := range modalLines {
-			row := topPad + i
-			if row >= len(baseLines) {
-				break
-			}
-			bl := baseLines[row]
-			// Pad bl to width if needed
-			blRunes := []rune(bl)
-			for len(blRunes) < w {
-				blRunes = append(blRunes, ' ')
-			}
-			// Insert modal line at leftPad position
-			mlRunes := []rune(ml)
-			end := leftPad + len(mlRunes)
-			if end > len(blRunes) {
-				end = len(blRunes)
-			}
-			copy(blRunes[leftPad:end], mlRunes[:end-leftPad])
-			baseLines[row] = string(blRunes)
-		}
-		return strings.Join(baseLines, "\n")
+		base = overlayModal(base, m.profilePanel.Render(), w, h)
+	}
+
+	// Overlay SSH panel modal if open
+	if m.sshPanel.IsOpen() {
+		base = overlayModal(base, m.sshPanel.Render(), w, h)
 	}
 
 	return base
@@ -881,6 +896,144 @@ func shortPath(p string) string {
 	}
 	return "…/" + strings.Join(parts[len(parts)-2:], "/")
 }
+
+// overlayModal centers a modal string over a base string (already rendered lines).
+func overlayModal(base, modal string, w, h int) string {
+	modalLines := strings.Split(modal, "\n")
+	modalH := len(modalLines)
+	modalW := 0
+	for _, l := range modalLines {
+		if lw := lipgloss.Width(l); lw > modalW {
+			modalW = lw
+		}
+	}
+	topPad := (h - modalH) / 2
+	if topPad < 0 {
+		topPad = 0
+	}
+	leftPad := (w - modalW) / 2
+	if leftPad < 0 {
+		leftPad = 0
+	}
+	baseLines := strings.Split(base, "\n")
+	for len(baseLines) < h {
+		baseLines = append(baseLines, strings.Repeat(" ", w))
+	}
+	for i, ml := range modalLines {
+		row := topPad + i
+		if row >= len(baseLines) {
+			break
+		}
+		bl := baseLines[row]
+		blRunes := []rune(bl)
+		for len(blRunes) < w {
+			blRunes = append(blRunes, ' ')
+		}
+		mlRunes := []rune(ml)
+		end := leftPad + len(mlRunes)
+		if end > len(blRunes) {
+			end = len(blRunes)
+		}
+		copy(blRunes[leftPad:end], mlRunes[:end-leftPad])
+		baseLines[row] = string(blRunes)
+	}
+	return strings.Join(baseLines, "\n")
+}
+
+// handleSSHPanelKey processes keystrokes when the SSH panel is open.
+func (m *Model) handleSSHPanelKey(msg tea.KeyMsg) tea.Cmd {
+	if m.sshPanel.IsAddMode() {
+		// Route key to the active text input
+		switch msg.Type {
+		case tea.KeyEsc:
+			m.sshPanel.CancelAdd()
+			return nil
+		case tea.KeyTab, tea.KeyEnter:
+			m.sshPanel.NextAddField()
+			return nil
+		default:
+			// Forward to the right textinput
+			switch m.sshPanel.addField {
+			case 0:
+				newM, cmd := m.sshPanel.addAlias.Update(msg)
+				m.sshPanel.addAlias = newM
+				return cmd
+			case 1:
+				newM, cmd := m.sshPanel.addSpec.Update(msg)
+				m.sshPanel.addSpec = newM
+				return cmd
+			case 2:
+				newM, cmd := m.sshPanel.addNote.Update(msg)
+				m.sshPanel.addNote = newM
+				return cmd
+			}
+		}
+		return nil
+	}
+
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.sshPanel.Close()
+		return nil
+	case tea.KeyUp:
+		m.sshPanel.MoveUp()
+	case tea.KeyDown:
+		m.sshPanel.MoveDown()
+	case tea.KeyEnter:
+		// Connect to selected host
+		h := m.sshPanel.SelectedHost()
+		if h == nil {
+			return nil
+		}
+		return m.connectSSHHost(h.Alias, h.Spec)
+	case tea.KeyRunes:
+		switch msg.String() {
+		case "a":
+			m.sshPanel.StartAdd()
+		case "d":
+			m.sshPanel.DeleteSelected()
+		case "x":
+			// Disconnect and return to local socket
+			return m.disconnectSSH()
+		}
+	}
+	return nil
+}
+
+// sshConnectMsg is sent after successfully establishing an SSH tunnel.
+type sshConnectMsg struct {
+	alias  string
+	tunnel *sshtunnel.Tunnel
+	ipc    *IPCClient
+}
+
+// connectSSHHost opens an SSH tunnel to the named host and switches IPC.
+func (m *Model) connectSSHHost(alias, spec string) tea.Cmd {
+	return func() tea.Msg {
+		t, err := sshtunnel.NewTunnel(spec)
+		if err != nil {
+			return sshStatusMsg{err: err.Error()}
+		}
+		if err := t.Open(); err != nil {
+			return sshStatusMsg{err: "tunnel: " + err.Error()}
+		}
+		// Try to fetch remote token; fall back to empty (daemon may not require it)
+		tok, _ := t.FetchRemoteToken()
+		ipc := NewIPCClientTCP(t.LocalAddr(), tok)
+		return sshConnectMsg{alias: alias, tunnel: t, ipc: ipc}
+	}
+}
+
+type sshStatusMsg struct{ err string }
+
+// disconnectSSH closes the tunnel and reconnects to local socket.
+func (m *Model) disconnectSSH() tea.Cmd {
+	return func() tea.Msg {
+		return sshDisconnectMsg{}
+	}
+}
+
+type sshDisconnectMsg struct{}
 
 func min(a, b int) int {
 	if a < b {
