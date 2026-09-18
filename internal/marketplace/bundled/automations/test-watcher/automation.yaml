@@ -1,0 +1,12 @@
+name: test-watcher
+version: "1.0.0"
+author: Aether
+description: "Workspace dosyalarındaki değişiklikleri izler; değişiklik sonrası test suite'i tetikler ve sonucu karta log olarak ekler."
+kind: automation
+trigger:
+  every_seconds: 30
+permissions:
+  shell: true
+  network: false
+  git: false
+tags: [testing, watch, ci]

@@ -1,0 +1,12 @@
+name: stale-card-nudge
+version: "1.0.0"
+author: Aether
+description: "Review kolonunda 24 saatten fazla bekleyen kartları işaretler ve atayan agent'ı uyarır."
+kind: automation
+trigger:
+  every_seconds: 3600
+permissions:
+  shell: false
+  network: false
+  git: false
+tags: [kanban, review, nudge]

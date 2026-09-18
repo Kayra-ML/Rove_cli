@@ -146,4 +146,21 @@ const (
 
 	// Parallel orchestration.
 	MethodOrchParallel = "orch.parallel"
+
+	// Multi-profile role system.
+	MethodProfileList       = "profile.list"
+	MethodProfileUpsert     = "profile.upsert"
+	MethodProfileDelete     = "profile.delete"
+	MethodProfileSetDefault = "profile.setDefault"
+	MethodProfileGetDefault = "profile.getDefault"
+
+	// Session linking and relay.
+	MethodSessionLink   = "session.link"
+	MethodSessionUnlink = "session.unlink"
+	MethodSessionLinked = "session.linked"
+	MethodSessionRelay  = "session.relay"
+
+	// Agent role management.
+	MethodAgentSetRole = "agent.setRole"
+	MethodAgentRoles   = "agent.roles"
 )

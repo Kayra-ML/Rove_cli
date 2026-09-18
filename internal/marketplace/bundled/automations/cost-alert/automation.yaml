@@ -1,0 +1,12 @@
+name: cost-alert
+version: "1.0.0"
+author: Aether
+description: "Günlük token/USD harcaması eşiği aşarsa aktif session'a uyarı mesajı yazar."
+kind: automation
+trigger:
+  every_seconds: 600
+permissions:
+  shell: false
+  network: false
+  git: false
+tags: [cost, billing, alert]

@@ -1278,6 +1278,129 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		return nil, fmt.Errorf("automation %q not installed", p.Name)
 
+	// ── Agent profiles ─────────────────────────────────────────────────────
+	case protocol.MethodProfileList:
+		out, err := a.Store.ListAgentProfiles(ctx)
+		return core.MustJSON(out), err
+
+	case protocol.MethodProfileUpsert:
+		var p types.AgentProfile
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if p.ID == "" {
+			p.ID = id.NewID()
+		}
+		out, err := a.Store.UpsertAgentProfile(ctx, p)
+		return core.MustJSON(out), err
+
+	case protocol.MethodProfileDelete:
+		var p struct {
+			ID types.ID `json:"id"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Store.DeleteAgentProfile(ctx, p.ID)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	case protocol.MethodProfileSetDefault:
+		var p struct {
+			ID types.ID `json:"id"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Store.SetDefaultProfile(ctx, p.ID)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	case protocol.MethodProfileGetDefault:
+		out, err := a.Store.GetDefaultProfile(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return core.MustJSON(map[string]any{"profile": nil}), nil
+		}
+		return core.MustJSON(map[string]any{"profile": out}), nil
+
+	// ── Session linking & relay ─────────────────────────────────────────────
+	case protocol.MethodSessionLink:
+		var p struct {
+			SessionA types.ID `json:"sessionA"`
+			SessionB types.ID `json:"sessionB"`
+			Label    string   `json:"label"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		link := types.SessionLink{SessionA: p.SessionA, SessionB: p.SessionB, Label: p.Label}
+		out, err := a.Store.CreateSessionLink(ctx, link)
+		return core.MustJSON(out), err
+
+	case protocol.MethodSessionUnlink:
+		var p struct {
+			ID types.ID `json:"id"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Store.DeleteSessionLink(ctx, p.ID)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	case protocol.MethodSessionLinked:
+		var p struct {
+			SessionID types.ID `json:"sessionId"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		out, err := a.Store.ListSessionLinks(ctx, p.SessionID)
+		return core.MustJSON(out), err
+
+	case protocol.MethodSessionRelay:
+		var p struct {
+			FromSessionID types.ID `json:"fromSessionId"`
+			ToSessionID   types.ID `json:"toSessionId"`
+			Content       string   `json:"content"`
+			FromRole      string   `json:"fromRole"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		toSess, err := a.Store.GetSession(ctx, p.ToSessionID)
+		if err != nil {
+			return nil, fmt.Errorf("target session not found: %w", err)
+		}
+		prefix := "[relay"
+		if p.FromRole != "" {
+			prefix += " from " + p.FromRole
+		}
+		prefix += "] "
+		res, err := a.Agents.Run(ctx, agent.RunRequest{
+			AgentID:     toSess.AgentID,
+			SessionID:   p.ToSessionID,
+			WorkspaceID: toSess.WorkspaceID,
+			UserMessage: prefix + p.Content,
+		})
+		return core.MustJSON(res), err
+
+	// ── Agent role management ───────────────────────────────────────────────
+	case protocol.MethodAgentSetRole:
+		var p struct {
+			AgentID types.ID        `json:"agentId"`
+			Role    types.AgentRole `json:"role"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Store.SetAgentRole(ctx, p.AgentID, p.Role)
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
+
+	case protocol.MethodAgentRoles:
+		roles := []string{"leader", "developer", "reviewer", "researcher", "tester", "designer"}
+		return core.MustJSON(roles), nil
+
 	default:
 		return nil, fmt.Errorf("unknown method %s", req.Method)
 	}

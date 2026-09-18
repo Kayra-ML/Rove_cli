@@ -1,0 +1,12 @@
+name: idle-timeout
+version: "1.0.0"
+author: Aether
+description: "15 dakikadan fazla idle kalan running agent'ı durdurur; durumunu ve son mesajını karta kaydeder."
+kind: automation
+trigger:
+  every_seconds: 60
+permissions:
+  shell: false
+  network: false
+  git: false
+tags: [agents, idle, timeout, cleanup]

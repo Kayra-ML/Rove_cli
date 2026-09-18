@@ -1,0 +1,12 @@
+name: context-compacter
+version: "1.0.0"
+author: Aether
+description: "500+ mesaj içeren session'ları tespit eder, eski mesajları otomatik özetler; token şişmesini önler."
+kind: automation
+trigger:
+  every_seconds: 900
+permissions:
+  shell: false
+  network: false
+  git: false
+tags: [context, tokens, session, compact]
