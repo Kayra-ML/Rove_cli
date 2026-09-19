@@ -103,7 +103,12 @@ func (p *PlanPanel) Render() string {
 	if len(rows) > h {
 		rows = rows[:h]
 	}
-	return lipgloss.NewStyle().Width(w).Height(h).Background(colorBgPanel).Render(strings.Join(rows, "\n"))
+	clamped := make([]string, len(rows))
+	for i, r := range rows {
+		clamped[i] = fitVisible(r, w)
+	}
+	// Do NOT use lipgloss.Render on joined multiline — it pads all rows to max width.
+	return strings.Join(clamped, "\n")
 }
 
 func (p *PlanPanel) renderPlan(w, h int) []string {
@@ -150,13 +155,13 @@ func (p *PlanPanel) renderPlan(w, h int) []string {
 }
 
 func (p *PlanPanel) renderPlanItem(item TodoItem, maxW int) string {
-	icon := styleDim.Render("◇")
+	icon := iconPending
 	textStyle := styleMuted
 	if item.Done {
-		icon = styleSuccess.Render("◆")
+		icon = iconDone
 		textStyle = styleMeta
 	} else if item.Current {
-		icon = styleHighlight.Bold(true).Render("◆")
+		icon = iconCurrent
 		textStyle = lipgloss.NewStyle().Foreground(colorWhite)
 	}
 	tag := ""
@@ -173,7 +178,7 @@ func (p *PlanPanel) renderPlanItem(item TodoItem, maxW int) string {
 }
 
 func (p *PlanPanel) renderUsage(w, h int) []string {
-	rows := []string{ruledHeader("usage", w, fmt.Sprintf("%.0f%%", p.contextPct*100), false)}
+	rows := []string{sectionHeader("usage", w, fmt.Sprintf("%.0f%%", p.contextPct*100), false)}
 	barW := w - 4
 	if barW < 8 {
 		barW = 8
@@ -188,7 +193,7 @@ func (p *PlanPanel) renderUsage(w, h int) []string {
 		barColor = colorRed
 	}
 	bar := lipgloss.NewStyle().Foreground(barColor).Render(strings.Repeat("━", filled))
-	bar += styleSep.Render(strings.Repeat("━", barW-filled))
+	bar += styleFrame.Render(strings.Repeat("░", barW-filled))
 	rows = append(rows, "  "+bar)
 
 	total := formatTokens(p.totalTokens)

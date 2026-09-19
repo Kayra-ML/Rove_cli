@@ -305,7 +305,7 @@ func (p *MessagesPanel) Render() string {
 	w := maxInt(p.width, 12)
 	h := maxInt(p.height, 4)
 	innerW, contentH := p.contentDimensions()
-	header := ruledHeader("messages", w, fmt.Sprintf("%d", len(p.messages)), p.active)
+	header := sectionHeader("messages", w, fmt.Sprintf("%d", len(p.messages)), p.active)
 
 	all := p.renderedLines(innerW)
 	var visible []string
@@ -329,12 +329,12 @@ func (p *MessagesPanel) Render() string {
 
 	rows := []string{header}
 	for _, line := range visible {
-		rows = append(rows, "   "+line)
+		rows = append(rows, "  "+line)
 	}
 	if p.pendingCard != nil {
 		rows = append(rows, "")
 		for _, line := range p.renderApprovalCardLines(innerW) {
-			rows = append(rows, "   "+line)
+			rows = append(rows, "  "+line)
 		}
 	}
 	for len(rows) < h {
@@ -343,7 +343,15 @@ func (p *MessagesPanel) Render() string {
 	if len(rows) > h {
 		rows = rows[:h]
 	}
-	return lipgloss.NewStyle().Width(w).Height(h).Background(colorBg).Render(strings.Join(rows, "\n"))
+	// Clamp each row to exact width w, then join — avoids lipgloss.Width(w) padding
+	// misbehaving on ambiguous-width chars (◆, ─, │) in lipgloss v1.1.0.
+	clamped := make([]string, len(rows))
+	for i, r := range rows {
+		clamped[i] = fitVisible(r, w)
+	}
+	// Do NOT use lipgloss.Render on the joined multiline string — lipgloss pads every
+	// row to the longest row's width, which breaks our exact-width contract.
+	return strings.Join(clamped, "\n")
 }
 
 func (p *MessagesPanel) emptyState(innerW, contentH int) []string {
@@ -351,16 +359,22 @@ func (p *MessagesPanel) emptyState(innerW, contentH int) []string {
 	if contentH < 5 {
 		return rows
 	}
-	brandText := truncate("R O V E  C O D E", innerW)
-	subtitleText := truncate("Welcome to Rove Code", innerW)
-	hintText := truncate("type a task · /setup for a real model · ctrl+k", innerW)
-	brand := styleBrand.Render(brandText)
+	brandText := truncate("◆  ROVE CODE", innerW)
+	subtitleText := truncate("local-first coding agent", innerW)
+	hintText := truncate("/setup  ·  ctrl+k  ·  type a task", innerW)
+	brand := styleBrandMark.Render("◆") + "  " + styleBrand.Render("ROVE CODE")
 	subtitle := styleMuted.Render(subtitleText)
-	hint := styleMeta.Render(hintText)
+	hint := styleFrame.Render(hintText)
+	_ = brandText
 	start := contentH/2 - 2
+	if start < 0 {
+		start = 0
+	}
 	rows[start] = centerVisible(brand, innerW)
-	rows[start+2] = centerVisible(subtitle, innerW)
-	if contentH > 7 {
+	if start+2 < contentH {
+		rows[start+2] = centerVisible(subtitle, innerW)
+	}
+	if contentH > 7 && start+4 < contentH {
 		rows[start+4] = centerVisible(hint, innerW)
 	}
 	return rows

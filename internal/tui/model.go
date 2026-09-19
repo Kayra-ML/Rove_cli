@@ -868,8 +868,11 @@ type tuiLayout struct {
 }
 
 func (m *Model) calculateLayout() tuiLayout {
-	layout := tuiLayout{topH: 1, statusH: 1, inputH: m.inputBar.DesiredHeight()}
-	layout.mainH = m.height - layout.topH - layout.statusH - layout.inputH
+	// topH=2: frame top + info line. statusH=1, inputH=variable, bottomH=1 (frame bottom), midDivH=1
+	layout := tuiLayout{topH: 2, statusH: 1, inputH: m.inputBar.DesiredHeight()}
+	const midDivH = 1
+	const bottomH = 1
+	layout.mainH = m.height - layout.topH - layout.statusH - layout.inputH - midDivH - bottomH
 	if layout.mainH < 4 {
 		layout.mainH = 4
 	}
@@ -917,22 +920,36 @@ func (m *Model) View() string {
 	messages := m.messagesPanel.Render()
 	mainRow := messages
 	if layout.showRail {
-		divider := lipgloss.NewStyle().
-			Width(1).
-			Height(layout.mainH).
-			Foreground(colorSep).
-			Background(colorBgPanel).
-			Render(strings.TrimSuffix(strings.Repeat("│\n", layout.mainH), "\n"))
-		mainRow = lipgloss.JoinHorizontal(lipgloss.Top, messages, divider, m.planPanel.Render())
+		// Manual horizontal join — JoinHorizontal adds padding that widens rows.
+		// Split each panel into lines and zip them side-by-side.
+		msgLines := strings.Split(messages, "\n")
+		sepLine := frameSide()
+		planLines := strings.Split(m.planPanel.Render(), "\n")
+		maxLines := layout.mainH
+		joined := make([]string, maxLines)
+		for i := 0; i < maxLines; i++ {
+			ml := ""
+			if i < len(msgLines) {
+				ml = msgLines[i]
+			}
+			pl := ""
+			if i < len(planLines) {
+				pl = planLines[i]
+			}
+			joined[i] = fitVisible(ml, layout.chatW) + sepLine + fitVisible(pl, layout.rightW)
+		}
+		mainRow = strings.Join(joined, "\n")
 	}
 
-	base := lipgloss.JoinVertical(
-		lipgloss.Left,
-		topBar,
-		mainRow,
-		m.renderStatusBar(m.width),
-		m.inputBar.Render(),
-	)
+	statusBar := m.renderStatusBar(m.width)
+	inputView := m.inputBar.Render()
+	bottomFrame := frameBottom(m.width)
+
+	// Manual join — avoid lipgloss.JoinVertical which pads every component to max width.
+	// Each component must already be exactly m.width wide via fitVisible.
+	parts := make([]string, 0, 6)
+	parts = append(parts, topBar, mainRow, m.renderMidDivider(layout), statusBar, inputView, bottomFrame)
+	base := strings.Join(parts, "\n")
 
 	if m.profilePanel.IsOpen() {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.profilePanel.Render())
@@ -943,31 +960,58 @@ func (m *Model) View() string {
 	return base
 }
 
+func (m *Model) renderMidDivider(layout tuiLayout) string {
+	if layout.showRail {
+		// "+---chatW-1---+---rightW-1---+" = chatW + rightW + 1 = m.width
+		lFill := layout.chatW - 1
+		rFill := layout.rightW - 1
+		if lFill < 0 {
+			lFill = 0
+		}
+		if rFill < 0 {
+			rFill = 0
+		}
+		return fitVisible(
+			styleFrame.Render(frameCharLT+strings.Repeat(frameCharH, lFill)+frameCharCRS+strings.Repeat(frameCharH, rFill)+frameCharRT),
+			m.width,
+		)
+	}
+	return fitVisible(frameDivider(m.width), m.width)
+}
+
 func (m *Model) renderTopBar(w int) string {
-	brand := styleBrandMark.Render("◆") + " " + styleBrand.Render("ROVE CODE")
+	top := frameTop("ROVE CODE", w)
+
+	// second line: model  mode  status — right-aligned inside the frame
 	var rightParts []string
+	if len(m.agents) > 0 {
+		rightParts = append(rightParts, styleMuted.Render(displayModel(m.agents[0])))
+	}
 	if m.sshPanel.TunnelStatusText() != "" {
-		rightParts = append(rightParts, m.sshPanel.TunnelStatusText())
+		rightParts = append(rightParts, styleMuted.Render(m.sshPanel.TunnelStatusText()))
 	} else {
-		rightParts = append(rightParts, "local")
+		rightParts = append(rightParts, styleFrame.Render("local"))
 	}
 	if profile := m.profilePanel.ActiveProfileName(); profile != "" {
-		rightParts = append(rightParts, profile)
+		rightParts = append(rightParts, styleMuted.Render(profile))
 	}
 	if m.pet != nil {
-		rightParts = append(rightParts, stripSimpleANSI(m.pet.Render(0)))
+		rightParts = append(rightParts, styleMuted.Render(stripSimpleANSI(m.pet.Render(0))))
 	}
-	right := styleMuted.Render(strings.Join(rightParts, "  ·  "))
-	gap := w - lipgloss.Width(brand) - lipgloss.Width(right) - 4
-	if gap < 1 {
-		right = styleMuted.Render(stripSimpleANSI(m.pet.Render(0)))
-		gap = w - lipgloss.Width(brand) - lipgloss.Width(right) - 4
-	}
+	right := strings.Join(rightParts, styleDim.Render("  ·  "))
+	rightW := lipgloss.Width(right)
+	gap := w - rightW - 4 // 2 leading spaces + 2 trailing
 	if gap < 1 {
 		gap = 1
 	}
-	line := "  " + brand + strings.Repeat(" ", gap) + right + "  "
-	return lipgloss.NewStyle().Width(w).Background(colorBgPanel).Render(fitVisible(line, w))
+	// Build infoLine to exact width w, then pad/trim — NO JoinVertical (it would equalise widths)
+	infoLine := strings.Repeat(" ", gap) + right + "  "
+	infoLine = fitVisible(infoLine, w)
+	// Ensure background fills the whole line without lipgloss width expansion
+	infoLine = lipgloss.NewStyle().Background(colorBgPanel).Render(infoLine)
+
+	// Manual join: avoid lipgloss.JoinVertical which pads every row to max-width
+	return top + "\n" + infoLine
 }
 
 func (m *Model) renderStatusBar(w int) string {
