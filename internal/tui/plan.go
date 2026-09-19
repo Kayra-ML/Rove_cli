@@ -94,7 +94,8 @@ func (p *PlanPanel) SetUsage(prompt, completion, total, calls int64) {
 func (p *PlanPanel) Render() string {
 	w := maxInt(p.width, 18)
 	h := maxInt(p.height, 10)
-	usageH := clampInt(h/3, 7, 10)
+	// Usage mini: header + bar + 3 data lines = 5 rows max
+	usageH := 5
 	planH := h - usageH
 	rows := append(p.renderPlan(w, planH), p.renderUsage(w, usageH)...)
 	for len(rows) < h {
@@ -107,7 +108,6 @@ func (p *PlanPanel) Render() string {
 	for i, r := range rows {
 		clamped[i] = fitVisible(r, w)
 	}
-	// Do NOT use lipgloss.Render on joined multiline — it pads all rows to max width.
 	return strings.Join(clamped, "\n")
 }
 
@@ -192,17 +192,13 @@ func (p *PlanPanel) renderUsage(w, h int) []string {
 	if p.contextPct >= .90 {
 		barColor = colorRed
 	}
-	bar := lipgloss.NewStyle().Foreground(barColor).Render(strings.Repeat("━", filled))
-	bar += styleFrame.Render(strings.Repeat("░", barW-filled))
+	bar := lipgloss.NewStyle().Foreground(barColor).Render(strings.Repeat("=", filled))
+	bar += styleFrame.Render(strings.Repeat("-", barW-filled))
 	rows = append(rows, "  "+bar)
 
 	total := formatTokens(p.totalTokens)
-	input := formatTokens(p.promptTokens)
-	output := formatTokens(p.completionTokens)
 	rows = append(rows,
-		"  "+styleMuted.Render("tokens")+"  "+lipgloss.NewStyle().Foreground(colorWhite).Render(total),
-		"  "+styleMeta.Render("in "+input+"  ·  out "+output),
-		"  "+styleMuted.Render("calls")+"   "+lipgloss.NewStyle().Foreground(colorWhite).Render(fmt.Sprintf("%d", p.calls)),
+		"  "+styleMuted.Render("tok")+" "+lipgloss.NewStyle().Foreground(colorWhite).Render(total)+"  "+styleMeta.Render("calls "+fmt.Sprintf("%d", p.calls)),
 		"  "+styleMeta.Render(truncate(p.modelName, w-4)),
 	)
 	for len(rows) < h {
