@@ -231,7 +231,9 @@ func (t *Tunnel) baseSSHArgs() []string {
 	}
 
 	// Identity file
-	if key := os.Getenv("AETHER_SSH_KEY"); key != "" {
+	if key := os.Getenv("ROVECODE_SSH_KEY"); key != "" {
+		args = append(args, "-i", key)
+	} else if key := os.Getenv("AETHER_SSH_KEY"); key != "" {
 		args = append(args, "-i", key)
 	} else {
 		for _, name := range []string{"id_ed25519", "id_rsa", "id_ecdsa"} {
