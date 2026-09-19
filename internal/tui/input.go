@@ -136,7 +136,7 @@ func (b *InputBar) DesiredHeight() int {
 	if b.slashOpen {
 		return 10 // 9 popup rows + 1 input line
 	}
-	return 4 // 3 visual padding rows + 1 input line = taller input area
+	return 1 // single input line, no padding
 }
 
 func (b *InputBar) SetActive(active bool) {
@@ -240,16 +240,8 @@ func (b *InputBar) Render() string {
 	rows := make([]string, 0, b.DesiredHeight())
 	if b.slashOpen {
 		rows = append(rows, b.renderSlashPopup(w)...)
-		rows = append(rows, b.renderInputLine(w))
-		return strings.Join(rows, "\n")
 	}
-	// Tall input: blank line, input line, blank line, blank line
-	side := styleFrame.Render(frameCharV)
-	blank := fitVisible(side+strings.Repeat(" ", w-2)+side, w)
-	rows = append(rows, blank)
 	rows = append(rows, b.renderInputLine(w))
-	rows = append(rows, blank)
-	rows = append(rows, blank)
 	return strings.Join(rows, "\n")
 }
 

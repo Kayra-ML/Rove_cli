@@ -135,18 +135,17 @@ func ruledHeader(label string, width int, right string, active bool) string {
 // Frame characters — all ASCII (single-width, no ambiguous wcwidth)
 // ---------------------------------------------------------------------------
 const (
-	frameCharTL  = "+" // top-left
-	frameCharTR  = "+" // top-right
-	frameCharBL  = "+" // bottom-left
-	frameCharBR  = "+" // bottom-right
-	frameCharH   = "=" // horizontal — double-line feel for thickness
-	frameCharV   = "|" // vertical
-	frameCharLT  = "+" // left-T
-	frameCharRT  = "+" // right-T
-	frameCharCRS = "+" // cross
+	frameCharTL  = "+"
+	frameCharTR  = "+"
+	frameCharBL  = "+"
+	frameCharBR  = "+"
+	frameCharH   = "-" // ince yatay çizgi
+	frameCharV   = "|"
+	frameCharLT  = "+"
+	frameCharRT  = "+"
+	frameCharCRS = "+"
 )
 
-// frameInputH is the horizontal char inside the input area (lighter than outer frame)
 const frameInputH = "-"
 
 func frameSide() string {
