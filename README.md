@@ -17,13 +17,13 @@ rovecode daemon       # shared daemon in the foreground
 rovecode --version
 ```
 
-macOS desktop bundle:
+macOS desktop app (from any directory, not the repo):
 
 ```bash
-./build-mac.sh
+curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install-desktop.sh | bash
 ```
 
-Drag `Rove Code.app` into `/Applications`, then `rovecode`.
+That clones the source, builds `Rove Code.app`, and copies it to `/Applications`. Then `rovecode`.
 
 ## Layout
 

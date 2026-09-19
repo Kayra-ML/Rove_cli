@@ -257,7 +257,8 @@ func launchDesktop() {
 		}
 	}
 	fmt.Fprintln(os.Stderr, "rovecode: desktop app is not installed yet.")
-	fmt.Fprintln(os.Stderr, "On macOS, build it with ./build-mac.sh and drag Rove Code.app into /Applications.")
+	fmt.Fprintln(os.Stderr, "On macOS, from any directory:")
+	fmt.Fprintln(os.Stderr, "  curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install-desktop.sh | bash")
 	os.Exit(1)
 }
 

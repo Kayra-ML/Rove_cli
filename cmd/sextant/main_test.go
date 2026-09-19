@@ -21,4 +21,7 @@ func TestDesktopMissingAppExits(t *testing.T) {
 	if !strings.Contains(string(out), "desktop app is not installed") {
 		t.Fatalf("missing desktop error: %s", out)
 	}
+	if !strings.Contains(string(out), "install-desktop.sh") {
+		t.Fatalf("missing desktop install hint: %s", out)
+	}
 }

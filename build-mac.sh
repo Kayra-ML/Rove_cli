@@ -104,5 +104,5 @@ echo -e "${GREEN}═════════════════════
 echo -e "${GREEN}  RoveCode.dmg oluşturuldu!${NC}"
 echo -e "${GREEN}  Konum: $DMG_PATH${NC}"
 echo -e "${GREEN}  DMG'yi aç → Rove Code.app'i Applications'a sürükle.${NC}"
-echo -e "${GREEN}  Sonra: rovecode desktop${NC}"
+echo -e "${GREEN}  Sonra: rovecode${NC}"
 echo -e "${GREEN}══════════════════════════════════════${NC}"
