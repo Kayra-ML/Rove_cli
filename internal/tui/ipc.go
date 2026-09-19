@@ -61,6 +61,11 @@ type SetupMsg struct {
 	Err   error
 }
 
+type WorkspaceListMsg struct {
+	Workspaces []types.Workspace
+	Err        error
+}
+
 type SendMsg struct {
 	SessionID string
 	Err       error
@@ -257,6 +262,20 @@ func (c *IPCClient) FetchAgents() tea.Cmd {
 	}
 }
 
+func (c *IPCClient) FetchWorkspaces() tea.Cmd {
+	return func() tea.Msg {
+		raw, err := c.Call(protocol.MethodWorkspaceList, nil)
+		if err != nil {
+			return WorkspaceListMsg{Err: err}
+		}
+		var list []types.Workspace
+		if err := json.Unmarshal(raw, &list); err != nil {
+			return WorkspaceListMsg{Err: err}
+		}
+		return WorkspaceListMsg{Workspaces: list}
+	}
+}
+
 func (c *IPCClient) FetchUsage() tea.Cmd {
 	return func() tea.Msg {
 		raw, err := c.Call(protocol.MethodUsageGet, nil)
@@ -324,6 +343,10 @@ func (c *IPCClient) CreateSession(agentID string) tea.Cmd {
 		params := map[string]any{}
 		if agentID != "" {
 			params["agentId"] = agentID
+		}
+		if cwd, err := os.Getwd(); err == nil && cwd != "" {
+			params["cwd"] = cwd
+			params["workspace"] = cwd
 		}
 		raw, err := c.Call(protocol.MethodSessionCreate, params)
 		if err != nil {

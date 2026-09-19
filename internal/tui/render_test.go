@@ -136,6 +136,16 @@ func TestUsageMessageFeedsRightRail(t *testing.T) {
 	}
 }
 
+func TestWorkspaceListBindsStatusPath(t *testing.T) {
+	m := NewModel(&IPCClient{})
+	m.sessionPanel.SetSessions([]types.Session{{ID: "s1", WorkspaceID: "w1"}})
+	m.sessionPanel.SelectID("s1")
+	_, _ = m.Update(WorkspaceListMsg{Workspaces: []types.Workspace{{ID: "w1", Path: "/tmp/rove-demo"}}})
+	if m.workspacePath != "/tmp/rove-demo" {
+		t.Fatalf("workspace path = %q", m.workspacePath)
+	}
+}
+
 func TestCommandPaletteReservesHeight(t *testing.T) {
 	m := NewModel(nil)
 	m.width, m.height = 120, 30

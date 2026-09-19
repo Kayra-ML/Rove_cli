@@ -51,6 +51,7 @@ type Model struct {
 	currentSessID string
 	pendingPrompt string
 	setupMode     bool
+	workspacePath string
 	agents        []types.Agent
 	escCount      int
 	escTime       time.Time
@@ -107,6 +108,20 @@ func displayModel(agent types.Agent) string {
 	return provider + "/" + model
 }
 
+func (m *Model) applyWorkspaceList(list []types.Workspace) {
+	if sel := m.sessionPanel.Selected(); sel != nil && sel.WorkspaceID != "" {
+		for _, ws := range list {
+			if ws.ID == sel.WorkspaceID {
+				m.workspacePath = ws.Path
+				return
+			}
+		}
+	}
+	if m.workspacePath == "" && len(list) > 0 {
+		m.workspacePath = list[0].Path
+	}
+}
+
 func (m *Model) SetStartupError(err error) {
 	if err == nil {
 		return
@@ -124,6 +139,7 @@ func (m *Model) Init() tea.Cmd {
 		m.ipc.FetchAgents(),
 		m.ipc.FetchProfiles(),
 		m.ipc.FetchUsage(),
+		m.ipc.FetchWorkspaces(),
 		tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg{t} }),
 	)
 }
@@ -196,7 +212,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sessionPanel.SelectID(m.currentSessID)
 				sessionChanged = true
 			}
-
 			if sessionChanged {
 				m.messagesPanel.SetMessages(nil)
 				if m.pendingPrompt != "" && m.currentSessID != "" {
@@ -206,11 +221,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds,
 						m.ipc.SendMessage(m.currentSessID, prompt),
 						m.ipc.FetchLinkedSessions(m.currentSessID),
+						m.ipc.FetchWorkspaces(),
 					)
 				} else if m.currentSessID != "" {
 					cmds = append(cmds,
 						m.ipc.FetchHistory(m.currentSessID),
 						m.ipc.FetchLinkedSessions(m.currentSessID),
+						m.ipc.FetchWorkspaces(),
 					)
 				}
 			}
@@ -229,6 +246,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(msg.Agents) > 0 {
 				m.planPanel.SetModelName(displayModel(msg.Agents[0]))
 			}
+		}
+
+	case WorkspaceListMsg:
+		if msg.Err == nil {
+			m.applyWorkspaceList(msg.Workspaces)
 		}
 
 	case UsageMsg:
@@ -425,6 +447,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 						m.lastStatus = styleDim.Render("no model configured — /setup")
 					} else {
 						m.lastStatus = styleDim.Render(displayModel(m.agents[0]))
+					}
+					return nil
+				case "/cwd":
+					m.inputBar.Clear()
+					if m.workspacePath == "" {
+						m.lastStatus = styleDim.Render("no workspace yet")
+					} else {
+						m.lastStatus = styleDim.Render(m.workspacePath)
 					}
 					return nil
 				}
@@ -959,6 +989,9 @@ func (m *Model) renderStatusBar(w int) string {
 		} else {
 			right = styleError.Render("○ offline")
 		}
+	}
+	if m.workspacePath != "" {
+		right = styleMeta.Render(shortPath(m.workspacePath)) + "   " + right
 	}
 	if m.currentSessID != "" {
 		right = styleMeta.Render("session "+m.currentSessID[:min(7, len(m.currentSessID))]) + "   " + right

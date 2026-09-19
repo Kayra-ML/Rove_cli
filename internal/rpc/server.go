@@ -296,8 +296,32 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			Title       string   `json:"title"`
 			AgentID     types.ID `json:"agentId"`
 			WorkspaceID types.ID `json:"workspaceId"`
+			Workspace   string   `json:"workspace"`
+			Cwd         string   `json:"cwd"`
 		}
 		_ = json.Unmarshal(req.Params, &p)
+		if p.AgentID == "" {
+			if agents, err := a.Agents.List(ctx); err == nil && len(agents) > 0 {
+				p.AgentID = agents[0].ID
+			}
+		}
+		if p.WorkspaceID == "" {
+			path := strings.TrimSpace(p.Workspace)
+			if path == "" {
+				path = strings.TrimSpace(p.Cwd)
+			}
+			if path == "" {
+				path, _ = os.Getwd()
+			}
+			if path != "" {
+				name := filepath.Base(path)
+				ws, err := a.WS.Open(ctx, path, name)
+				if err != nil {
+					return nil, err
+				}
+				p.WorkspaceID = ws.ID
+			}
+		}
 		out, err := a.Sess.Create(ctx, p.Title, p.AgentID, p.WorkspaceID)
 		return core.MustJSON(out), err
 	case protocol.MethodSessionList:
@@ -344,6 +368,14 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		if p.Workspace == "" && p.WorkspaceID != "" {
 			if ws, err := a.WS.Get(ctx, p.WorkspaceID); err == nil {
 				p.Workspace = ws.Path
+			}
+		}
+		if p.Workspace == "" {
+			if cwd, err := os.Getwd(); err == nil {
+				if ws, err := a.WS.Open(ctx, cwd, filepath.Base(cwd)); err == nil {
+					p.WorkspaceID = ws.ID
+					p.Workspace = ws.Path
+				}
 			}
 		}
 		res, err := a.Agents.Run(ctx, agent.RunRequest{

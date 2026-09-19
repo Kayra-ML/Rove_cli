@@ -140,6 +140,40 @@ func TestSessionSendUsesCore(t *testing.T) {
 	}
 }
 
+func TestSessionCreateBindsCwdWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	app, err := core.Open(config.Config{DataDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	s := New(app)
+	ctx := context.Background()
+	cwd := t.TempDir()
+	params, _ := json.Marshal(map[string]any{"cwd": cwd, "title": "from-tui"})
+	resp := s.Dispatch(ctx, protocol.Request{Method: protocol.MethodSessionCreate, Token: app.Token, Params: params})
+	if !resp.OK {
+		t.Fatalf("%+v", resp)
+	}
+	var sess types.Session
+	if err := json.Unmarshal(resp.Result, &sess); err != nil {
+		t.Fatal(err)
+	}
+	if sess.WorkspaceID == "" {
+		t.Fatal("session created without workspace")
+	}
+	ws, err := app.WS.Get(ctx, sess.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws.Path != cwd && filepath.Clean(ws.Path) != filepath.Clean(cwd) {
+		t.Fatalf("workspace path = %s want %s", ws.Path, cwd)
+	}
+	if sess.AgentID == "" {
+		t.Fatal("session created without agent")
+	}
+}
+
 func TestCardLogsAndArtifact(t *testing.T) {
 	dir := t.TempDir()
 	app, err := core.Open(config.Config{DataDir: dir})
