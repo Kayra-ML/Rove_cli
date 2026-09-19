@@ -13,20 +13,20 @@ if [ "$(uname -s)" != "Darwin" ]; then
   fail "Desktop installer is macOS-only."
 fi
 
-# Apple's /usr/bin/git is a stub that refuses to run until the Xcode license is agreed.
+# clang/cgo refuse to compile until the SDK license is agreed.
+# xcodebuild -checkFirstLaunchStatus can miss this; probe a real compile.
 check_xcode_license() {
-  if ! command -v xcodebuild >/dev/null 2>&1; then
-    return 0
-  fi
   local out
-  out="$(xcodebuild -checkFirstLaunchStatus 2>&1 || true)"
+  out="$(echo 'int main(void){return 0;}' | cc -x c - -o /tmp/rovecode-cc-check 2>&1 || true)"
+  rm -f /tmp/rovecode-cc-check
   if echo "$out" | grep -qi "license"; then
     echo ""
     echo "Xcode / Apple SDK license is not agreed yet."
-    echo "Run this once, agree, then re-run the installer:"
+    echo "One command (no paging — just your password):"
     echo ""
-    echo "  sudo xcodebuild -license"
+    echo "  sudo xcodebuild -license accept"
     echo ""
+    echo "Then re-run this installer."
     fail "Xcode license not agreed."
   fi
 }

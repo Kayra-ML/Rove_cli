@@ -11,6 +11,22 @@ fail() { echo -e "${RED}[fail]${NC} $1"; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+check_xcode_license() {
+  local out
+  out="$(echo 'int main(void){return 0;}' | cc -x c - -o /tmp/rovecode-cc-check 2>&1 || true)"
+  rm -f /tmp/rovecode-cc-check
+  if echo "$out" | grep -qi "license"; then
+    echo ""
+    echo "Xcode / Apple SDK license is not agreed yet."
+    echo "One command (no paging — just your password):"
+    echo ""
+    echo "  sudo xcodebuild -license accept"
+    echo ""
+    fail "Xcode license not agreed."
+  fi
+}
+check_xcode_license
+
 # ── 1. Homebrew ───────────────────────────────────────────────────────────────
 if ! command -v brew &>/dev/null; then
   log "Homebrew kuruluyor..."
