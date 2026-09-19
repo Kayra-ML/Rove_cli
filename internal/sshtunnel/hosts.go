@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/aether-dev/aether/internal/config"
 )
 
 // SavedHost is a persisted SSH host entry.
@@ -23,8 +25,7 @@ type HostStore struct {
 }
 
 func dataDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "aether")
+	return config.DefaultDataDir()
 }
 
 // LoadHosts loads the host list from disk (creates empty if missing).

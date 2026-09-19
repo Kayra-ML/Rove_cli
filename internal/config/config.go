@@ -14,25 +14,47 @@ type Config struct {
 	LogLevel   string `json:"logLevel"`
 }
 
+func envHome() string {
+	if x := os.Getenv("ROVECODE_HOME"); x != "" {
+		return x
+	}
+	return os.Getenv("AETHER_HOME")
+}
+
 func DefaultDataDir() string {
-	if x := os.Getenv("AETHER_HOME"); x != "" {
+	if x := envHome(); x != "" {
 		return x
 	}
 	home, _ := os.UserHomeDir()
 	switch runtime.GOOS {
 	case "darwin":
-		return filepath.Join(home, "Library", "Application Support", "Aether")
+		return firstExisting(
+			filepath.Join(home, "Library", "Application Support", "Rove Code"),
+			filepath.Join(home, "Library", "Application Support", "Aether"),
+		)
 	case "windows":
-		if a := os.Getenv("APPDATA"); a != "" {
-			return filepath.Join(a, "Aether")
+		base := os.Getenv("APPDATA")
+		if base == "" {
+			base = filepath.Join(home, "AppData", "Roaming")
 		}
-		return filepath.Join(home, "AppData", "Roaming", "Aether")
+		return firstExisting(filepath.Join(base, "Rove Code"), filepath.Join(base, "Aether"))
 	default:
-		if x := os.Getenv("XDG_DATA_HOME"); x != "" {
-			return filepath.Join(x, "aether")
+		xdg := os.Getenv("XDG_DATA_HOME")
+		if xdg == "" {
+			xdg = filepath.Join(home, ".local", "share")
 		}
-		return filepath.Join(home, ".local", "share", "aether")
+		return firstExisting(filepath.Join(xdg, "rovecode"), filepath.Join(xdg, "aether"))
 	}
+}
+
+func firstExisting(preferred, legacy string) string {
+	if _, err := os.Stat(preferred); err == nil {
+		return preferred
+	}
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return preferred
 }
 
 func Load(path string) (Config, error) {
@@ -84,13 +106,19 @@ func (c Config) EnsureDirs() error {
 
 func defaultIPCPath() string {
 	if runtime.GOOS == "windows" {
-		return `\\.\pipe\aether`
+		return `\\.\pipe\rovecode`
 	}
-	return filepath.Join(DefaultDataDir(), "aether.sock")
+	return filepath.Join(DefaultDataDir(), "rovecode.sock")
 }
 
 func DBPath(dataDir string) string {
-	return filepath.Join(dataDir, "aether.db")
+	for _, name := range []string{"rovecode.db", "aether.db"} {
+		p := filepath.Join(dataDir, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return filepath.Join(dataDir, "rovecode.db")
 }
 
 func TokenPath(dataDir string) string {

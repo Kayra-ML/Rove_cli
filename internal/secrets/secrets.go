@@ -72,15 +72,17 @@ func Open(dataDir string, kr Keyring) (*Store, error) {
 }
 
 func loadOrCreateMaster(kr Keyring) ([]byte, error) {
-	b, err := kr.Get("aether", "master")
-	if err == nil && len(b) == 32 {
-		return b, nil
+	for _, service := range []string{"rovecode", "aether"} {
+		b, err := kr.Get(service, "master")
+		if err == nil && len(b) == 32 {
+			return b, nil
+		}
 	}
 	key := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, key); err != nil {
 		return nil, err
 	}
-	if err := kr.Set("aether", "master", key); err != nil {
+	if err := kr.Set("rovecode", "master", key); err != nil {
 		return nil, err
 	}
 	return key, nil

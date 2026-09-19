@@ -88,7 +88,15 @@ func waitHTTP(addr string, d time.Duration) error {
 }
 
 func PIDPath(dataDir string) string {
-	return filepath.Join(dataDir, "aetherd.pid")
+	legacy := filepath.Join(dataDir, "aetherd.pid")
+	modern := filepath.Join(dataDir, "rovecode.pid")
+	if _, err := os.Stat(modern); err == nil {
+		return modern
+	}
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return modern
 }
 
 func WritePID(dataDir string) error {

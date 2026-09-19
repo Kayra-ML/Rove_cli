@@ -18,7 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// IPCClient wraps the unix socket connection to the Aether daemon.
+// IPCClient wraps the unix socket connection to the Rove Code daemon.
 type IPCClient struct {
 	ipcPath  string
 	httpBase string
@@ -92,7 +92,10 @@ func NewIPCClient() (*IPCClient, error) {
 		return nil, err
 	}
 
-	tok := os.Getenv("AETHER_TOKEN")
+	tok := os.Getenv("ROVECODE_TOKEN")
+	if tok == "" {
+		tok = os.Getenv("AETHER_TOKEN")
+	}
 	if tok == "" {
 		b, readErr := os.ReadFile(config.TokenPath(cfg.DataDir))
 		if readErr == nil {

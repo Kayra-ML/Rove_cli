@@ -27,7 +27,10 @@ func FromEnv() (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	tok := os.Getenv("AETHER_TOKEN")
+	tok := os.Getenv("ROVECODE_TOKEN")
+	if tok == "" {
+		tok = os.Getenv("AETHER_TOKEN")
+	}
 	if tok == "" {
 		b, err := os.ReadFile(config.TokenPath(cfg.DataDir))
 		if err == nil {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/aether-dev/aether/internal/config"
+	"github.com/aether-dev/aether/internal/daemon"
 	"github.com/aether-dev/aether/pkg/client"
 	"github.com/aether-dev/aether/pkg/protocol"
 )
@@ -145,7 +146,7 @@ func runDaemon(args []string) {
 		}
 		fmt.Printf("started aetherd pid=%d\n", cmd.Process.Pid)
 	case "stop":
-		b, err := os.ReadFile(filepath.Join(cfg.DataDir, "aetherd.pid"))
+		b, err := os.ReadFile(daemon.PIDPath(cfg.DataDir))
 		if err != nil {
 			fatal(err)
 		}
