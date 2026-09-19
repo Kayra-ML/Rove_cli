@@ -49,6 +49,15 @@ func TestRootRenderHasCoreSurfaces(t *testing.T) {
 	}
 }
 
+func TestEmptyStateShowsRoveWordmark(t *testing.T) {
+	m := NewModel(nil)
+	m.width, m.height = 120, 30
+	view := stripSimpleANSI(m.View())
+	if !strings.Contains(view, "██████") {
+		t.Fatalf("empty messages panel missing ROVE wordmark:\n%s", view)
+	}
+}
+
 func TestFirstPromptCreatesSessionAndIsNotDropped(t *testing.T) {
 	m := NewModel(&IPCClient{})
 	m.inputBar.input.SetValue("fix the failing test")

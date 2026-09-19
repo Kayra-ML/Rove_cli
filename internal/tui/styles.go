@@ -22,9 +22,9 @@ var (
 	colorMid   = lipgloss.Color("#8B92AA") // secondary text
 	colorDim   = lipgloss.Color("#3D4560") // muted / disabled
 
-	// frame — bright enough to read, not eye-watering
-	colorFrame = lipgloss.Color("#4A5480") // frame lines (thick, visible)
-	colorSep   = lipgloss.Color("#1E2438") // inner separators
+	// frame — bright white, solid, never dashed
+	colorFrame = lipgloss.Color("#FFFFFF")
+	colorSep   = lipgloss.Color("#3A4258")
 
 	// semantic
 	colorGreen  = lipgloss.Color("#5DD88A")
@@ -79,7 +79,6 @@ var (
 	styleSelected  = lipgloss.NewStyle().Background(colorSelected).Foreground(colorWhite)
 	stylePet       = lipgloss.NewStyle().Foreground(colorDim)
 	styleSep       = lipgloss.NewStyle().Foreground(colorSep)
-	// Frame style — bright so the thick ASCII lines read clearly
 	styleFrame     = lipgloss.NewStyle().Foreground(colorFrame).Bold(true)
 	styleStatusBar = lipgloss.NewStyle().Foreground(colorMid).Background(colorBgPanel)
 	styleStatusRight = lipgloss.NewStyle().Foreground(colorMid).Background(colorBgPanel)
@@ -119,7 +118,7 @@ func sectionHeader(label string, width int, right string, active bool) string {
 	if fill < 0 {
 		fill = 0
 	}
-	line := styleFrame.Render("--") + labelRendered +
+	line := styleFrame.Render(strings.Repeat(frameCharH, 2)) + labelRendered +
 		styleFrame.Render(strings.Repeat(frameCharH, fill))
 	if rightText != "" {
 		line += " " + styleMeta.Render(right) + " " + styleFrame.Render(frameCharH)
@@ -139,14 +138,14 @@ const (
 	frameCharTR  = "+"
 	frameCharBL  = "+"
 	frameCharBR  = "+"
-	frameCharH   = "-" // ince yatay çizgi
+	frameCharH   = "=" // kalın, kesiksiz yatay çizgi
 	frameCharV   = "|"
 	frameCharLT  = "+"
 	frameCharRT  = "+"
 	frameCharCRS = "+"
 )
 
-const frameInputH = "-"
+const frameInputH = "="
 
 func frameSide() string {
 	return styleFrame.Render(frameCharV)
@@ -251,37 +250,39 @@ func clampInt(v, low, high int) int {
 }
 
 // ---------------------------------------------------------------------------
-// Pixel-art ROVE logo — 5-row block font, each char 5-wide, 2-space gap
-// Total width: (5+2)*4 - 2 = 26 cols. All ASCII '#' + space — zero wcwidth issues.
+// Figlet ROVE wordmark (user-supplied). 6 rows × 37 cols. Box-drawing is
+// single-width in lipgloss v1.1.0 — still clamped per-row in emptyState.
 // ---------------------------------------------------------------------------
-var pixelLogoLines = [5]string{
-	"####    ###   ## ##  #####",
-	"## ##  ## ##  ## ##  ##   ",
-	"####   ## ##   # #   #### ",
-	"## ##  ## ##   # #   ##   ",
-	"##  #   ###      #   #####",
+var pixelLogoLines = []string{
+	"██████╗   ██████╗  ██╗   ██╗ ███████╗",
+	"██╔══██╗ ██╔═══██╗ ██║   ██║ ██╔════╝",
+	"██████╔╝ ██║   ██║ ██║   ██║ █████╗  ",
+	"██╔══██╗ ██║   ██║ ╚██╗ ██╔╝ ██╔══╝  ",
+	"██║  ██║ ╚██████╔╝  ╚████╔╝  ███████╗",
+	"╚═╝  ╚═╝  ╚═════╝    ╚═══╝   ╚══════╝",
 }
 
-// renderPixelLogo returns the 5-line pixel art block, centered in width w.
 func renderPixelLogo(w int) []string {
-	logoW := len([]rune(pixelLogoLines[0]))
+	logoW := 0
+	for _, row := range pixelLogoLines {
+		if n := len([]rune(row)); n > logoW {
+			logoW = n
+		}
+	}
 	pad := (w - logoW) / 2
 	if pad < 0 {
 		pad = 0
 	}
 	prefix := strings.Repeat(" ", pad)
-	lines := make([]string, 5)
+	lines := make([]string, len(pixelLogoLines))
 	for i, row := range pixelLogoLines {
 		rendered := ""
 		for _, ch := range row {
-			switch ch {
-			case '#':
-				rendered += styleBrandMark.Render("#")
-			case ' ':
+			if ch == ' ' {
 				rendered += " "
-			default:
-				rendered += string(ch)
+				continue
 			}
+			rendered += styleBrand.Render(string(ch))
 		}
 		lines[i] = prefix + rendered
 	}

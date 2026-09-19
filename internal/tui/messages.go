@@ -356,17 +356,21 @@ func (p *MessagesPanel) Render() string {
 
 func (p *MessagesPanel) emptyState(innerW, contentH int) []string {
 	rows := make([]string, contentH)
-	if contentH < 9 {
+	logoLines := renderPixelLogo(innerW)
+	logoH := len(logoLines)
+	if contentH < logoH {
 		return rows
 	}
-	// Pixel art logo — 5 rows
-	logoLines := renderPixelLogo(innerW)
-	subtitleText := "local-first coding agent"
-	hintText := "/setup  --  ctrl+k  --  type a task"
-	subtitle := styleMuted.Render(subtitleText)
-	hint := styleDim.Render(hintText)
-
-	start := contentH/2 - 4
+	subtitle := styleMuted.Render("local-first coding agent")
+	hint := styleDim.Render("/setup  --  ctrl+k  --  type a task")
+	blockH := logoH
+	if contentH >= logoH+2 {
+		blockH = logoH + 2
+	}
+	if contentH >= logoH+4 {
+		blockH = logoH + 4
+	}
+	start := (contentH - blockH) / 2
 	if start < 0 {
 		start = 0
 	}
@@ -375,11 +379,11 @@ func (p *MessagesPanel) emptyState(innerW, contentH int) []string {
 			rows[start+i] = l
 		}
 	}
-	if start+6 < contentH {
-		rows[start+6] = centerVisible(subtitle, innerW)
+	if blockH >= logoH+2 && start+logoH+1 < contentH {
+		rows[start+logoH+1] = centerVisible(subtitle, innerW)
 	}
-	if start+8 < contentH {
-		rows[start+8] = centerVisible(hint, innerW)
+	if blockH >= logoH+4 && start+logoH+3 < contentH {
+		rows[start+logoH+3] = centerVisible(hint, innerW)
 	}
 	return rows
 }
