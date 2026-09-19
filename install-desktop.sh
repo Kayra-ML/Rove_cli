@@ -13,28 +13,82 @@ if [ "$(uname -s)" != "Darwin" ]; then
   fail "Desktop installer is macOS-only."
 fi
 
+# Apple's /usr/bin/git is a stub that refuses to run until the Xcode license is agreed.
+check_xcode_license() {
+  if ! command -v xcodebuild >/dev/null 2>&1; then
+    return 0
+  fi
+  local out
+  out="$(xcodebuild -checkFirstLaunchStatus 2>&1 || true)"
+  if echo "$out" | grep -qi "license"; then
+    echo ""
+    echo "Xcode / Apple SDK license is not agreed yet."
+    echo "Run this once, agree, then re-run the installer:"
+    echo ""
+    echo "  sudo xcodebuild -license"
+    echo ""
+    fail "Xcode license not agreed."
+  fi
+}
+
+# Prefer Homebrew git — it does not go through the Xcode license stub.
+prefer_brew_git() {
+  if [ -x /opt/homebrew/bin/git ]; then
+    export PATH="/opt/homebrew/bin:$PATH"
+  elif [ -x /usr/local/bin/git ]; then
+    export PATH="/usr/local/bin:$PATH"
+  fi
+}
+
+fetch_tarball() {
+  local repo="$1" branch="$2" dest="$3"
+  local url="https://codeload.github.com/${repo}/tar.gz/refs/heads/${branch}"
+  local tmp
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/rovecode-src.XXXXXX")"
+  log "Downloading source tarball…"
+  curl -fsSL "$url" -o "$tmp/src.tgz"
+  tar -xzf "$tmp/src.tgz" -C "$tmp"
+  local unpacked
+  unpacked="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -1)"
+  [ -n "$unpacked" ] || fail "Source tarball was empty."
+  rm -rf "$dest"
+  mkdir -p "$(dirname "$dest")"
+  mv "$unpacked" "$dest"
+  rm -rf "$tmp"
+}
+
 REPO="${ROVECODE_REPO:-Kayra-ML/Rove_cli}"
 BRANCH="${ROVECODE_BRANCH:-main}"
 SRC_DIR="${ROVECODE_SRC:-$HOME/Library/Caches/RoveCode/src}"
 
-if ! command -v git >/dev/null 2>&1; then
-  if command -v brew >/dev/null 2>&1; then
-    brew install git
-  else
-    fail "git required. Install Xcode Command Line Tools: xcode-select --install"
-  fi
-fi
+prefer_brew_git
 
 log "Fetching Rove Code source ($REPO@$BRANCH)…"
 mkdir -p "$(dirname "$SRC_DIR")"
-if [ -d "$SRC_DIR/.git" ]; then
+
+GIT_BIN="$(command -v git || true)"
+USE_GIT=0
+if [ -n "$GIT_BIN" ]; then
+  if echo "$GIT_BIN" | grep -qE '/(opt/homebrew|usr/local)/bin/git$'; then
+    USE_GIT=1
+  elif "$GIT_BIN" --version >/dev/null 2>&1; then
+    USE_GIT=1
+  fi
+fi
+
+if [ "$USE_GIT" -eq 1 ] && [ -d "$SRC_DIR/.git" ]; then
   git -C "$SRC_DIR" fetch --depth 1 origin "$BRANCH"
   git -C "$SRC_DIR" checkout -f "origin/$BRANCH"
-else
+elif [ "$USE_GIT" -eq 1 ]; then
   rm -rf "$SRC_DIR"
   git clone --depth 1 --branch "$BRANCH" "https://github.com/${REPO}.git" "$SRC_DIR"
+else
+  fetch_tarball "$REPO" "$BRANCH" "$SRC_DIR"
 fi
 ok "source: $SRC_DIR"
+
+# Wails / clang still need a working Apple toolchain.
+check_xcode_license
 
 chmod +x "$SRC_DIR/build-mac.sh"
 "$SRC_DIR/build-mac.sh"
