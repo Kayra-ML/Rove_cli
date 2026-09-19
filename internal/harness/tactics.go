@@ -1,4 +1,4 @@
-// Package harness implements Aether's central execution policy system.
+// Package harness implements Rove Code's central execution policy system.
 // A HarnessProfile is a composition of tactic flags — not a single enum.
 // Multiple tactics within the same category can be active simultaneously.
 // The ExecutionKernel reads the profile and dispatches real behavior;
@@ -169,65 +169,131 @@ func (p GoalExecProfile) Explain() string {
 
 func (p GoalExecProfile) contextExplain() string {
 	var parts []string
-	if p.Has(SelectiveContext) { parts = append(parts, "Selective") }
-	if p.Has(LargeContext)     { parts = append(parts, "Large") }
-	if p.Has(FreshContext)     { parts = append(parts, "Fresh") }
-	if p.Has(RepositoryMap)    { parts = append(parts, "RepoMap") }
-	if p.Has(MemoryHeavy)      { parts = append(parts, "Memory") }
-	if len(parts) == 0 { return "Ctx: default" }
+	if p.Has(SelectiveContext) {
+		parts = append(parts, "Selective")
+	}
+	if p.Has(LargeContext) {
+		parts = append(parts, "Large")
+	}
+	if p.Has(FreshContext) {
+		parts = append(parts, "Fresh")
+	}
+	if p.Has(RepositoryMap) {
+		parts = append(parts, "RepoMap")
+	}
+	if p.Has(MemoryHeavy) {
+		parts = append(parts, "Memory")
+	}
+	if len(parts) == 0 {
+		return "Ctx: default"
+	}
 	return "Ctx: " + joinParts(parts)
 }
 
 func (p GoalExecProfile) execExplain() string {
 	var parts []string
-	if p.HasExec(Direct)      { parts = append(parts, "Direct") }
-	if p.HasExec(PlanExecute) { parts = append(parts, "Plan") }
-	if p.HasExec(GoalLoop)    { parts = append(parts, "Loop") }
-	if p.HasExec(Parallel)    { parts = append(parts, "Parallel") }
-	if p.HasExec(Delegated)   { parts = append(parts, "Delegated") }
-	if p.HasExec(Sandboxed)   { parts = append(parts, "Sandboxed") }
-	if len(parts) == 0 { return "Exec: default" }
+	if p.HasExec(Direct) {
+		parts = append(parts, "Direct")
+	}
+	if p.HasExec(PlanExecute) {
+		parts = append(parts, "Plan")
+	}
+	if p.HasExec(GoalLoop) {
+		parts = append(parts, "Loop")
+	}
+	if p.HasExec(Parallel) {
+		parts = append(parts, "Parallel")
+	}
+	if p.HasExec(Delegated) {
+		parts = append(parts, "Delegated")
+	}
+	if p.HasExec(Sandboxed) {
+		parts = append(parts, "Sandboxed")
+	}
+	if len(parts) == 0 {
+		return "Exec: default"
+	}
 	return "Exec: " + joinParts(parts)
 }
 
 func (p GoalExecProfile) toolsExplain() string {
 	var parts []string
-	if p.HasTool(SequentialTools) { parts = append(parts, "Seq") }
-	if p.HasTool(ParallelTools)   { parts = append(parts, "Parallel") }
-	if p.HasTool(RestrictedTools) { parts = append(parts, "Restricted") }
-	if p.HasTool(CodingTools)     { parts = append(parts, "Coding") }
-	if p.HasTool(ResearchTools)   { parts = append(parts, "Research") }
-	if len(parts) == 0 { return "Tools: default" }
+	if p.HasTool(SequentialTools) {
+		parts = append(parts, "Seq")
+	}
+	if p.HasTool(ParallelTools) {
+		parts = append(parts, "Parallel")
+	}
+	if p.HasTool(RestrictedTools) {
+		parts = append(parts, "Restricted")
+	}
+	if p.HasTool(CodingTools) {
+		parts = append(parts, "Coding")
+	}
+	if p.HasTool(ResearchTools) {
+		parts = append(parts, "Research")
+	}
+	if len(parts) == 0 {
+		return "Tools: default"
+	}
 	return "Tools: " + joinParts(parts)
 }
 
 func (p GoalExecProfile) verifyExplain() string {
 	var parts []string
-	if p.HasVerify(FastVerify)        { parts = append(parts, "Fast") }
-	if p.HasVerify(TestVerify)        { parts = append(parts, "Test") }
-	if p.HasVerify(IndependentReview) { parts = append(parts, "IndepReview") }
-	if p.HasVerify(DoubleReview)      { parts = append(parts, "Double") }
-	if p.HasVerify(ArtifactVerify)    { parts = append(parts, "Artifact") }
-	if len(parts) == 0 { return "Verify: default" }
+	if p.HasVerify(FastVerify) {
+		parts = append(parts, "Fast")
+	}
+	if p.HasVerify(TestVerify) {
+		parts = append(parts, "Test")
+	}
+	if p.HasVerify(IndependentReview) {
+		parts = append(parts, "IndepReview")
+	}
+	if p.HasVerify(DoubleReview) {
+		parts = append(parts, "Double")
+	}
+	if p.HasVerify(ArtifactVerify) {
+		parts = append(parts, "Artifact")
+	}
+	if len(parts) == 0 {
+		return "Verify: default"
+	}
 	return "Verify: " + joinParts(parts)
 }
 
 func (p GoalExecProfile) recoveryExplain() string {
 	var parts []string
-	if p.HasRecovery(Retry)            { parts = append(parts, "Retry") }
-	if p.HasRecovery(Replan)           { parts = append(parts, "Replan") }
-	if p.HasRecovery(ModelFallback)    { parts = append(parts, "ModelFB") }
-	if p.HasRecovery(ContextReset)     { parts = append(parts, "CtxReset") }
-	if p.HasRecovery(CheckpointResume) { parts = append(parts, "Checkpoint") }
-	if p.HasRecovery(Escalation)       { parts = append(parts, "Escalate") }
-	if len(parts) == 0 { return "Recovery: none" }
+	if p.HasRecovery(Retry) {
+		parts = append(parts, "Retry")
+	}
+	if p.HasRecovery(Replan) {
+		parts = append(parts, "Replan")
+	}
+	if p.HasRecovery(ModelFallback) {
+		parts = append(parts, "ModelFB")
+	}
+	if p.HasRecovery(ContextReset) {
+		parts = append(parts, "CtxReset")
+	}
+	if p.HasRecovery(CheckpointResume) {
+		parts = append(parts, "Checkpoint")
+	}
+	if p.HasRecovery(Escalation) {
+		parts = append(parts, "Escalate")
+	}
+	if len(parts) == 0 {
+		return "Recovery: none"
+	}
 	return "Recovery: " + joinParts(parts)
 }
 
 func joinParts(parts []string) string {
 	result := ""
 	for i, p := range parts {
-		if i > 0 { result += "+" }
+		if i > 0 {
+			result += "+"
+		}
 		result += p
 	}
 	return result
@@ -274,12 +340,12 @@ func (p GoalExecProfile) EffectiveMaxParallelAgents() int {
 // SmallBugProfile is for small, well-scoped bug fixes.
 func SmallBugProfile() GoalExecProfile {
 	return GoalExecProfile{
-		Mode:      ProfileAuto,
-		Context:   SelectiveContext,
-		Execution: Direct,
-		Tools:     CodingTools | SequentialTools,
-		Verify:    TestVerify,
-		Recovery:  Retry,
+		Mode:           ProfileAuto,
+		Context:        SelectiveContext,
+		Execution:      Direct,
+		Tools:          CodingTools | SequentialTools,
+		Verify:         TestVerify,
+		Recovery:       Retry,
 		ComposerReason: "small bug: selective context, direct execution, test verify, retry on failure",
 	}
 }
@@ -287,12 +353,12 @@ func SmallBugProfile() GoalExecProfile {
 // LargeRefactorProfile is for large, cross-cutting refactors.
 func LargeRefactorProfile() GoalExecProfile {
 	return GoalExecProfile{
-		Mode:      ProfileAuto,
-		Context:   RepositoryMap | SelectiveContext,
-		Execution: PlanExecute | Parallel | Sandboxed,
-		Tools:     CodingTools | ParallelTools,
-		Verify:    TestVerify | IndependentReview,
-		Recovery:  CheckpointResume | Replan,
+		Mode:           ProfileAuto,
+		Context:        RepositoryMap | SelectiveContext,
+		Execution:      PlanExecute | Parallel | Sandboxed,
+		Tools:          CodingTools | ParallelTools,
+		Verify:         TestVerify | IndependentReview,
+		Recovery:       CheckpointResume | Replan,
 		ComposerReason: "large refactor: repo map, plan+execute, parallel worktrees, independent review, checkpoint resume",
 	}
 }
@@ -300,12 +366,12 @@ func LargeRefactorProfile() GoalExecProfile {
 // HardLongTaskProfile is for complex, multi-day autonomous tasks.
 func HardLongTaskProfile() GoalExecProfile {
 	return GoalExecProfile{
-		Mode:      ProfileAuto,
-		Context:   SelectiveContext | RepositoryMap | FreshContext,
-		Execution: GoalLoop | Delegated | Parallel,
-		Tools:     CodingTools | ParallelTools,
-		Verify:    IndependentReview | ArtifactVerify,
-		Recovery:  Replan | ContextReset | ModelFallback | CheckpointResume,
+		Mode:           ProfileAuto,
+		Context:        SelectiveContext | RepositoryMap | FreshContext,
+		Execution:      GoalLoop | Delegated | Parallel,
+		Tools:          CodingTools | ParallelTools,
+		Verify:         IndependentReview | ArtifactVerify,
+		Recovery:       Replan | ContextReset | ModelFallback | CheckpointResume,
 		ComposerReason: "hard/long task: multi-context loop, delegated parallel agents, full verification, full recovery stack",
 	}
 }

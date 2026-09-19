@@ -48,13 +48,28 @@ func DefaultDataDir() string {
 }
 
 func firstExisting(preferred, legacy string) string {
-	if _, err := os.Stat(preferred); err == nil {
+	if dataDirLooksUsed(preferred) {
 		return preferred
 	}
-	if _, err := os.Stat(legacy); err == nil {
+	if dataDirLooksUsed(legacy) {
 		return legacy
 	}
 	return preferred
+}
+
+func dataDirLooksUsed(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	for _, name := range []string{
+		"rovecode.db", "aether.db", "auth.token", "config.json",
+		"rovecode.sock", "aether.sock", "rovecode.pid", "aetherd.pid",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func Load(path string) (Config, error) {
@@ -108,7 +123,14 @@ func defaultIPCPath() string {
 	if runtime.GOOS == "windows" {
 		return `\\.\pipe\rovecode`
 	}
-	return filepath.Join(DefaultDataDir(), "rovecode.sock")
+	dir := DefaultDataDir()
+	for _, name := range []string{"rovecode.sock", "aether.sock"} {
+		p := filepath.Join(dir, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return filepath.Join(dir, "rovecode.sock")
 }
 
 func DBPath(dataDir string) string {
@@ -123,4 +145,27 @@ func DBPath(dataDir string) string {
 
 func TokenPath(dataDir string) string {
 	return filepath.Join(dataDir, "auth.token")
+}
+
+func TokenSearchPaths(dataDir string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(p string) {
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	add(TokenPath(dataDir))
+	home, _ := os.UserHomeDir()
+	add(filepath.Join(home, ".local", "share", "rovecode", "auth.token"))
+	add(filepath.Join(home, ".local", "share", "aether", "auth.token"))
+	add(filepath.Join(home, "Library", "Application Support", "Rove Code", "auth.token"))
+	add(filepath.Join(home, "Library", "Application Support", "Aether", "auth.token"))
+	if app := os.Getenv("APPDATA"); app != "" {
+		add(filepath.Join(app, "Rove Code", "auth.token"))
+		add(filepath.Join(app, "Aether", "auth.token"))
+	}
+	return out
 }

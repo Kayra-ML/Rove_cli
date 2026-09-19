@@ -1,10 +1,10 @@
-# Aether — Architecture & Implementation Notes
+# Rove Code — Architecture & Implementation Notes
 
 ## Overview
 
-Aether is a cross-platform AI development environment. Its **Go Core** is the single
-source of truth for all subsystems. Both the CLI (`aether`) and the Desktop GUI share
-the same core via the local daemon (`aetherd`).
+Rove Code is a local-first coding agent. Its **Go Core** is the single
+source of truth for all subsystems. The terminal (`rovecode`), desktop app,
+and headless daemon share the same core.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -14,7 +14,7 @@ the same core via the local daemon (`aetherd`).
 └──────────────────────────┬───────────────────────────────────┘
                            │ HTTP JSON-RPC + SSE
 ┌──────────────────────────▼───────────────────────────────────┐
-│                     aetherd daemon                           │
+│                     rovecode daemon                          │
 │   HTTP :7420  +  Unix socket (IPC)  –  both auth-gated       │
 └──────────────────────────┬───────────────────────────────────┘
                            │ in-process
@@ -30,18 +30,18 @@ the same core via the local daemon (`aetherd`).
 │  Secrets Manager    Permission System  Worker Pool           │
 └──────────────────────────────────────────────────────────────┘
                            │
-                        aether CLI
+                        rovecode CLI
 ```
 
 ## Key Architectural Decisions
 
 ### 1. Single Daemon Owns All State
-`aetherd` starts, opens the Go Core (`core.Open`), and serves two concurrent transports:
+`rovecode daemon` starts, opens the Go Core (`core.Open`), and serves two concurrent transports:
 - **HTTP** (`/rpc` POST, `/events` SSE, `/health` GET)
 - **Unix socket** (IPC, newline-delimited JSON)
 
-Both use the same `rpc.Server.Dispatch` handler. The daemon writes a `aether.sock`
-file; the CLI prefers IPC, falls back to HTTP.
+Both use the same `rpc.Server.Dispatch` handler. The daemon writes a `rovecode.sock`
+file (legacy `aether.sock` is still accepted); the CLI prefers IPC, falls back to HTTP.
 
 ### 2. No Logic in Desktop / CLI
 The desktop `App` struct in Wails is a thin bridge. Its only method is `RPC(method,
@@ -108,7 +108,7 @@ surfaced to agents through the Tool Runtime.
 ```
 cmd/
   aether/        CLI entry point
-  aetherd/       Daemon entry point
+  aetherd/       Legacy daemon entry (still builds; product path is `rovecode daemon`)
 internal/
   agent/         Agent runtime, RunRequest, RunResult
   clock/         Testable clock wrapper
@@ -161,7 +161,7 @@ desktop/
 go build ./...
 
 # Run the daemon (stays running in background)
-./aetherd
+rovecode daemon
 
 # CLI
 ./aether ping
@@ -184,7 +184,7 @@ All acceptance criteria met. Final gate run (2026-09-14):
 
 | Gate | Status |
 |---|---|
-| `go build ./cmd/aether ./cmd/aetherd` | ✅ |
+| `go build ./cmd/sextant ./cmd/aether ./cmd/aetherd` | ✅ |
 | `go vet ./...` | ✅ |
 | `go test ./... -count=1` (29 packages, 50+ tests) | ✅ |
 | `tsc --noEmit` | ✅ 0 errors |

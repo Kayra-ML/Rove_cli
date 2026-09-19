@@ -1,5 +1,5 @@
 // Package webhook provides GitHub-style HMAC-SHA256 webhook verification
-// and trigger logic for Aether background agents.
+// and trigger logic for Rove Code background agents.
 package webhook
 
 import (

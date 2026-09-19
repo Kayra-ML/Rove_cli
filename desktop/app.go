@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/aether-dev/aether/internal/config"
+	"github.com/aether-dev/aether/internal/daemon"
 	"github.com/aether-dev/aether/pkg/client"
 	"github.com/aether-dev/aether/pkg/protocol"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -26,7 +25,7 @@ func NewApp(cfg config.Config) *App { return &App{cfg: cfg} }
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	_ = a.cfg.EnsureDirs()
-	ensureDaemon(a.cfg)
+	ensureDaemon()
 	cl, err := client.FromEnv()
 	if err == nil {
 		a.client = cl
@@ -76,25 +75,35 @@ func (a *App) RPC(method string, paramsJSON string) (string, error) {
 	return string(b), nil
 }
 
-func ensureDaemon(cfg config.Config) {
+func ensureDaemon() {
+	if pingDaemon() {
+		return
+	}
+	cmd := daemon.Command()
+	if cmd == nil {
+		return
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	_ = cmd.Process.Release()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if pingDaemon() {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func pingDaemon() bool {
 	cl, err := client.FromEnv()
-	if err == nil {
-		if _, err := cl.Call(protocol.MethodPing, nil); err == nil {
-			return
-		}
+	if err != nil {
+		return false
 	}
-	candidates := []string{"aetherd"}
-	if self, err := os.Executable(); err == nil {
-		candidates = append([]string{filepath.Join(filepath.Dir(self), "aetherd")}, candidates...)
-	}
-	for _, bin := range candidates {
-		cmd := exec.Command(bin)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Env = os.Environ()
-		if err := cmd.Start(); err == nil {
-			time.Sleep(500 * time.Millisecond)
-			return
-		}
-	}
+	_, err = cl.Call(protocol.MethodPing, nil)
+	return err == nil
 }

@@ -1,4 +1,4 @@
-// Package sshtunnel manages SSH port-forward tunnels for remote Aether daemons.
+// Package sshtunnel manages SSH port-forward tunnels for remote Rove Code daemons.
 package sshtunnel
 
 import (
@@ -165,8 +165,11 @@ func (t *Tunnel) LocalAddr() string {
 // FetchRemoteToken retrieves the token from the remote host.
 func (t *Tunnel) FetchRemoteToken() (string, error) {
 	tokenPaths := []string{
+		"~/.local/share/rovecode/auth.token",
+		"~/Library/Application\\ Support/Rove\\ Code/auth.token",
 		"~/.local/share/aether/auth.token",
 		"~/.local/share/aether/token",
+		"~/Library/Application\\ Support/Aether/auth.token",
 	}
 	for _, tp := range tokenPaths {
 		out, err := t.runRemote("cat " + tp + " 2>/dev/null")

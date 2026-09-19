@@ -32,9 +32,12 @@ func FromEnv() (*Client, error) {
 		tok = os.Getenv("AETHER_TOKEN")
 	}
 	if tok == "" {
-		b, err := os.ReadFile(config.TokenPath(cfg.DataDir))
-		if err == nil {
-			tok = string(b)
+		for _, tp := range config.TokenSearchPaths(cfg.DataDir) {
+			b, err := os.ReadFile(tp)
+			if err == nil && len(b) > 0 {
+				tok = string(b)
+				break
+			}
 		}
 	}
 	return &Client{

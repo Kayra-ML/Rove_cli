@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -97,21 +96,7 @@ func NewIPCClient() (*IPCClient, error) {
 		tok = os.Getenv("AETHER_TOKEN")
 	}
 	if tok == "" {
-		b, readErr := os.ReadFile(config.TokenPath(cfg.DataDir))
-		if readErr == nil {
-			tok = strings.TrimSpace(string(b))
-		}
-	}
-
-	// Also try auth.token path directly
-	if tok == "" {
-		home, _ := os.UserHomeDir()
-		tokenPaths := []string{
-			filepath.Join(home, ".local", "share", "aether", "auth.token"),
-			filepath.Join(home, ".local", "share", "aether", "token"),
-			config.TokenPath(cfg.DataDir),
-		}
-		for _, tp := range tokenPaths {
+		for _, tp := range config.TokenSearchPaths(cfg.DataDir) {
 			b, readErr := os.ReadFile(tp)
 			if readErr == nil && len(b) > 0 {
 				tok = strings.TrimSpace(string(b))

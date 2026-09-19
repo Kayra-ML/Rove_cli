@@ -17,7 +17,7 @@ export type ThemeId =
   | "midnight";
 
 export const THEMES: { id: ThemeId; label: string; swatch: [string, string, string] }[] = [
-  { id: "aether",     label: "Aether",      swatch: ["#0b0c0e", "#8eb0ff", "#f2f4f7"] },
+  { id: "aether",     label: "Rove",        swatch: ["#0b0c0e", "#8eb0ff", "#f2f4f7"] },
   { id: "obsidian",   label: "Obsidian",    swatch: ["#0a0a0a", "#c8c8c8", "#fafafa"] },
   { id: "nord",       label: "Nord",        swatch: ["#2e3440", "#88c0d0", "#eceff4"] },
   { id: "catppuccin", label: "Catppuccin",  swatch: ["#1e1e2e", "#cba6f7", "#cdd6f4"] },

@@ -63,9 +63,45 @@ func TestDefaultDataDirPrefersRoveThenLegacy(t *testing.T) {
 	if err := os.MkdirAll(legacy, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(legacy, "aether.db"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	got = DefaultDataDir()
 	if got != legacy {
 		t.Fatalf("legacy fallback = %s want %s", got, legacy)
+	}
+}
+
+func TestEmptyPreferredDoesNotStealUsedLegacy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ROVECODE_HOME", "")
+	t.Setenv("AETHER_HOME", "")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	preferred := filepath.Join(home, ".local", "share", "rovecode")
+	legacy := filepath.Join(home, ".local", "share", "aether")
+	if runtime.GOOS == "darwin" {
+		preferred = filepath.Join(home, "Library", "Application Support", "Rove Code")
+		legacy = filepath.Join(home, "Library", "Application Support", "Aether")
+	}
+	if runtime.GOOS == "windows" {
+		preferred = filepath.Join(home, "AppData", "Roaming", "Rove Code")
+		legacy = filepath.Join(home, "AppData", "Roaming", "Aether")
+	}
+	if err := os.MkdirAll(preferred, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "auth.token"), []byte("tok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := DefaultDataDir()
+	if got != legacy {
+		t.Fatalf("got %s want legacy %s", got, legacy)
 	}
 }
 
@@ -77,5 +113,13 @@ func TestDBPathPrefersExistingLegacy(t *testing.T) {
 	}
 	if got := DBPath(dir); got != legacy {
 		t.Fatalf("%s", got)
+	}
+}
+
+func TestTokenSearchPathsPutsDataDirFirst(t *testing.T) {
+	dir := t.TempDir()
+	paths := TokenSearchPaths(dir)
+	if len(paths) == 0 || paths[0] != TokenPath(dir) {
+		t.Fatalf("%v", paths)
 	}
 }

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/aether-dev/aether/internal/config"
@@ -129,22 +127,17 @@ func runDaemon(args []string) {
 	}
 	switch args[0] {
 	case "start":
-		self, err := os.Executable()
-		if err != nil {
-			fatal(err)
+		cmd := daemon.Command()
+		if cmd == nil {
+			fatal(fmt.Errorf("rovecode daemon binary not found"))
 		}
-		daemonBin := filepath.Join(filepath.Dir(self), "aetherd")
-		if _, err := os.Stat(daemonBin); err != nil {
-			daemonBin = "aetherd"
-		}
-		cmd := exec.Command(daemonBin)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Env = os.Environ()
 		if err := cmd.Start(); err != nil {
 			fatal(err)
 		}
-		fmt.Printf("started aetherd pid=%d\n", cmd.Process.Pid)
+		fmt.Printf("started rovecode daemon pid=%d\n", cmd.Process.Pid)
 	case "stop":
 		b, err := os.ReadFile(daemon.PIDPath(cfg.DataDir))
 		if err != nil {
