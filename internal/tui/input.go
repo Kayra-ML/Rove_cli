@@ -134,9 +134,9 @@ func (b *InputBar) SetSize(w, h int) {
 // DesiredHeight lets the root layout reserve room for the command palette.
 func (b *InputBar) DesiredHeight() int {
 	if b.slashOpen {
-		return 10 // 9 popup rows + 1 input line (no separator line anymore)
+		return 10 // 9 popup rows + 1 input line
 	}
-	return 1
+	return 4 // 3 visual padding rows + 1 input line = taller input area
 }
 
 func (b *InputBar) SetActive(active bool) {
@@ -240,25 +240,33 @@ func (b *InputBar) Render() string {
 	rows := make([]string, 0, b.DesiredHeight())
 	if b.slashOpen {
 		rows = append(rows, b.renderSlashPopup(w)...)
+		rows = append(rows, b.renderInputLine(w))
+		return strings.Join(rows, "\n")
 	}
-	// No top separator — mid-divider in model.View() handles the visual break
+	// Tall input: blank line, input line, blank line, blank line
+	side := styleFrame.Render(frameCharV)
+	blank := fitVisible(side+strings.Repeat(" ", w-2)+side, w)
+	rows = append(rows, blank)
 	rows = append(rows, b.renderInputLine(w))
-	return lipgloss.NewStyle().Width(w).Background(colorBgPanel).Render(strings.Join(rows, "\n"))
+	rows = append(rows, blank)
+	rows = append(rows, blank)
+	return strings.Join(rows, "\n")
 }
 
 func (b *InputBar) renderInputLine(w int) string {
-	side := styleFrame.Render("│")
+	side := styleFrame.Render(frameCharV)
+	// Prompt "› " already inside b.input.View()
 	view := b.input.View()
-	inner := w - 4 // │ + space + ... + space
+	inner := w - 4 // side + space + content + space + side
 	if lipgloss.Width(view) > inner {
 		view = truncateVisible(view, inner)
 	}
 	line := side + " " + view
-	pad := w - lipgloss.Width(line) - 1
+	pad := w - len([]rune(stripSimpleANSI(line))) - 1
 	if pad < 0 {
 		pad = 0
 	}
-	return line + strings.Repeat(" ", pad) + side
+	return fitVisible(line+strings.Repeat(" ", pad)+side, w)
 }
 
 func (b *InputBar) renderSlashPopup(maxW int) []string {

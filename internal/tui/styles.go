@@ -6,26 +6,36 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Rove Code night palette — restrained contrast, warm execution states.
+// ---------------------------------------------------------------------------
+// Rove Code — Navy palette
+// Deep navy background, bright white accents, violet brand, warm execution.
+// ---------------------------------------------------------------------------
 var (
-	colorBg       = lipgloss.Color("#08090D")
-	colorBgPanel  = lipgloss.Color("#0D0F15")
-	colorElevated = lipgloss.Color("#12151D")
-	colorWhite    = lipgloss.Color("#E7E9EE")
-	colorMid      = lipgloss.Color("#858A9A")
-	colorDim      = lipgloss.Color("#3E4455")
-	colorSep      = lipgloss.Color("#1E2130")
-	colorFrame    = lipgloss.Color("#2A2F42")
+	// backgrounds — layered navy depth
+	colorBg       = lipgloss.Color("#0A0E1A") // deepest navy
+	colorBgPanel  = lipgloss.Color("#0D1220") // panel surface
+	colorElevated = lipgloss.Color("#131929") // elevated card / selection
+	colorSelected = lipgloss.Color("#1A2236")
 
-	colorGreen  = lipgloss.Color("#6BD88D")
-	colorYellow = lipgloss.Color("#E5B567")
-	colorOrange = lipgloss.Color("#E58B5B")
-	colorRed    = lipgloss.Color("#E56B6F")
-	colorBlue   = lipgloss.Color("#7AA2F7")
-	colorViolet = lipgloss.Color("#A78BFA")
-	colorCyan   = lipgloss.Color("#56C9C9")
+	// text scale
+	colorWhite = lipgloss.Color("#EFF1F8") // primary text — near-white
+	colorMid   = lipgloss.Color("#8B92AA") // secondary text
+	colorDim   = lipgloss.Color("#3D4560") // muted / disabled
 
-	// Compatibility aliases used by other TUI surfaces.
+	// frame — bright enough to read, not eye-watering
+	colorFrame = lipgloss.Color("#4A5480") // frame lines (thick, visible)
+	colorSep   = lipgloss.Color("#1E2438") // inner separators
+
+	// semantic
+	colorGreen  = lipgloss.Color("#5DD88A")
+	colorYellow = lipgloss.Color("#E8C468")
+	colorOrange = lipgloss.Color("#E8924F")
+	colorRed    = lipgloss.Color("#E56B72")
+	colorBlue   = lipgloss.Color("#6EA8FC")
+	colorViolet = lipgloss.Color("#B49AFA") // brand accent — brighter
+	colorCyan   = lipgloss.Color("#4ECDC4")
+
+	// Compatibility aliases
 	colorUser         = colorBlue
 	colorAgent        = colorWhite
 	colorTool         = colorMid
@@ -37,13 +47,15 @@ var (
 	colorBorderDim    = colorSep
 	colorBorderActive = colorMid
 	colorPet          = colorDim
-	colorSelected     = lipgloss.Color("#1A1F2B")
 
+	// -----------------------------------------------------------------------
+	// Styles
+	// -----------------------------------------------------------------------
 	stylePanelBorder       = lipgloss.NewStyle().Background(colorBg)
 	stylePanelBorderActive = lipgloss.NewStyle().Background(colorBg)
 
 	styleTitle       = lipgloss.NewStyle().Foreground(colorMid)
-	styleTitleActive = lipgloss.NewStyle().Foreground(colorWhite)
+	styleTitleActive = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
 	styleBrand       = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
 	styleBrandMark   = lipgloss.NewStyle().Foreground(colorViolet).Bold(true)
 	styleMeta        = lipgloss.NewStyle().Foreground(colorDim)
@@ -53,28 +65,29 @@ var (
 	styleToolRow  = lipgloss.NewStyle().Foreground(colorMid)
 	styleToolEdit = lipgloss.NewStyle().Foreground(colorMid)
 
-	styleApprovalRow    = lipgloss.NewStyle().Foreground(colorYellow).Background(colorElevated)
+	styleApprovalRow = lipgloss.NewStyle().Foreground(colorYellow).Background(colorElevated)
 	styleApprovalBorder = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(colorYellow).
 				Padding(0, 1)
 
-	styleError       = lipgloss.NewStyle().Foreground(colorRed)
-	styleSuccess     = lipgloss.NewStyle().Foreground(colorGreen)
-	styleDim         = lipgloss.NewStyle().Foreground(colorDim)
-	styleMuted       = lipgloss.NewStyle().Foreground(colorMid)
-	styleHighlight   = lipgloss.NewStyle().Foreground(colorYellow)
-	styleSelected    = lipgloss.NewStyle().Background(colorSelected).Foreground(colorWhite)
-	stylePet         = lipgloss.NewStyle().Foreground(colorDim)
-	styleSep         = lipgloss.NewStyle().Foreground(colorSep)
-	styleFrame       = lipgloss.NewStyle().Foreground(colorFrame)
-	styleStatusBar   = lipgloss.NewStyle().Foreground(colorDim).Background(colorBgPanel)
+	styleError     = lipgloss.NewStyle().Foreground(colorRed)
+	styleSuccess   = lipgloss.NewStyle().Foreground(colorGreen)
+	styleDim       = lipgloss.NewStyle().Foreground(colorDim)
+	styleMuted     = lipgloss.NewStyle().Foreground(colorMid)
+	styleHighlight = lipgloss.NewStyle().Foreground(colorYellow)
+	styleSelected  = lipgloss.NewStyle().Background(colorSelected).Foreground(colorWhite)
+	stylePet       = lipgloss.NewStyle().Foreground(colorDim)
+	styleSep       = lipgloss.NewStyle().Foreground(colorSep)
+	// Frame style — bright so the thick ASCII lines read clearly
+	styleFrame     = lipgloss.NewStyle().Foreground(colorFrame).Bold(true)
+	styleStatusBar = lipgloss.NewStyle().Foreground(colorMid).Background(colorBgPanel)
 	styleStatusRight = lipgloss.NewStyle().Foreground(colorMid).Background(colorBgPanel)
 
-	// Plan item state icons.
-	iconDone    = styleSuccess.Render("◆")
-	iconCurrent = styleHighlight.Bold(true).Render("◈")
-	iconPending = styleDim.Render("◇")
+	// Plan item state icons
+	iconDone    = styleSuccess.Render("#")
+	iconCurrent = styleHighlight.Bold(true).Render("*")
+	iconPending = styleDim.Render("o")
 )
 
 func panelStyle(active bool) lipgloss.Style {
@@ -88,7 +101,9 @@ func titleStyle(active bool) lipgloss.Style {
 	return styleTitle
 }
 
-// sectionHeader renders a panel section title: "-- label ------------- meta -"
+// ---------------------------------------------------------------------------
+// Section headers  -- label -------------------- meta -
+// ---------------------------------------------------------------------------
 func sectionHeader(label string, width int, right string, active bool) string {
 	if width <= 0 {
 		return ""
@@ -98,7 +113,7 @@ func sectionHeader(label string, width int, right string, active bool) string {
 	if right != "" {
 		rightText = " " + styleMeta.Render(right) + " " + styleFrame.Render(frameCharH)
 	}
-	prefixW := 2 + lipgloss.Width(labelRendered) // "--" + label
+	prefixW := 2 + lipgloss.Width(labelRendered)
 	used := prefixW + lipgloss.Width(rightText)
 	fill := width - used
 	if fill < 0 {
@@ -112,41 +127,41 @@ func sectionHeader(label string, width int, right string, active bool) string {
 	return fitVisible(line, width)
 }
 
-// ruledHeader is kept as an alias so existing call sites compile unchanged.
 func ruledHeader(label string, width int, right string, active bool) string {
 	return sectionHeader(label, width, right, active)
 }
 
-// Frame chars — ASCII-safe, unambiguous single-width in all terminals.
-// We avoid box-drawing Unicode (╭╮╰╯│─) because their east_asian_width is
-// "Ambiguous" and some wcwidth tables (including lipgloss's) count them as 2.
+// ---------------------------------------------------------------------------
+// Frame characters — all ASCII (single-width, no ambiguous wcwidth)
+// ---------------------------------------------------------------------------
 const (
-	frameCharTL  = "."   // top-left corner
-	frameCharTR  = "."   // top-right corner
-	frameCharBL  = "'"   // bottom-left corner
-	frameCharBR  = "'"   // bottom-right corner
-	frameCharH   = "-"   // horizontal
-	frameCharV   = "|"   // vertical
-	frameCharLT  = "+"   // left-T (mid-divider left)
-	frameCharRT  = "+"   // right-T (mid-divider right)
-	frameCharCRS = "+"   // cross / T-down
+	frameCharTL  = "+" // top-left
+	frameCharTR  = "+" // top-right
+	frameCharBL  = "+" // bottom-left
+	frameCharBR  = "+" // bottom-right
+	frameCharH   = "=" // horizontal — double-line feel for thickness
+	frameCharV   = "|" // vertical
+	frameCharLT  = "+" // left-T
+	frameCharRT  = "+" // right-T
+	frameCharCRS = "+" // cross
 )
 
-// frameSide renders a single "|" in frame color.
+// frameInputH is the horizontal char inside the input area (lighter than outer frame)
+const frameInputH = "-"
+
 func frameSide() string {
 	return styleFrame.Render(frameCharV)
 }
 
-// frameTop renders ".─ ◆ ROVE CODE ──────────────────────────────────────."
+// frameTop: "+== ROVE CODE ============================================+"
 func frameTop(label string, width int) string {
 	if width < 6 {
 		return ""
 	}
-	mark := styleBrandMark.Render("◆")
+	mark := styleBrandMark.Render("*")
 	text := " " + mark + " " + styleBrand.Render(label) + " "
-	textW := lipgloss.Width(text)
-	// corners + "─" on each side: "." + "─" + text + fill×"─" + "."
-	// visible: 1 + 1 + textW + fill + 1 = width  →  fill = width - textW - 3
+	textW := len([]rune(stripSimpleANSI(text)))
+	// "+=" (2) + text + fill + "+" (1) = width  =>  fill = width - textW - 3
 	fill := width - textW - 3
 	if fill < 0 {
 		fill = 0
@@ -157,41 +172,29 @@ func frameTop(label string, width int) string {
 	return fitVisible(line, width)
 }
 
-// frameBottom renders "'────────────────────────────────────────────────────'"
+// frameBottom: "+============================================+"
 func frameBottom(width int) string {
 	if width < 2 {
 		return ""
 	}
 	inner := width - 2
-	return styleFrame.Render(frameCharBL + strings.Repeat(frameCharH, inner) + frameCharBR)
+	return fitVisible(styleFrame.Render(frameCharBL+strings.Repeat(frameCharH, inner)+frameCharBR), width)
 }
 
-// frameDivider renders a mid-panel horizontal separator.
+// frameDivider: "+--------------------+"  (lighter inner divider)
 func frameDivider(width int) string {
 	if width < 2 {
 		return ""
 	}
 	inner := width - 2
-	return styleFrame.Render(frameCharLT+strings.Repeat(frameCharH, inner)+frameCharRT)
+	return fitVisible(styleFrame.Render(frameCharLT+strings.Repeat(frameInputH, inner)+frameCharRT), width)
 }
 
-// frameSplitDivider renders the divider between chat and right rail.
-func frameSplitDivider(chatW, planW, totalW int) string {
-	lFill := chatW
-	rFill := planW
-	if lFill < 0 {
-		lFill = 0
-	}
-	if rFill < 0 {
-		rFill = 0
-	}
-	_ = totalW
-	return styleFrame.Render(frameCharLT +
-		strings.Repeat(frameCharH, lFill) +
-		frameCharCRS +
-		strings.Repeat(frameCharH, rFill) +
-		frameCharRT)
-}
+// frameSplitDivider is unused — renderMidDivider builds inline.
+
+// ---------------------------------------------------------------------------
+// Width helpers — rune-count primary, lipgloss secondary clamp
+// ---------------------------------------------------------------------------
 
 func fitVisible(s string, width int) string {
 	if width <= 0 {
@@ -207,8 +210,7 @@ func fitVisible(s string, width int) string {
 		result = string(plain[:width])
 	}
 
-	// Secondary clamp: lipgloss.Width accounts for terminal wcwidth profile and may
-	// see ambiguous chars (e.g. ◆, ─, │) as 2-wide. If so, strip ANSI and return plain text.
+	// Secondary clamp: lipgloss.Width varies by terminal wcwidth profile.
 	if lipgloss.Width(result) > width {
 		plain2 := []rune(stripSimpleANSI(result))
 		if len(plain2) > width {
@@ -219,7 +221,6 @@ func fitVisible(s string, width int) string {
 	return result
 }
 
-// stripSimpleANSI handles SGR sequences emitted by lipgloss.
 func stripSimpleANSI(s string) string {
 	var out strings.Builder
 	inEscape := false
@@ -248,4 +249,43 @@ func clampInt(v, low, high int) int {
 		return high
 	}
 	return v
+}
+
+// ---------------------------------------------------------------------------
+// Pixel-art ROVE CODE logo — 5-row bitmap, rendered in violet + white
+// ---------------------------------------------------------------------------
+// Each character is 5 cols wide + 1 gap. Full string = 9 chars × 6 = 54 cols.
+var pixelLogoLines = [5]string{
+	// R      O      V      E        C      O      D      E
+	" ###   ###   # #  ####   ###   ###   ###  #### ",
+	" #  # #   # # #  #     #     #   # #   # #    ",
+	" ###  #   # ###  ###   #     #   # #   # ###  ",
+	" # #  #   # # #  #     #     #   # #   # #    ",
+	" #  #  ###  # #  ####   ###   ###   ###  #### ",
+}
+
+// renderPixelLogo returns the 5-line pixel art block, centered in width w.
+func renderPixelLogo(w int) []string {
+	logoW := len([]rune(pixelLogoLines[0]))
+	pad := (w - logoW) / 2
+	if pad < 0 {
+		pad = 0
+	}
+	prefix := strings.Repeat(" ", pad)
+	lines := make([]string, 5)
+	for i, row := range pixelLogoLines {
+		rendered := ""
+		for _, ch := range row {
+			switch ch {
+			case '#':
+				rendered += styleBrandMark.Render("#")
+			case ' ':
+				rendered += " "
+			default:
+				rendered += string(ch)
+			}
+		}
+		lines[i] = prefix + rendered
+	}
+	return lines
 }

@@ -356,26 +356,30 @@ func (p *MessagesPanel) Render() string {
 
 func (p *MessagesPanel) emptyState(innerW, contentH int) []string {
 	rows := make([]string, contentH)
-	if contentH < 5 {
+	if contentH < 9 {
 		return rows
 	}
-	brandText := truncate("◆  ROVE CODE", innerW)
-	subtitleText := truncate("local-first coding agent", innerW)
-	hintText := truncate("/setup  ·  ctrl+k  ·  type a task", innerW)
-	brand := styleBrandMark.Render("◆") + "  " + styleBrand.Render("ROVE CODE")
+	// Pixel art logo — 5 rows
+	logoLines := renderPixelLogo(innerW)
+	subtitleText := "local-first coding agent"
+	hintText := "/setup  --  ctrl+k  --  type a task"
 	subtitle := styleMuted.Render(subtitleText)
-	hint := styleFrame.Render(hintText)
-	_ = brandText
-	start := contentH/2 - 2
+	hint := styleDim.Render(hintText)
+
+	start := contentH/2 - 4
 	if start < 0 {
 		start = 0
 	}
-	rows[start] = centerVisible(brand, innerW)
-	if start+2 < contentH {
-		rows[start+2] = centerVisible(subtitle, innerW)
+	for i, l := range logoLines {
+		if start+i < contentH {
+			rows[start+i] = l
+		}
 	}
-	if contentH > 7 && start+4 < contentH {
-		rows[start+4] = centerVisible(hint, innerW)
+	if start+6 < contentH {
+		rows[start+6] = centerVisible(subtitle, innerW)
+	}
+	if start+8 < contentH {
+		rows[start+8] = centerVisible(hint, innerW)
 	}
 	return rows
 }
