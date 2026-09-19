@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-dev/aether/internal/config"
-	"github.com/aether-dev/aether/internal/core"
-	"github.com/aether-dev/aether/internal/types"
-	"github.com/aether-dev/aether/pkg/protocol"
+	"github.com/Kayra-ML/rove/internal/config"
+	"github.com/Kayra-ML/rove/internal/core"
+	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Kayra-ML/rove/pkg/protocol"
 )
 
 func TestDispatchAuthAndPing(t *testing.T) {

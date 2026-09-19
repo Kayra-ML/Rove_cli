@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/types"
 	_ "modernc.org/sqlite"
 )
 

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/aether-dev/aether/internal/config"
+	"github.com/Kayra-ML/rove/internal/config"
 )
 
 // SavedHost is a persisted SSH host entry.

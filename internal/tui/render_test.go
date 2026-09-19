@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/types"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )

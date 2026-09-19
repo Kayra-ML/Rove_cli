@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/aether-dev/aether/internal/config"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/config"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 func TestOpenSeedsAndRecoversRunningCards(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-dev/aether/internal/harness"
+	"github.com/Kayra-ML/rove/internal/harness"
 )
 
 // ─── Composer tests ────────────────────────────────────────────────────────────

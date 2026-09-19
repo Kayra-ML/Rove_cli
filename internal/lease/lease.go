@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/aether-dev/aether/internal/store"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/store"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 // Coordinator prevents two agents from editing the same file at once.

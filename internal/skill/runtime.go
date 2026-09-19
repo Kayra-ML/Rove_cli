@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/aether-dev/aether/internal/store"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/store"
+	"github.com/Kayra-ML/rove/internal/types"
 	"gopkg.in/yaml.v3"
 )
 

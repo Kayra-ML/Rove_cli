@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 // Generator produces unique IDs. Tests can inject a deterministic source.

@@ -1,6 +1,6 @@
 package terminal
 
-import "github.com/aether-dev/aether/internal/types"
+import "github.com/Kayra-ML/rove/internal/types"
 
 type SpawnOpts struct {
 	Kind        types.TerminalKind `json:"kind"`

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-dev/aether/internal/store"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/store"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 func openTestStore(t *testing.T) *store.Store {

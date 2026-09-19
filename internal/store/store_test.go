@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 func TestOpenMemory_CRUD(t *testing.T) {

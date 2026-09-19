@@ -8,16 +8,16 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/aether-dev/aether/internal/agent"
-	"github.com/aether-dev/aether/internal/eventbus"
-	"github.com/aether-dev/aether/internal/gitwt"
-	"github.com/aether-dev/aether/internal/harness"
-	"github.com/aether-dev/aether/internal/id"
-	"github.com/aether-dev/aether/internal/judge"
-	"github.com/aether-dev/aether/internal/kanban"
-	"github.com/aether-dev/aether/internal/store"
-	"github.com/aether-dev/aether/internal/types"
-	"github.com/aether-dev/aether/internal/workspace"
+	"github.com/Kayra-ML/rove/internal/agent"
+	"github.com/Kayra-ML/rove/internal/eventbus"
+	"github.com/Kayra-ML/rove/internal/gitwt"
+	"github.com/Kayra-ML/rove/internal/harness"
+	"github.com/Kayra-ML/rove/internal/id"
+	"github.com/Kayra-ML/rove/internal/judge"
+	"github.com/Kayra-ML/rove/internal/kanban"
+	"github.com/Kayra-ML/rove/internal/store"
+	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Kayra-ML/rove/internal/workspace"
 )
 
 // Engine drives autonomous goals using the harness execution kernel.

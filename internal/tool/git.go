@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/aether-dev/aether/internal/gitwt"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/gitwt"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 type GitStatusTool struct{ Git *gitwt.Manager }

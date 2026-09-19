@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aether-dev/aether/internal/config"
-	"github.com/aether-dev/aether/internal/daemon"
-	"github.com/aether-dev/aether/internal/sshtunnel"
-	"github.com/aether-dev/aether/internal/tui"
+	"github.com/Kayra-ML/rove/internal/config"
+	"github.com/Kayra-ML/rove/internal/daemon"
+	"github.com/Kayra-ML/rove/internal/sshtunnel"
+	"github.com/Kayra-ML/rove/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

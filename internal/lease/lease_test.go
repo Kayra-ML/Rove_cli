@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-dev/aether/internal/store"
+	"github.com/Kayra-ML/rove/internal/store"
 )
 
 func TestAcquireManyRollback(t *testing.T) {

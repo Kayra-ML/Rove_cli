@@ -3,8 +3,8 @@ package worker
 import (
 	"context"
 
-	"github.com/aether-dev/aether/internal/agent"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/agent"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 // Worker executes agent runs. The local daemon is the default worker.

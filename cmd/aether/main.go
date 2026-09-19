@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/aether-dev/aether/internal/config"
-	"github.com/aether-dev/aether/internal/daemon"
-	"github.com/aether-dev/aether/pkg/client"
-	"github.com/aether-dev/aether/pkg/protocol"
+	"github.com/Kayra-ML/rove/internal/config"
+	"github.com/Kayra-ML/rove/internal/daemon"
+	"github.com/Kayra-ML/rove/pkg/client"
+	"github.com/Kayra-ML/rove/pkg/protocol"
 )
 
 func main() {

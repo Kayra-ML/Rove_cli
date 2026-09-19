@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/aether-dev/aether/internal/store"
+	"github.com/Kayra-ML/rove/internal/store"
 )
 
 func TestOpenIdempotentByPath(t *testing.T) {

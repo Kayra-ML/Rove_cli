@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aether-dev/aether/internal/eventbus"
-	"github.com/aether-dev/aether/internal/memory"
-	"github.com/aether-dev/aether/internal/provider"
-	"github.com/aether-dev/aether/internal/session"
-	"github.com/aether-dev/aether/internal/store"
-	"github.com/aether-dev/aether/internal/tool"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/eventbus"
+	"github.com/Kayra-ML/rove/internal/memory"
+	"github.com/Kayra-ML/rove/internal/provider"
+	"github.com/Kayra-ML/rove/internal/session"
+	"github.com/Kayra-ML/rove/internal/store"
+	"github.com/Kayra-ML/rove/internal/tool"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 func TestRunStreamsAndPersists(t *testing.T) {

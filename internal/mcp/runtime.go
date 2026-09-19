@@ -10,8 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/aether-dev/aether/internal/tool"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/tool"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 type ServerConfig struct {

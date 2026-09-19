@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-dev/aether/internal/eventbus"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/eventbus"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 func TestSpawnEchoAndKill(t *testing.T) {

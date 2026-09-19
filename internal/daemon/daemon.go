@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aether-dev/aether/internal/config"
-	"github.com/aether-dev/aether/internal/core"
-	"github.com/aether-dev/aether/internal/rpc"
+	"github.com/Kayra-ML/rove/internal/config"
+	"github.com/Kayra-ML/rove/internal/core"
+	"github.com/Kayra-ML/rove/internal/rpc"
 )
 
 type Daemon struct {

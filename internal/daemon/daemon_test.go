@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-dev/aether/internal/config"
+	"github.com/Kayra-ML/rove/internal/config"
 )
 
 func TestStartHealthAndStop(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/aether-dev/aether/internal/terminal"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/terminal"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 type Manager struct {

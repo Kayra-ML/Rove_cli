@@ -6,17 +6,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aether-dev/aether/internal/agent"
-	"github.com/aether-dev/aether/internal/eventbus"
-	"github.com/aether-dev/aether/internal/gitwt"
-	"github.com/aether-dev/aether/internal/goal"
-	"github.com/aether-dev/aether/internal/harness"
-	"github.com/aether-dev/aether/internal/kanban"
-	"github.com/aether-dev/aether/internal/lease"
-	"github.com/aether-dev/aether/internal/session"
-	"github.com/aether-dev/aether/internal/store"
-	"github.com/aether-dev/aether/internal/types"
-	"github.com/aether-dev/aether/internal/workspace"
+	"github.com/Kayra-ML/rove/internal/agent"
+	"github.com/Kayra-ML/rove/internal/eventbus"
+	"github.com/Kayra-ML/rove/internal/gitwt"
+	"github.com/Kayra-ML/rove/internal/goal"
+	"github.com/Kayra-ML/rove/internal/harness"
+	"github.com/Kayra-ML/rove/internal/kanban"
+	"github.com/Kayra-ML/rove/internal/lease"
+	"github.com/Kayra-ML/rove/internal/session"
+	"github.com/Kayra-ML/rove/internal/store"
+	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Kayra-ML/rove/internal/workspace"
 )
 
 // Orchestrator fans independent Kanban cards out to agents. Cards that share

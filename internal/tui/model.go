@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aether-dev/aether/internal/sshtunnel"
-	"github.com/aether-dev/aether/internal/types"
-	"github.com/aether-dev/aether/pkg/protocol"
+	"github.com/Kayra-ML/rove/internal/sshtunnel"
+	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Kayra-ML/rove/pkg/protocol"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"

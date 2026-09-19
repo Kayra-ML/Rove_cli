@@ -1,4 +1,4 @@
-module github.com/aether-dev/aether
+module github.com/Kayra-ML/rove
 
 go 1.25.0
 

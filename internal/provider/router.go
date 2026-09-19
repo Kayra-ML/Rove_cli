@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 var ErrNoProvider = errors.New("provider: none configured")

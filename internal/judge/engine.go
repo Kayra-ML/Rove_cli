@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aether-dev/aether/internal/id"
-	"github.com/aether-dev/aether/internal/qualitygate"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/id"
+	"github.com/Kayra-ML/rove/internal/qualitygate"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 type Evidence struct {

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aether-dev/aether/internal/id"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/id"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 // VerifySignature validates a GitHub-style X-Hub-Signature-256 header.

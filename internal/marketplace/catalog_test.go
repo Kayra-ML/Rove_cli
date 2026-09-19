@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/aether-dev/aether/internal/skill"
+	"github.com/Kayra-ML/rove/internal/skill"
 )
 
 func TestPublishSearchInstall(t *testing.T) {

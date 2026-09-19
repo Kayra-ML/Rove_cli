@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/aether-dev/aether/internal/agent"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/agent"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 type stub struct{}

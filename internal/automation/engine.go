@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aether-dev/aether/internal/eventbus"
-	"github.com/aether-dev/aether/internal/goal"
-	"github.com/aether-dev/aether/internal/id"
-	"github.com/aether-dev/aether/internal/kanban"
-	"github.com/aether-dev/aether/internal/orchestrator"
-	"github.com/aether-dev/aether/internal/store"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/eventbus"
+	"github.com/Kayra-ML/rove/internal/goal"
+	"github.com/Kayra-ML/rove/internal/id"
+	"github.com/Kayra-ML/rove/internal/kanban"
+	"github.com/Kayra-ML/rove/internal/orchestrator"
+	"github.com/Kayra-ML/rove/internal/store"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 type Engine struct {

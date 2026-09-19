@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/aether-dev/aether/internal/skill"
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/skill"
+	"github.com/Kayra-ML/rove/internal/types"
 )
 
 //go:embed all:bundled

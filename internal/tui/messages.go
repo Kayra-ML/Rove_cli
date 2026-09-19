@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aether-dev/aether/internal/types"
+	"github.com/Kayra-ML/rove/internal/types"
 	"github.com/charmbracelet/lipgloss"
 )
 
