@@ -248,11 +248,12 @@ textarea { resize: none; }
 .body { display: grid; grid-template-columns: 248px 1fr 260px; min-height: 0; }
 .body-market { grid-template-columns: 248px 1fr; }
 .body-aux-off { grid-template-columns: 248px 1fr 28px; }
-.body-side-off { grid-template-columns: 28px 1fr 260px; }
-.body-side-off.body-aux-off { grid-template-columns: 28px 1fr 28px; }
-.body-market.body-side-off { grid-template-columns: 28px 1fr; }
+.body-side-off { grid-template-columns: 1fr 260px; }
+.body-side-off.body-aux-off { grid-template-columns: 1fr 28px; }
+.body-market.body-side-off { grid-template-columns: 1fr; }
 .sidebar, .aux { border-color: var(--border); border-style: solid; background: var(--bg-sunken); overflow: auto; }
 .sidebar { border-width: 0 1px 0 0; display: flex; flex-direction: column; min-height: 0; }
+.sidebar[hidden], .body-side-off > .sidebar { display: none; }
 .sidebar-top { flex: 1; overflow: auto; min-height: 0; }
 .sidebar-bottom { border-top: 1px solid #3a4250; flex-shrink: 0; }
 .general-prompt {

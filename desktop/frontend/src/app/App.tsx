@@ -50,7 +50,7 @@ export function App() {
   const [rpcOk, setRpcOk] = useState(true);
   const [updateAvail, setUpdateAvail] = useState<string | null>(null);
   const [auxOpen, setAuxOpen] = useState(() => localStorage.getItem("aether.auxOpen") !== "0");
-  const [sideOpen, setSideOpen] = useState(() => localStorage.getItem("aether.sideOpen") !== "0");
+  const [sideOpen, setSideOpen] = useState(() => localStorage.getItem("aether.sideOpen") === "1");
 
   const toggleAux = useCallback(() => {
     setAuxOpen((v) => {
@@ -217,28 +217,24 @@ export function App() {
     if (current.kind === "market") {
       return (
         <div className={`body body-market${sideOpen ? "" : " body-side-off"}`}>
-          {sideOpen ? (
-            <div className="sidebar">
-              <div className="aux-head">
-                <span>{t("sessions", lang)}</span>
-                <button type="button" className="icon-btn" title="‹" onClick={toggleSide}>‹</button>
-              </div>
-              <div className="sidebar-top">
-                <Extensions onOpenMarket={openMarket} marketActive />
-                <WorkspacePanel active={workspace} onSelect={setWorkspace} onNewChat={() => void openNewChat()} />
-                <SessionPanel
-                  workspaceId={workspace?.id}
-                  activeId={activeSession?.id ?? null}
-                  onSelect={setActiveSession}
-                  createRef={newChatRef}
-                />
-              </div>
-              <UsageCard />
-              <GeneralPanel />
+          <div className="sidebar" hidden={!sideOpen}>
+            <div className="aux-head">
+              <span>{t("sessions", lang)}</span>
+              <button type="button" className="icon-btn" title="‹" onClick={toggleSide}>‹</button>
             </div>
-          ) : (
-            <button type="button" className="side-show" onClick={toggleSide} title={t("sessions", lang)}>›</button>
-          )}
+            <div className="sidebar-top">
+              <Extensions onOpenMarket={openMarket} marketActive />
+              <WorkspacePanel active={workspace} onSelect={setWorkspace} onNewChat={() => void openNewChat()} />
+              <SessionPanel
+                workspaceId={workspace?.id}
+                activeId={activeSession?.id ?? null}
+                onSelect={setActiveSession}
+                createRef={newChatRef}
+              />
+            </div>
+            <UsageCard />
+            <GeneralPanel />
+          </div>
           <div className="main catalog-main">
             <SkillMarket />
           </div>
@@ -267,8 +263,7 @@ export function App() {
     }
     return (
       <div className={`body${auxOpen ? "" : " body-aux-off"}${sideOpen ? "" : " body-side-off"}`}>
-        {sideOpen ? (
-        <div className="sidebar">
+        <div className="sidebar" hidden={!sideOpen}>
           <div className="aux-head">
             <span>{t("sessions", lang)}</span>
             <button type="button" className="icon-btn" title="‹" onClick={toggleSide}>‹</button>
@@ -286,9 +281,6 @@ export function App() {
           <UsageCard />
           <GeneralPanel />
         </div>
-        ) : (
-          <button type="button" className="side-show" onClick={toggleSide} title={t("sessions", lang)}>›</button>
-        )}
         <div className="main">
           {current.kind === "board" ? (
             <Kanban workspaceId={workspace?.id} sessionId={activeSession?.id} onSelectCard={setSelectedCard} />
