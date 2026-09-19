@@ -1,6 +1,6 @@
 # Rove Code
 
-Local-first coding agent. One command installs the terminal cockpit. Desktop and daemon share the same sessions.
+Local-first coding agent. The desktop app is the product. One daemon, shared sessions.
 
 ## Install
 
@@ -11,25 +11,24 @@ curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install.sh |
 Then:
 
 ```bash
-rovecode              # terminal cockpit
-rovecode desktop      # desktop app, after Rove Code.app is installed
+rovecode              # desktop app
+rovecode desktop      # same
 rovecode daemon       # shared daemon in the foreground
 rovecode --version
 ```
 
-macOS desktop bundle (separate from the CLI installer):
+macOS desktop bundle:
 
 ```bash
 ./build-mac.sh
 ```
 
-Drag `Rove Code.app` into `/Applications`, then `rovecode desktop`.
+Drag `Rove Code.app` into `/Applications`, then `rovecode`.
 
 ## Layout
 
-- Terminal: chat on the left, plan + usage on the right
-- Desktop: Wails + React, same Go core and daemon
-- Profiles, sessions, SSH tunnels, automations, marketplace all live in the daemon
+- Desktop: Wails + React, Go core and daemon
+- Profiles, sessions, SSH tunnels, automations, marketplace live in the daemon
 
 ## Develop
 

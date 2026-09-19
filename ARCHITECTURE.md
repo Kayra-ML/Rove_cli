@@ -3,8 +3,8 @@
 ## Overview
 
 Rove Code is a local-first coding agent. Its **Go Core** is the single
-source of truth for all subsystems. The terminal (`rovecode`), desktop app,
-and headless daemon share the same core.
+source of truth for all subsystems. The desktop app (`rovecode`) and
+headless daemon share the same core.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐

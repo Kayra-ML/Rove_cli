@@ -14,17 +14,21 @@ import (
 )
 
 func main() {
-	// No args or "tui" → cockpit. "desktop" is forwarded as a product subcommand.
-	if len(os.Args) < 2 || os.Args[1] == "tui" {
+	// No args or "desktop" → desktop app. "tui" is the terminal cockpit.
+	if len(os.Args) < 2 || os.Args[1] == "desktop" {
+		extra := []string{}
+		if len(os.Args) > 2 {
+			extra = os.Args[2:]
+		}
+		launchTUI(append([]string{"desktop"}, extra...))
+		return
+	}
+	if os.Args[1] == "tui" {
 		tuiArgs := []string{}
 		if len(os.Args) > 2 {
 			tuiArgs = os.Args[2:]
 		}
-		launchTUI(tuiArgs)
-		return
-	}
-	if os.Args[1] == "desktop" {
-		launchTUI(append([]string{"desktop"}, os.Args[2:]...))
+		launchTUI(append([]string{"tui"}, tuiArgs...))
 		return
 	}
 	cmd := os.Args[1]
@@ -67,7 +71,7 @@ func usage() {
 	fmt.Print(`rovecode — CLI for the Rove Code daemon
 
 commands:
-  (none) | tui | desktop
+  (none) | desktop | tui
   version
   daemon start|stop
   ping

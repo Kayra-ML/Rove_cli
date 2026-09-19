@@ -16,6 +16,9 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/appicon.png
+var appIcon []byte
+
 func main() {
 	cfg, err := config.Load("")
 	if err != nil {
@@ -35,9 +38,17 @@ func main() {
 		Mac: &mac.Options{
 			TitleBar:   mac.TitleBarHiddenInset(),
 			Appearance: mac.NSAppearanceNameDarkAqua,
+			About: &mac.AboutInfo{
+				Title:   "Rove Code",
+				Message: "Local-first coding agent",
+				Icon:    appIcon,
+			},
 		},
 		Windows: &windows.Options{Theme: windows.Dark},
-		Linux:   &linux.Options{ProgramName: "rovecode"},
+		Linux: &linux.Options{
+			Icon:        appIcon,
+			ProgramName: "rovecode",
+		},
 	})
 	if err != nil {
 		log.Fatal(err)

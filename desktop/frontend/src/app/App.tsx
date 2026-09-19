@@ -22,6 +22,7 @@ import { useAgents } from "~/hooks/useApi";
 import type { SSHTarget } from "~/lib/types";
 import { usePrefs } from "~/hooks/usePrefs";
 import { t } from "~/lib/i18n";
+import brandMark from "~/assets/logo-256.png";
 
 type WinKind = "chat" | "board" | "terminal" | "market";
 type Win = { id: string; kind: WinKind; title: string; termId?: string };
@@ -392,7 +393,10 @@ export function App() {
   return (
     <div className="app">
       <div className="topbar">
-        <span className="brand"><em>Æ</em>ther</span>
+        <span className="brand">
+          <img className="brand-mark" src={brandMark} alt="" />
+          Rove
+        </span>
         <div className="win-tabs">
           {windows.map((w) => (
             <button

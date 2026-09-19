@@ -178,12 +178,22 @@ textarea { resize: none; }
 .topbar .brand {
   --wails-draggable: drag;
   -webkit-app-region: drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 650;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   font-size: 11px;
   color: var(--muted);
   margin-right: 8px;
+}
+.topbar .brand-mark {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  display: block;
+  flex-shrink: 0;
 }
 .topbar .brand em { color: var(--accent); font-style: normal; }
 
@@ -378,6 +388,14 @@ textarea { resize: none; }
   text-align: center;
   padding: 24px 32px 80px;
   color: var(--muted);
+}
+.wordmark-logo {
+  width: min(168px, 42vw);
+  height: auto;
+  margin: 0 0 18px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  pointer-events: none;
 }
 .wordmark {
   margin: 0 0 8px;

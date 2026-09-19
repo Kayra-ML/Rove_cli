@@ -29,6 +29,7 @@ var (
 )
 
 func main() {
+	runAsTUI := false
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "daemon":
@@ -38,6 +39,9 @@ func main() {
 			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
 			launchDesktop()
 			return
+		case "tui":
+			runAsTUI = true
+			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
 		case "help", "-h", "--help":
 			printUsage()
 			return
@@ -107,6 +111,15 @@ func main() {
 		return
 	}
 
+	if !runAsTUI {
+		launchDesktop()
+		return
+	}
+
+	runTUI()
+}
+
+func runTUI() {
 	localConfig, err := config.Load("")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rovecode: config: %v\n", err)
@@ -196,15 +209,16 @@ func printUsage() {
 	fmt.Print(`Rove Code — local-first coding agent
 
 Usage:
-  rovecode                 Open the terminal cockpit
+  rovecode                 Open the desktop app
   rovecode desktop         Open the desktop app
+  rovecode tui             Open the terminal cockpit
   rovecode daemon          Run the shared daemon in the foreground
   rovecode --version       Print the installed version
-  rovecode --host alias    Connect to a saved SSH host
+  rovecode tui --host alias
   rovecode --list-hosts    List saved SSH hosts
   rovecode --add-host alias=user@host:port
 
-The terminal and desktop share the same daemon, sessions, and workspace.
+The desktop and daemon share the same sessions and workspace.
 `)
 }
 

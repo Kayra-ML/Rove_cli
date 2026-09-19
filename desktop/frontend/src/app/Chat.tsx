@@ -9,6 +9,7 @@ import { Markdown } from "~/lib/markdown";
 import { filterSlash, lastUserKeep, matchSlash, SLASH, type SlashCmd, type SlashId } from "~/lib/slash";
 import type { Card } from "~/lib/types";
 import { toast } from "~/lib/toast";
+import wordmarkLogo from "~/assets/logo-256.png";
 
 interface Props {
   workspaceId?: string;
@@ -390,7 +391,8 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenBoard,
       <div className="thread-viewport">
         {empty ? (
           <div className="intro">
-            <p className="wordmark" aria-label="AETHER"><span>AETHER</span></p>
+            <img className="wordmark-logo" src={wordmarkLogo} alt="" />
+            <p className="wordmark" aria-label="ROVE"><span>ROVE</span></p>
             <p className="intro-body">{t("introBody", lang)}</p>
           </div>
         ) : (
