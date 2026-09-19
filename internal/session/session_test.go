@@ -21,7 +21,7 @@ func TestCreateAppendHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sess.Title != "Untitled" {
+	if sess.Title != "New chat" {
 		t.Fatalf("%s", sess.Title)
 	}
 	if _, err := m.Append(ctx, types.Message{SessionID: sess.ID, Role: types.RoleUser, Content: "hi"}); err != nil {

@@ -52,3 +52,28 @@ func TestRunStreamsAndPersists(t *testing.T) {
 		t.Fatalf("history %d", len(hist))
 	}
 }
+
+func TestBuildMessagesIncludesWorkspace(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "a.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	rt := New(s, nil, nil, nil, provider.NewRouter(), tool.New(nil))
+	msgs, err := rt.buildMessages(context.Background(), types.Agent{}, RunRequest{Workspace: "/tmp/demo-app"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) == 0 || msgs[0].Role != "system" {
+		t.Fatalf("%+v", msgs)
+	}
+	if !strings.Contains(msgs[0].Content, "Rove Code") {
+		t.Fatalf("missing brand: %s", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "/tmp/demo-app") {
+		t.Fatalf("missing workspace: %s", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "demo-app") {
+		t.Fatalf("missing project name: %s", msgs[0].Content)
+	}
+}

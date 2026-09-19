@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -247,7 +248,13 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 func (rt *Runtime) buildMessages(ctx context.Context, agent types.Agent, req RunRequest) ([]provider.ChatMessage, error) {
 	sys := agent.SystemPrompt
 	if sys == "" {
-		sys = "You are an Aether coding agent. Prefer tools over speculation. Stay inside the workspace."
+		sys = "You are Rove Code, a local coding agent. Prefer tools over speculation. Stay inside the workspace. Do not invent files that are not there."
+	}
+	if req.Workspace != "" {
+		sys += "\n\nWorkspace: " + req.Workspace
+		if name := filepath.Base(req.Workspace); name != "" && name != "." && name != "/" {
+			sys += "\nProject: " + name
+		}
 	}
 	if req.SystemExtra != "" {
 		sys += "\n\n" + req.SystemExtra

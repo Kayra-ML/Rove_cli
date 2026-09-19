@@ -205,7 +205,7 @@ export function App() {
   if (!ready) {
     return (
       <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>
-        Starting Aether…
+        Starting Rove Code…
       </div>
     );
   }
@@ -515,7 +515,7 @@ export function App() {
             {workspace.name} / {workspace.defaultBranch}
           </span>
         )}
-        <span style={{ marginLeft: "auto", color: "var(--faint)" }}>Aether v0.1.0</span>
+        <span style={{ marginLeft: "auto", color: "var(--faint)" }}>Rove Code</span>
       </div>
     </div>
   );

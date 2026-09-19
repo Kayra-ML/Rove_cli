@@ -22,7 +22,7 @@ func New(s *store.Store, bus *eventbus.Bus) *Manager {
 func (m *Manager) Create(ctx context.Context, title string, agentID, ws types.ID) (types.Session, error) {
 	now := time.Now().UTC()
 	if title == "" {
-		title = "Untitled"
+		title = "New chat"
 	}
 	sess := types.Session{ID: id.NewID(), Title: title, AgentID: agentID, WorkspaceID: ws, CreatedAt: now, UpdatedAt: now}
 	if err := m.store.UpsertSession(ctx, sess); err != nil {

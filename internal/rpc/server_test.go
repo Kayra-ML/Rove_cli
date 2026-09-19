@@ -174,6 +174,37 @@ func TestSessionCreateBindsCwdWorkspace(t *testing.T) {
 	}
 }
 
+func TestSessionSendRenamesPlaceholderTitle(t *testing.T) {
+	dir := t.TempDir()
+	app, err := core.Open(config.Config{DataDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	s := New(app)
+	ctx := context.Background()
+	agents, _ := app.Agents.List(ctx)
+	sess, err := app.Sess.Create(ctx, "", agents[0].ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	params, _ := json.Marshal(map[string]any{
+		"sessionId": sess.ID,
+		"content":   "fix the failing auth test",
+	})
+	resp := s.Dispatch(ctx, protocol.Request{Method: protocol.MethodSessionSend, Token: app.Token, Params: params})
+	if !resp.OK {
+		t.Fatalf("%+v", resp)
+	}
+	got, err := app.Sess.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "fix the failing auth test" {
+		t.Fatalf("title = %q", got.Title)
+	}
+}
+
 func TestCardLogsAndArtifact(t *testing.T) {
 	dir := t.TempDir()
 	app, err := core.Open(config.Config{DataDir: dir})

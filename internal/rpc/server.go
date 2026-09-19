@@ -385,6 +385,13 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			Workspace:   p.Workspace,
 			UserMessage: p.Content,
 		})
+		if err == nil && p.SessionID != "" && strings.TrimSpace(p.Content) != "" {
+			if sess, gerr := a.Sess.Get(ctx, p.SessionID); gerr == nil {
+				if sess.Title == "" || sess.Title == "Untitled" || sess.Title == "New chat" {
+					_ = a.Sess.Rename(ctx, p.SessionID, sessionTitleFrom(p.Content))
+				}
+			}
+		}
 		return core.MustJSON(res), err
 	case protocol.MethodSessionRename:
 		var p struct {
@@ -1548,4 +1555,21 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 	default:
 		return nil, fmt.Errorf("unknown method %s", req.Method)
 	}
+}
+
+func sessionTitleFrom(content string) string {
+	line := strings.TrimSpace(strings.ReplaceAll(content, "\n", " "))
+	if line == "" {
+		return "New chat"
+	}
+	fields := strings.Fields(line)
+	if len(fields) > 8 {
+		fields = fields[:8]
+	}
+	title := strings.Join(fields, " ")
+	runes := []rune(title)
+	if len(runes) > 48 {
+		title = string(runes[:45]) + "…"
+	}
+	return title
 }
