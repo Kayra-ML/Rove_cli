@@ -251,15 +251,15 @@ func clampInt(v, low, high int) int {
 }
 
 // ---------------------------------------------------------------------------
-// Pixel-art ROVE logo — 5-row bitmap, rendered in violet
-// Each character is 5 cols wide + 1 gap. Full string = 4 chars × 6 - 1 = 23 cols.
+// Pixel-art ROVE logo — 5-row block font, each char 5-wide, 2-space gap
+// Total width: (5+2)*4 - 2 = 26 cols. All ASCII '#' + space — zero wcwidth issues.
 // ---------------------------------------------------------------------------
 var pixelLogoLines = [5]string{
-	"###   ###  # #  ####",
-	"#  # #   # # #  #   ",
-	"###  #   # ###  ### ",
-	"# #  #   # # #  #   ",
-	"#  #  ###  # #  ####",
+	"####    ###   ## ##  #####",
+	"## ##  ## ##  ## ##  ##   ",
+	"####   ## ##   # #   #### ",
+	"## ##  ## ##   # #   ##   ",
+	"##  #   ###      #   #####",
 }
 
 // renderPixelLogo returns the 5-line pixel art block, centered in width w.
