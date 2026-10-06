@@ -113,6 +113,10 @@ export function describeTool(id: string, name: string, argsJson: string | undefi
       if (result && !result.isError) v.summary = `${outLines.length} öğe`;
       break;
     case "shell":
+    case "shell_run":
+    case "run_command":
+    case "bash":
+    case "exec":
       v.verb = "Bash";
       v.arg = clipArg(str(a.command), 90);
       if (result) clipOut();

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -93,5 +94,43 @@ func TestOpenAICompat_RegisterInRouter(t *testing.T) {
 	}
 	if c == nil {
 		t.Fatal("nil completer")
+	}
+}
+
+// A tool turn is not streamed: a gateway that answers a streamed tool
+// request with the call written out as text would otherwise never run it.
+func TestToolTurnIsNotStreamed(t *testing.T) {
+	var streamed *bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		s, _ := body["stream"].(bool)
+		streamed = &s
+		if _, ok := body["stream_options"]; ok {
+			t.Errorf("a non-streamed request must not carry stream_options")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"bakıyorum","tool_calls":[{"id":"c1","type":"function","function":{"name":"shell","arguments":"{\"command\":\"hostname\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":40,"completion_tokens":9,"prompt_tokens_details":{"cached_tokens":12}}}`)
+	}))
+	defer srv.Close()
+
+	p := &OpenAICompat{BaseURL: srv.URL, HTTPClient: srv.Client()}
+	ch, err := p.Complete(context.Background(), ChatRequest{
+		Model:    "m",
+		Messages: []ChatMessage{{Role: "user", Content: "hostname çalıştır"}},
+		Tools:    []ToolSpec{{Name: "shell", Parameters: json.RawMessage(`{"type":"object"}`)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, calls, u := collect(t, ch)
+	if streamed == nil || *streamed {
+		t.Fatalf("stream = %v, want false", streamed)
+	}
+	if text != "bakıyorum" || len(calls) != 1 || calls[0].Name != "shell" || calls[0].ArgsJSON != `{"command":"hostname"}` {
+		t.Fatalf("text=%q calls=%+v", text, calls)
+	}
+	if u.PromptTokens != 40 || u.CachedTokens != 12 {
+		t.Fatalf("usage = %+v", u)
 	}
 }

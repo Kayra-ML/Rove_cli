@@ -92,9 +92,26 @@ func (r *Runtime) Specs() []provider.ToolSpec {
 	return out
 }
 
+// toolAlias maps the names models reach for when they do not use the real
+// one. The shell tool is named "shell", but models trained elsewhere write
+// "shell_run", "run_command" or "bash" and then report that name as "command
+// not found" instead of running anything. The call goes to the real tool.
+var toolAlias = map[string]string{
+	"shell_run": "shell", "run_command": "shell", "exec": "shell", "bash": "shell",
+	"run_shell": "shell", "execute": "shell", "terminal": "shell", "command": "shell",
+	"read": "read_file", "cat": "read_file", "write": "write_file", "create_file": "write_file",
+	"edit_file": "patch_file", "search_replace": "patch_file", "replace_file": "patch_file",
+	"list": "list_dir", "ls": "list_dir",
+}
+
 func (r *Runtime) Call(ctx context.Context, name string, tc Context, args json.RawMessage) (Result, error) {
 	r.mu.RLock()
 	t, ok := r.tools[name]
+	if !ok {
+		if real, yes := toolAlias[name]; yes {
+			t, ok = r.tools[real]
+		}
+	}
 	r.mu.RUnlock()
 	if !ok {
 		return Result{Content: "unknown tool: " + name, IsError: true}, fmt.Errorf("unknown tool %s", name)

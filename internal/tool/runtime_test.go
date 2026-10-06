@@ -159,4 +159,9 @@ func TestShellAndPermissionDeny(t *testing.T) {
 	if err != nil || !strings.Contains(res.Content, "hi") {
 		t.Fatalf("%v %v", res, err)
 	}
+	// a model that calls the shell by another name still runs it
+	aliased, err := rt2.Call(context.Background(), "shell_run", Context{Workspace: root}, json.RawMessage(`{"command":"echo hi"}`))
+	if err != nil || !strings.Contains(aliased.Content, "hi") {
+		t.Fatalf("alias: %v %v", aliased, err)
+	}
 }

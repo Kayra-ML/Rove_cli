@@ -18,6 +18,17 @@ describe("ToolRows", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
+  it("a command that printed something opens to show its output", () => {
+    const results = new Map([["c0", { content: "KAYRA\n192.168.1.4" }]]);
+    render(<ToolRows calls={[call(0)]} results={results} lang="tr" />);
+    const card = document.querySelector(".out-card")!;
+    expect(card).toBeTruthy();
+    expect(card.querySelector(".edit-path")?.textContent).toBe("echo 0");
+    expect(document.querySelector(".edit-body")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    expect(Array.from(document.querySelectorAll(".edit-line")).map((l) => l.textContent)).toEqual(["KAYRA", "192.168.1.4"]);
+  });
+
   it("a refused call is not shown as an error, and reads as one line", () => {
     const refusal = {
       content: "shell is not allowed in this chat (rule: ask). Do not try it again: do the work another way, or ask the user to allow shell in Settings → Permissions.",

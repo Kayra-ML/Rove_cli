@@ -27,6 +27,7 @@ export function ToolRows({ calls, results, lang }: Props) {
     <div className="tool-chips">
       {rows.map((tv) => {
         if (tv.diff?.length) return <EditCard key={tv.id} tv={tv} lang={lang} />;
+        if (tv.output?.length) return <OutputCard key={tv.id} tv={tv} />;
         seen += 1;
         if (folded && seen > 1) return null;
         return (
@@ -50,6 +51,32 @@ export function ToolRows({ calls, results, lang }: Props) {
       })}
       {open && plain.length > FOLD && (
         <button type="button" className="tool-more tool-less" onClick={() => setOpen(false)}>{t("toolLess", lang)}</button>
+      )}
+    </div>
+  );
+}
+
+// OutputCard is one command and what it printed. The line shows the command;
+// the caret opens the output, which scrolls instead of pushing the turn away.
+function OutputCard({ tv }: { tv: ToolView }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`edit-card out-card${open ? " open" : ""}${tv.isError ? " err" : ""}`}>
+      <button type="button" className="edit-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <Icon name="terminal" size={12} />
+        <strong>{tv.verb}</strong>
+        {tv.arg && <span className="edit-path" title={tv.arg}>{tv.arg}</span>}
+        <span className="edit-caret" aria-hidden>›</span>
+      </button>
+      {open && (
+        <div className="edit-body">
+          <div className="edit-lines">
+            {tv.output!.map((l, i) => (
+              <div key={i} className="edit-line"><code>{l || " "}</code></div>
+            ))}
+            {tv.more ? <div className="edit-more">+{tv.more}</div> : null}
+          </div>
+        </div>
       )}
     </div>
   );

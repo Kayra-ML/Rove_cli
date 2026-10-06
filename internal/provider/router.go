@@ -307,11 +307,20 @@ func (o *OpenAICompat) Complete(ctx context.Context, req ChatRequest) (<-chan Ch
 		}
 	}
 	host := hostOf(o.BaseURL)
+	// A tool turn is asked for whole, not streamed. Some OpenAI-compatible
+	// gateways (the one behind 89.47.113.13) answer a streamed request that
+	// carries tools with the call written out as text — "<tool_call>…" —
+	// and finish with "stop", so the command is never run. The same request
+	// with stream off comes back as a real tool_calls entry. Plain replies,
+	// which have no tools, still stream so the words appear as they come.
+	stream := len(req.Tools) == 0
 	body := map[string]any{
-		"model":          req.Model,
-		"messages":       toOpenAIMessages(req.Messages, host == "openrouter.ai"),
-		"stream":         true,
-		"stream_options": map[string]any{"include_usage": true},
+		"model":    req.Model,
+		"messages": toOpenAIMessages(req.Messages, host == "openrouter.ai"),
+		"stream":   stream,
+	}
+	if stream {
+		body["stream_options"] = map[string]any{"include_usage": true}
 	}
 	// extras only where the endpoint is known to take them: an unknown
 	// field can make a strict OpenAI-compatible server reject the request
@@ -357,6 +366,14 @@ func (o *OpenAICompat) Complete(ctx context.Context, req ChatRequest) (<-chan Ch
 		b, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		return nil, fmt.Errorf("provider: %s: %s", resp.Status, b)
+	}
+	if !stream {
+		b, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		return wholeReply(b)
 	}
 	ch := make(chan ChatDelta, 16)
 	go func() {
@@ -470,6 +487,65 @@ func (o *OpenAICompat) Complete(ctx context.Context, req ChatRequest) (<-chan Ch
 			_ = dec
 		}
 	}()
+	return ch, nil
+}
+
+// wholeReply reads one non-streamed chat completion — the shape a tool turn
+// comes back in — and hands it over as a single delta, the way a finished
+// stream would.
+func wholeReply(b []byte) (<-chan ChatDelta, error) {
+	var resp struct {
+		Choices []struct {
+			Message struct {
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					ID       string `json:"id"`
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage *struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			PromptDetails    *struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
+			CacheRead int `json:"cache_read_input_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(b, &resp); err != nil {
+		return nil, fmt.Errorf("provider: bad reply: %w", err)
+	}
+	d := ChatDelta{Done: true}
+	if len(resp.Choices) > 0 {
+		m := resp.Choices[0].Message
+		d.Content = m.Content
+		for i, tc := range m.ToolCalls {
+			if tc.Function.Name == "" {
+				continue
+			}
+			id := tc.ID
+			if id == "" {
+				id = fmt.Sprintf("call_%d", i)
+			}
+			d.ToolCalls = append(d.ToolCalls, types.ToolCall{ID: id, Name: tc.Function.Name, ArgsJSON: tc.Function.Arguments})
+		}
+	}
+	if u := resp.Usage; u != nil && (u.PromptTokens > 0 || u.CompletionTokens > 0) {
+		d.Usage = &Usage{PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens}
+		if p := u.PromptDetails; p != nil {
+			d.Usage.CachedTokens = p.CachedTokens
+		}
+		if u.CacheRead > d.Usage.CachedTokens {
+			d.Usage.CachedTokens = u.CacheRead
+		}
+	}
+	ch := make(chan ChatDelta, 1)
+	ch <- d
+	close(ch)
 	return ch, nil
 }
 
