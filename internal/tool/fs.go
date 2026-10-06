@@ -169,8 +169,10 @@ type Shell struct {
 	Timeout time.Duration
 }
 
-func (Shell) Name() string        { return "shell" }
-func (Shell) Description() string { return "Run a shell command in the workspace. Prefer non-interactive commands." }
+func (Shell) Name() string { return "shell" }
+func (Shell) Description() string {
+	return "Run a shell command in the workspace. Prefer non-interactive commands."
+}
 func (Shell) Parameters() json.RawMessage {
 	return schema(`{"command":{"type":"string"},"cwd":{"type":"string"}}`)
 }

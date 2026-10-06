@@ -59,8 +59,6 @@ func (m *Manager) List(ctx context.Context) ([]types.Workspace, error) {
 	return m.store.ListWorkspaces(ctx)
 }
 
-func (m *Manager) Git() *gitwt.Manager { return m.git }
-
 func (m *Manager) Delete(ctx context.Context, id types.ID) error {
 	return m.store.DeleteWorkspace(ctx, id)
 }

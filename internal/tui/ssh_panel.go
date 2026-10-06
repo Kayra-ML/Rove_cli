@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Kayra-ML/rove/internal/sshtunnel"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -24,8 +23,6 @@ type SSHPanel struct {
 	addNote  textinput.Model
 	addField int // 0=alias, 1=spec, 2=note
 
-	width  int
-	height int
 	status string
 
 	// active tunnel
@@ -67,7 +64,7 @@ func (p *SSHPanel) reloadHosts() {
 	}
 }
 
-func (p *SSHPanel) IsOpen() bool  { return p.open }
+func (p *SSHPanel) IsOpen() bool    { return p.open }
 func (p *SSHPanel) IsAddMode() bool { return p.addMode }
 
 func (p *SSHPanel) Open() {
@@ -342,22 +339,4 @@ func (p *SSHPanel) TunnelStatusText() string {
 		return fmt.Sprintf("● %s", p.activeAlias)
 	}
 	return ""
-}
-
-// FormatLastUsed formats a time for display.
-func formatAge(t time.Time) string {
-	if t.IsZero() {
-		return "never"
-	}
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	}
 }

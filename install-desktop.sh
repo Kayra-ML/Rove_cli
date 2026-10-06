@@ -112,6 +112,22 @@ else
 fi
 ok "installed: $DEST"
 
+# The terminal command runs the daemon the app carries: one link, and later
+# updates of the app update it too, with no sudo.
+BIN_DIR="/usr/local/bin"
+LINK="$BIN_DIR/rovecode"
+TARGET="$DEST/Contents/MacOS/rovecode"
+if [ -x "$TARGET" ] && [ "$(readlink "$LINK" 2>/dev/null || true)" != "$TARGET" ]; then
+  log "Linking $LINK → app…"
+  if mkdir -p "$BIN_DIR" 2>/dev/null && [ -w "$BIN_DIR" ]; then
+    ln -sf "$TARGET" "$LINK"
+  else
+    sudo mkdir -p "$BIN_DIR"
+    sudo ln -sf "$TARGET" "$LINK"
+  fi
+  ok "rovecode → $TARGET"
+fi
+
 echo ""
 echo -e "${GREEN}Rove Code.app is in /Applications.${NC}"
 echo "Run:  rovecode"

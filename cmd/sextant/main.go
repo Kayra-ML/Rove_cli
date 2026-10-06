@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	"github.com/Kayra-ML/rove/internal/daemon"
 	"github.com/Kayra-ML/rove/internal/sshtunnel"
 	"github.com/Kayra-ML/rove/internal/tui"
+	"github.com/Kayra-ML/rove/pkg/protocol"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -48,6 +50,20 @@ func main() {
 		case "version":
 			fmt.Printf("rovecode %s\n", version)
 			return
+		case "api-level":
+			// what the desktop app checks on a server before connecting
+			fmt.Println(protocol.APILevel)
+			return
+		case "token":
+			// the daemon's token, for a desktop app connecting over SSH
+			for _, p := range config.TokenSearchPaths(config.DefaultDataDir()) {
+				if b, err := os.ReadFile(p); err == nil && strings.TrimSpace(string(b)) != "" {
+					fmt.Println(strings.TrimSpace(string(b)))
+					return
+				}
+			}
+			fmt.Fprintln(os.Stderr, "rovecode: no token yet (has the daemon run?)")
+			os.Exit(1)
 		}
 	}
 
@@ -400,16 +416,25 @@ func runBundledDaemon() {
 	if daemonHealthy(cfg.ListenHTTP) {
 		return
 	}
+	if lf, err := daemon.OpenLog(cfg.DataDir); err == nil {
+		defer lf.Close()
+	}
+	pathFrom := daemon.FixPath()
 	d, err := daemon.Start(cfg)
 	if err != nil {
+		log.Printf("daemon: %v", err)
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	log.Printf("daemon %s started: pid %d, api %d, data %s, PATH from %s", version, os.Getpid(), protocol.APILevel, cfg.DataDir, pathFrom)
 	_ = daemon.WritePID(cfg.DataDir)
 	defer os.Remove(daemon.PIDPath(cfg.DataDir))
 
+	// pkill and the desktop app's restart send SIGTERM; stop cleanly for it
+	// too, so the store is closed and the pid file goes
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
-	<-stop
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	sig := <-stop
+	log.Printf("daemon stopping: %v", sig)
 	_ = d.Stop()
 }

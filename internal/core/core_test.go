@@ -8,15 +8,23 @@ import (
 	"github.com/Kayra-ML/rove/internal/types"
 )
 
-func TestOpenSeedsAndRecoversRunningCards(t *testing.T) {
+func TestOpenSeedsAndRecoversRunningGoals(t *testing.T) {
 	dir := t.TempDir()
 	app, err := Open(config.Config{DataDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	card, err := app.Kanban.Create(ctx, types.Card{Title: "mid-flight", Column: types.ColRunning})
+	g, err := app.Goals.Create(ctx, types.Goal{Title: "mid-flight"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	g.Status = types.GoalRunning
+	if err := app.Store.UpsertGoal(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	// a job of a kind an older version seeded is dropped on the next start
+	if _, err := app.Auto.Upsert(ctx, types.AutomationJob{Name: "sweep ready", Kind: "sweep_ready", EverySeconds: 30}); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.Close(); err != nil {
@@ -27,12 +35,15 @@ func TestOpenSeedsAndRecoversRunningCards(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer app2.Close()
-	got, err := app2.Kanban.Get(ctx, card.ID)
+	got, err := app2.Goals.Get(ctx, g.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Column != types.ColReady {
-		t.Fatalf("expected recovered card in ready, got %s", got.Column)
+	if got.Status != types.GoalPending {
+		t.Fatalf("expected the interrupted goal back to pending, got %s", got.Status)
+	}
+	if jobs, _ := app2.Auto.List(ctx); len(jobs) != 0 {
+		t.Fatalf("old jobs kept: %+v", jobs)
 	}
 	agents, err := app2.Agents.List(ctx)
 	if err != nil || len(agents) == 0 {

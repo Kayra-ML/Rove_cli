@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -46,18 +47,6 @@ func TestOpenMemory_CRUD(t *testing.T) {
 		t.Fatalf("msgs %+v", msgs)
 	}
 
-	card := types.Card{ID: "c1", Title: "build", Column: types.ColReady, AcceptanceCriteria: []string{"tests pass"}, CreatedAt: now, UpdatedAt: now}
-	if err := s.UpsertCard(ctx, card); err != nil {
-		t.Fatal(err)
-	}
-	c, err := s.GetCard(ctx, "c1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(c.AcceptanceCriteria) != 1 {
-		t.Fatalf("criteria %+v", c.AcceptanceCriteria)
-	}
-
 	g := types.Goal{ID: "g1", Title: "ship", Status: types.GoalPending, CompletionContract: types.CompletionContract{Criteria: []string{"ok"}, MaxIterations: 3}, CreatedAt: now, UpdatedAt: now}
 	if err := s.UpsertGoal(ctx, g); err != nil {
 		t.Fatal(err)
@@ -83,40 +72,6 @@ func TestOpenMemory_CRUD(t *testing.T) {
 	}
 }
 
-func TestFileLease_ConflictAndExpiry(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "lease.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	ctx := context.Background()
-	until := time.Now().Add(time.Hour)
-	if err := s.AcquireLease(ctx, "/src/main.go", "agent-a", "c1", until); err != nil {
-		t.Fatal(err)
-	}
-	err = s.AcquireLease(ctx, "/src/main.go", "agent-b", "c2", until)
-	if !errors.Is(err, ErrConflict) {
-		t.Fatalf("want conflict, got %v", err)
-	}
-	if err := s.ReleaseLease(ctx, "/src/main.go", "agent-a"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.AcquireLease(ctx, "/src/main.go", "agent-b", "c2", until); err != nil {
-		t.Fatal(err)
-	}
-
-	past := time.Now().Add(-time.Minute)
-	if err := s.AcquireLease(ctx, "/old.go", "agent-a", "c1", past); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SweepExpiredLeases(ctx, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.AcquireLease(ctx, "/old.go", "agent-b", "c2", until); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestMemoryUniqueKey(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "mem.db"))
 	if err != nil {
@@ -139,5 +94,49 @@ func TestMemoryUniqueKey(t *testing.T) {
 	}
 	if got.Content != "b" {
 		t.Fatalf("got %s", got.Content)
+	}
+}
+
+// A database made by an older version still has card_id columns on
+// goals and harness mutations; they have defaults, so writing without them
+// works and nothing has to be migrated.
+func TestOldCardColumnsStillWork(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	old, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`CREATE TABLE goals (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', contract TEXT NOT NULL,
+			status TEXT NOT NULL, card_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL DEFAULT '', agent_id TEXT NOT NULL DEFAULT '',
+			iteration INTEGER NOT NULL DEFAULT 0, last_verdict TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE TABLE harness_mutations (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, card_id TEXT NOT NULL DEFAULT '',
+			iteration INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT '', old_profile TEXT NOT NULL DEFAULT '{}',
+			new_profile TEXT NOT NULL DEFAULT '{}', result TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
+	} {
+		if _, err := old.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := s.UpsertGoal(ctx, types.Goal{ID: "g1", Title: "ship", Status: types.GoalPending, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if g, err := s.GetGoal(ctx, "g1"); err != nil || g.Title != "ship" {
+		t.Fatalf("goal = %+v, %v", g, err)
+	}
+	if err := s.InsertHarnessMutation(ctx, HarnessMutationRow{ID: "m1", GoalID: "g1", Reason: "r", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if ms, err := s.ListHarnessMutations(ctx, "g1"); err != nil || len(ms) != 1 {
+		t.Fatalf("mutations = %+v, %v", ms, err)
 	}
 }

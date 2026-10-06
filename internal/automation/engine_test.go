@@ -4,20 +4,13 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/Kayra-ML/rove/internal/agent"
 	"github.com/Kayra-ML/rove/internal/eventbus"
-	"github.com/Kayra-ML/rove/internal/kanban"
-	"github.com/Kayra-ML/rove/internal/orchestrator"
-	"github.com/Kayra-ML/rove/internal/provider"
-	"github.com/Kayra-ML/rove/internal/session"
 	"github.com/Kayra-ML/rove/internal/store"
-	"github.com/Kayra-ML/rove/internal/tool"
 	"github.com/Kayra-ML/rove/internal/types"
 )
 
-func harness(t *testing.T) (*Engine, *kanban.Engine, *agent.Runtime, context.Context) {
+func harness(t *testing.T) (*Engine, context.Context) {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "a.db"))
 	if err != nil {
@@ -26,19 +19,12 @@ func harness(t *testing.T) (*Engine, *kanban.Engine, *agent.Runtime, context.Con
 	t.Cleanup(func() { _ = s.Close() })
 	bus := eventbus.New()
 	t.Cleanup(func() { bus.Close() })
-	k := kanban.New(s, bus)
-	r := provider.NewRouter()
-	r.Register("fake", &provider.Fake{Responses: []string{"did the work"}})
-	sess := session.New(s, bus)
-	ag := agent.New(s, bus, sess, nil, r, tool.New(nil))
-	o := orchestrator.New(s, bus, k, ag, nil, sess, nil, nil, nil)
-	e := New(s, bus, k, o, nil, ag)
-	return e, k, ag, context.Background()
+	return New(s, bus, nil), context.Background()
 }
 
 func TestUpsertListDelete(t *testing.T) {
-	e, _, _, ctx := harness(t)
-	j, err := e.Upsert(ctx, types.AutomationJob{Name: "sweep", Kind: types.AutoSweepReady, EverySeconds: 15, Enabled: true})
+	e, ctx := harness(t)
+	j, err := e.Upsert(ctx, types.AutomationJob{Name: "sweep", Kind: types.AutoDriveGoals, EverySeconds: 15, Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +45,8 @@ func TestUpsertListDelete(t *testing.T) {
 }
 
 func TestTickDisabledSkipped(t *testing.T) {
-	e, _, _, ctx := harness(t)
-	_, err := e.Upsert(ctx, types.AutomationJob{Name: "off", Kind: types.AutoAssignIdle, EverySeconds: 1, Enabled: false})
+	e, ctx := harness(t)
+	_, err := e.Upsert(ctx, types.AutomationJob{Name: "off", Kind: types.AutoDriveGoals, EverySeconds: 1, Enabled: false})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,68 +59,25 @@ func TestTickDisabledSkipped(t *testing.T) {
 	}
 }
 
-func TestAssignIdleFillsReady(t *testing.T) {
-	e, k, ag, ctx := harness(t)
-	a, err := ag.Upsert(ctx, types.Agent{Name: "lead", Provider: "fake", Model: "fake", Status: types.AgentIdle})
-	if err != nil {
-		t.Fatal(err)
-	}
-	card, err := k.Create(ctx, types.Card{Title: "open", Column: types.ColReady})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = e.Upsert(ctx, types.AutomationJob{Name: "assign", Kind: types.AutoAssignIdle, EverySeconds: 1, Enabled: true})
-	if err != nil {
+// Only goal driving has a runner; a job of another kind (a template that
+// has none yet) runs as a no-op instead of doing something unrelated.
+func TestJobWithoutRunnerIsANoop(t *testing.T) {
+	e, ctx := harness(t)
+	if _, err := e.Upsert(ctx, types.AutomationJob{Name: "daily-digest", Kind: "daily_digest", EverySeconds: 1, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	out, err := e.Tick(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].LastResult != "assigned 1" {
+	if len(out) != 1 || out[0].LastResult != "noop" {
 		t.Fatalf("%+v", out)
 	}
-	got, err := k.Get(ctx, card.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.AssigneeAgentID != a.ID {
-		t.Fatalf("assignee %s want %s", got.AssigneeAgentID, a.ID)
-	}
-}
-
-func TestSweepDispatchesReady(t *testing.T) {
-	e, k, ag, ctx := harness(t)
-	a, err := ag.Upsert(ctx, types.Agent{Name: "lead", Provider: "fake", Model: "fake", Status: types.AgentIdle})
-	if err != nil {
-		t.Fatal(err)
-	}
-	card, err := k.Create(ctx, types.Card{Title: "ship", Column: types.ColReady, AssigneeAgentID: a.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = e.Upsert(ctx, types.AutomationJob{Name: "sweep", Kind: types.AutoSweepReady, EverySeconds: 1, Enabled: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		got, _ := k.Get(ctx, card.ID)
-		if got.Column == types.ColRunning || got.Column == types.ColReview {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	got, _ := k.Get(ctx, card.ID)
-	t.Fatalf("column %s", got.Column)
 }
 
 func TestTickRespectsInterval(t *testing.T) {
-	e, _, _, ctx := harness(t)
-	j, err := e.Upsert(ctx, types.AutomationJob{Name: "slow", Kind: types.AutoAssignIdle, EverySeconds: 3600, Enabled: true})
+	e, ctx := harness(t)
+	j, err := e.Upsert(ctx, types.AutomationJob{Name: "slow", Kind: types.AutoDriveGoals, EverySeconds: 3600, Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,12 +99,12 @@ func TestTickRespectsInterval(t *testing.T) {
 }
 
 func TestDefaultEverySeconds(t *testing.T) {
-	e, _, _, ctx := harness(t)
+	e, ctx := harness(t)
 	j, err := e.Upsert(ctx, types.AutomationJob{Name: "d"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if j.EverySeconds != 30 || j.Kind != types.AutoSweepReady {
+	if j.EverySeconds != 30 || j.Kind != types.AutoDriveGoals {
 		t.Fatalf("%+v", j)
 	}
 }

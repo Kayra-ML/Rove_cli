@@ -212,14 +212,6 @@ func (m *Manager) Log(path string, limit int) ([]GitCommit, error) {
 	return commits, nil
 }
 
-func (m *Manager) BranchForCard(cardID types.ID) string {
-	return "aether/" + string(cardID)
-}
-
-func (m *Manager) WorktreePath(repo string, cardID types.ID) string {
-	return filepath.Join(repo, ".aether", "worktrees", string(cardID))
-}
-
 // CreateBranch creates a new local branch at the given repo path.
 func (m *Manager) CreateBranch(path, name string) error {
 	_, err := m.run(path, "checkout", "-b", name)
@@ -234,12 +226,10 @@ func (m *Manager) PushBranch(path, remote, branch string) error {
 
 // CreatePR creates a pull request using the gh CLI and returns the PR URL.
 func (m *Manager) CreatePR(path, title, body, base string) (string, error) {
-	args := []string{"pr", "create",
-		"--title", title,
-		"--body", body,
-	}
+	// "--flag=value": a title starting with "-" stays a title
+	args := []string{"pr", "create", "--title=" + title, "--body=" + body}
 	if base != "" {
-		args = append(args, "--base", base)
+		args = append(args, "--base="+base)
 	}
 	cmd := exec.Command("gh", args...)
 	cmd.Dir = path
@@ -277,4 +267,146 @@ func (m *Manager) RejectHunk(dir, hunkPatch string) error {
 		return fmt.Errorf("git apply --reverse: %w (%s)", err, stderr.String())
 	}
 	return nil
+}
+
+// ── Worktree isolation for subagents ──────────────────────────────────────────
+//
+// Parallel agents writing one checkout collide: two of them edit a file and
+// the second quietly wins. Each subagent instead gets a checkout of its own,
+// and what it changed comes back to the user's tree as a patch once it is
+// done. The user's own tree, index and branch are never committed to: the
+// changes land there uncommitted, exactly as a single agent's would.
+
+// runIn is run with extra environment and, optionally, a stdin. raw keeps the
+// output untouched — a patch must keep its final newline.
+func (m *Manager) runIn(dir string, env []string, stdin string, raw bool, args ...string) (string, error) {
+	cmd := exec.Command(m.GitBin, args...)
+	cmd.Dir = dir
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	if raw {
+		return stdout.String(), nil
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// snapshotIdentity signs the throwaway snapshot commit, so a machine with no
+// git identity configured can still take one.
+var snapshotIdentity = []string{
+	"GIT_AUTHOR_NAME=Rove", "GIT_AUTHOR_EMAIL=rove@localhost",
+	"GIT_COMMITTER_NAME=Rove", "GIT_COMMITTER_EMAIL=rove@localhost",
+}
+
+// Snapshot records the working tree as it stands — tracked changes and new
+// files alike, ignored files not — as a commit on top of HEAD, without
+// touching the user's index, tree or branch. A subagent's checkout starts
+// from it, so it sees the work the user has not committed yet. It works on
+// a copy of the index, which keeps git's cached file stats and so only
+// re-reads files that changed.
+func (m *Manager) Snapshot(repo string) (string, error) {
+	head, err := m.run(repo, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("no commit to start from: %w", err)
+	}
+	real, err := m.run(repo, "rev-parse", "--path-format=absolute", "--git-path", "index")
+	if err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp("", "rove-index-*")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if b, rerr := os.ReadFile(real); rerr == nil {
+		_, _ = tmp.Write(b)
+	}
+	_ = tmp.Close()
+	env := []string{"GIT_INDEX_FILE=" + tmpPath}
+	if _, err := m.runIn(repo, env, "", false, "add", "-A"); err != nil {
+		return "", err
+	}
+	tree, err := m.runIn(repo, env, "", false, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	if headTree, _ := m.run(repo, "rev-parse", head+"^{tree}"); headTree == tree {
+		return head, nil // nothing uncommitted: HEAD is the snapshot
+	}
+	return m.runIn(repo, snapshotIdentity, "", false, "commit-tree", tree, "-p", head, "-m", "rove: working tree for subagents")
+}
+
+// AddWorktree checks commit out into dest on a new branch.
+func (m *Manager) AddWorktree(repo, dest, branch, commit string) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	_, err := m.run(repo, "worktree", "add", "-b", branch, dest, commit)
+	return err
+}
+
+// WorkPatch is everything a checkout changed since base — edits, new files,
+// deletions, binaries — as a patch, with the added and removed line counts
+// and the files it touched. Commits the agent made there count too: the
+// comparison is between base and what is in the checkout now.
+func (m *Manager) WorkPatch(dest, base string) (patch string, added, removed int, files []string, err error) {
+	if _, err = m.run(dest, "add", "-A"); err != nil {
+		return "", 0, 0, nil, err
+	}
+	if patch, err = m.runIn(dest, nil, "", true, "diff", "--cached", "--binary", base); err != nil {
+		return "", 0, 0, nil, err
+	}
+	stat, err := m.run(dest, "diff", "--cached", "--numstat", base)
+	if err != nil {
+		return "", 0, 0, nil, err
+	}
+	for _, line := range strings.Split(stat, "\n") {
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		// binary files show "-" for both counts
+		var a, r int
+		_, _ = fmt.Sscanf(parts[0], "%d", &a)
+		_, _ = fmt.Sscanf(parts[1], "%d", &r)
+		added += a
+		removed += r
+		files = append(files, parts[2])
+	}
+	return patch, added, removed, files, nil
+}
+
+// ApplyPatch lays a patch onto repo's working tree, leaving it uncommitted.
+// It checks first, so a patch that does not fit — the same lines changed by
+// someone else meanwhile — changes nothing at all rather than half of it.
+func (m *Manager) ApplyPatch(repo, patch string) error {
+	if strings.TrimSpace(patch) == "" {
+		return nil
+	}
+	if _, err := m.runIn(repo, nil, patch, false, "apply", "--check", "--whitespace=nowarn", "-"); err != nil {
+		return err
+	}
+	_, err := m.runIn(repo, nil, patch, false, "apply", "--whitespace=nowarn", "-")
+	return err
+}
+
+// DropWorktree removes a subagent's checkout and its branch.
+func (m *Manager) DropWorktree(repo, dest, branch string) error {
+	err := m.RemoveWorktree(repo, dest)
+	if branch != "" {
+		if _, berr := m.run(repo, "branch", "-D", branch); berr != nil && err == nil {
+			err = berr
+		}
+	}
+	return err
 }

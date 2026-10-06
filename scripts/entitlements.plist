@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Hardened runtime with no exceptions: the app is not sandboxed, starts
+     programs the user installed (node, python, agent CLIs) as its own
+     children, and reads the keychain through /usr/bin/security; none of that
+     needs an entitlement. -->
+<dict/>
+</plist>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export interface UseVoiceReturn {
+interface UseVoiceReturn {
   listening: boolean;
   supported: boolean;
   start: () => void;

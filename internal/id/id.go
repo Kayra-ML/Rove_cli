@@ -21,10 +21,6 @@ func New() *Generator {
 	return &Generator{rand: rand.Reader}
 }
 
-func NewWithReader(r io.Reader) *Generator {
-	return &Generator{rand: r}
-}
-
 func (g *Generator) New() types.ID {
 	var b [10]byte
 	if _, err := io.ReadFull(g.rand, b[:]); err != nil {

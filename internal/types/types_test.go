@@ -2,17 +2,6 @@ package types
 
 import "testing"
 
-func TestValidColumn(t *testing.T) {
-	for _, c := range []KanbanColumn{ColBacklog, ColReady, ColRunning, ColReview, ColDone, ColBlocked} {
-		if !ValidColumn(c) {
-			t.Fatalf("expected %s valid", c)
-		}
-	}
-	if ValidColumn("todo") {
-		t.Fatal("todo must not be a valid column")
-	}
-}
-
 func TestSkillPermissions_DangerousCapabilities(t *testing.T) {
 	p := SkillPermissions{Filesystem: true, Shell: true, Dangerous: []string{"raw-socket"}}
 	got := p.DangerousCapabilities()
@@ -34,5 +23,13 @@ func TestID_IsZero(t *testing.T) {
 	}
 	if ID("abc").IsZero() {
 		t.Fatal("non-empty should not be zero")
+	}
+}
+
+func TestMCPSlug(t *testing.T) {
+	for in, want := range map[string]string{"GitHub": "github", "My Echo": "my-echo", " a__b ": "a-b", "!!!": "server", "Şirket CRM": "sirket-crm", "Çağrı Ölçüm": "cagri-olcum"} {
+		if got := MCPSlug(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
 	}
 }

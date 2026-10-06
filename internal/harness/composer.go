@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"math"
 	"strings"
 )
 
@@ -9,7 +8,7 @@ import (
 // Fields that are zero/empty are treated as unknown.
 type TaskAnalysis struct {
 	// Classification
-	TaskType   string // "bug_fix" | "feature" | "refactor" | "research" | "review" | "test" | "generic"
+	TaskType   string  // "bug_fix" | "feature" | "refactor" | "research" | "review" | "test" | "generic"
 	Complexity float64 // 0.0 (trivial) … 1.0 (very hard)
 	RiskLevel  float64 // 0.0 (safe) … 1.0 (dangerous)
 
@@ -25,9 +24,9 @@ type TaskAnalysis struct {
 	CostBudgetUSD     float64 // 0 = unlimited
 
 	// Available models
-	AvailableModels     []string
-	PrimaryModelCap     ModelCap
-	FallbackModelRef    string
+	AvailableModels  []string
+	PrimaryModelCap  ModelCap
+	FallbackModelRef string
 
 	// Historical harness eval (optional)
 	HistoricalSuccessRate float64 // 0.0 … 1.0
@@ -36,9 +35,9 @@ type TaskAnalysis struct {
 
 // ModelCap describes a model's context capabilities.
 type ModelCap struct {
-	MaxContextTokens int
+	MaxContextTokens  int
 	SupportsFunctions bool
-	IsLong           bool // e.g. 128k+ context
+	IsLong            bool // e.g. 128k+ context
 }
 
 // HarnessComposer composes a GoalExecProfile from a TaskAnalysis.
@@ -101,22 +100,10 @@ func (hc *HarnessComposer) Compose(a TaskAnalysis) GoalExecProfile {
 		reasons = append(reasons, "goal loop+plan (high complexity/risk)")
 	}
 
-	// Parallel agents if task is large and autonomy is high.
-	if a.AffectedFiles > 10 && a.RequestedAutonomy > 0.5 {
-		p.Execution |= Parallel
-		reasons = append(reasons, "parallel agents (many files, high autonomy)")
-	}
-
-	// Sandboxed if risk is high.
+	// Snapshot first if risk is high.
 	if a.RiskLevel > 0.5 || a.TaskType == "refactor" {
 		p.Execution |= Sandboxed
-		reasons = append(reasons, "sandboxed worktree (risk/refactor)")
-	}
-
-	// Delegated for research tasks.
-	if a.TaskType == "research" {
-		p.Execution |= Delegated
-		reasons = append(reasons, "delegated (research task)")
+		reasons = append(reasons, "snapshot before starting (risk/refactor)")
 	}
 
 	// ── Tools ────────────────────────────────────────────────────────────────
@@ -130,9 +117,9 @@ func (hc *HarnessComposer) Compose(a TaskAnalysis) GoalExecProfile {
 		reasons = append(reasons, "coding tools")
 	}
 
-	if a.AffectedFiles > 5 && p.HasExec(Parallel) {
+	if a.AffectedFiles > 5 {
 		p.Tools |= ParallelTools
-		reasons = append(reasons, "parallel tool calls (parallel execution)")
+		reasons = append(reasons, "parallel read-only tool calls (many files)")
 	} else {
 		p.Tools |= SequentialTools
 		reasons = append(reasons, "sequential tool calls")
@@ -225,14 +212,6 @@ func (hc *HarnessComposer) Compose(a TaskAnalysis) GoalExecProfile {
 		p.ContextBudgetTokens = a.TokenBudget
 	} else {
 		p.ContextBudgetTokens = p.EffectiveContextBudget()
-	}
-
-	// ── Max parallel agents ───────────────────────────────────────────────────
-
-	if p.HasExec(Parallel) {
-		workers := clampInt(int(math.Ceil(float64(a.AffectedFiles)/5.0)), 2, 8)
-		p.MaxParallelAgents = workers
-		reasons = append(reasons, "parallel agents: "+itoa(workers))
 	}
 
 	p.ComposerReason = strings.Join(reasons, "; ")

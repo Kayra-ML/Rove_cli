@@ -14,7 +14,6 @@ var (
 	// backgrounds — layered navy depth
 	colorBg       = lipgloss.Color("#0A0E1A") // deepest navy
 	colorBgPanel  = lipgloss.Color("#0D1220") // panel surface
-	colorElevated = lipgloss.Color("#131929") // elevated card / selection
 	colorSelected = lipgloss.Color("#1A2236")
 
 	// text scale
@@ -24,35 +23,23 @@ var (
 
 	// frame — bright white, solid, never dashed
 	colorFrame = lipgloss.Color("#FFFFFF")
-	colorSep   = lipgloss.Color("#3A4258")
 
 	// semantic
 	colorGreen  = lipgloss.Color("#5DD88A")
 	colorYellow = lipgloss.Color("#E8C468")
-	colorOrange = lipgloss.Color("#E8924F")
 	colorRed    = lipgloss.Color("#E56B72")
 	colorBlue   = lipgloss.Color("#6EA8FC")
 	colorViolet = lipgloss.Color("#B49AFA") // brand accent — brighter
-	colorCyan   = lipgloss.Color("#4ECDC4")
 
 	// Compatibility aliases
-	colorUser         = colorBlue
-	colorAgent        = colorWhite
-	colorTool         = colorMid
-	colorApproval     = colorYellow
-	colorError        = colorRed
-	colorSuccess      = colorGreen
-	colorHighlight    = colorYellow
-	colorContextBar   = colorBlue
-	colorBorderDim    = colorSep
-	colorBorderActive = colorMid
-	colorPet          = colorDim
+	colorAgent   = colorWhite
+	colorError   = colorRed
+	colorSuccess = colorGreen
 
 	// -----------------------------------------------------------------------
 	// Styles
 	// -----------------------------------------------------------------------
-	stylePanelBorder       = lipgloss.NewStyle().Background(colorBg)
-	stylePanelBorderActive = lipgloss.NewStyle().Background(colorBg)
+	stylePanelBorder = lipgloss.NewStyle().Background(colorBg)
 
 	styleTitle       = lipgloss.NewStyle().Foreground(colorMid)
 	styleTitleActive = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
@@ -62,14 +49,6 @@ var (
 
 	styleUserMsg  = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
 	styleAgentMsg = lipgloss.NewStyle().Foreground(colorWhite)
-	styleToolRow  = lipgloss.NewStyle().Foreground(colorMid)
-	styleToolEdit = lipgloss.NewStyle().Foreground(colorMid)
-
-	styleApprovalRow = lipgloss.NewStyle().Foreground(colorYellow).Background(colorElevated)
-	styleApprovalBorder = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(colorYellow).
-				Padding(0, 1)
 
 	styleError     = lipgloss.NewStyle().Foreground(colorRed)
 	styleSuccess   = lipgloss.NewStyle().Foreground(colorGreen)
@@ -77,11 +56,8 @@ var (
 	styleMuted     = lipgloss.NewStyle().Foreground(colorMid)
 	styleHighlight = lipgloss.NewStyle().Foreground(colorYellow)
 	styleSelected  = lipgloss.NewStyle().Background(colorSelected).Foreground(colorWhite)
-	stylePet       = lipgloss.NewStyle().Foreground(colorDim)
-	styleSep       = lipgloss.NewStyle().Foreground(colorSep)
 	styleFrame     = lipgloss.NewStyle().Foreground(colorFrame).Bold(true)
 	styleStatusBar = lipgloss.NewStyle().Foreground(colorMid).Background(colorBgPanel)
-	styleStatusRight = lipgloss.NewStyle().Foreground(colorMid).Background(colorBgPanel)
 
 	// Plan item state icons
 	iconDone    = styleSuccess.Render("#")
@@ -145,29 +121,8 @@ const (
 	frameCharCRS = "+"
 )
 
-const frameInputH = "="
-
 func frameSide() string {
 	return styleFrame.Render(frameCharV)
-}
-
-// frameTop: "+== ROVE CODE ============================================+"
-func frameTop(label string, width int) string {
-	if width < 6 {
-		return ""
-	}
-	mark := styleBrandMark.Render("*")
-	text := " " + mark + " " + styleBrand.Render(label) + " "
-	textW := len([]rune(stripSimpleANSI(text)))
-	// "+=" (2) + text + fill + "+" (1) = width  =>  fill = width - textW - 3
-	fill := width - textW - 3
-	if fill < 0 {
-		fill = 0
-	}
-	line := styleFrame.Render(frameCharTL+frameCharH) +
-		text +
-		styleFrame.Render(strings.Repeat(frameCharH, fill)+frameCharTR)
-	return fitVisible(line, width)
 }
 
 // frameBottom: "+============================================+"
@@ -177,15 +132,6 @@ func frameBottom(width int) string {
 	}
 	inner := width - 2
 	return fitVisible(styleFrame.Render(frameCharBL+strings.Repeat(frameCharH, inner)+frameCharBR), width)
-}
-
-// frameDivider: "+--------------------+"  (lighter inner divider)
-func frameDivider(width int) string {
-	if width < 2 {
-		return ""
-	}
-	inner := width - 2
-	return fitVisible(styleFrame.Render(frameCharLT+strings.Repeat(frameInputH, inner)+frameCharRT), width)
 }
 
 // frameSplitDivider is unused — renderMidDivider builds inline.

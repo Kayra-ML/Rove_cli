@@ -61,9 +61,6 @@ type Model struct {
 	width  int
 	height int
 
-	// Approval
-	pendingApprovalID string
-
 	// Ticker for refresh + timer display
 	tickCount int
 	runStart  time.Time
@@ -572,30 +569,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
-	// Approval card handling
-	if m.messagesPanel.HasPendingCard() && (m.focus == FocusMessages || m.focus == FocusInput) {
-		switch msg.String() {
-		case "a", "A":
-			cardID := m.pendingApprovalID
-			m.messagesPanel.ClearPendingCard()
-			m.pendingApprovalID = ""
-			m.planPanel.SetNeedsApproval(false)
-			if cardID != "" {
-				return m.approveCard(cardID, true)
-			}
-			return nil
-		case "d", "D":
-			cardID := m.pendingApprovalID
-			m.messagesPanel.ClearPendingCard()
-			m.pendingApprovalID = ""
-			m.planPanel.SetNeedsApproval(false)
-			if cardID != "" {
-				return m.approveCard(cardID, false)
-			}
-			return nil
-		}
-	}
-
 	// Global panel switching
 	switch msg.Type {
 	case tea.KeyCtrlH:
@@ -791,23 +764,6 @@ func (m *Model) handleEvent(ev protocol.EventFrame) tea.Cmd {
 			}
 		}
 
-	case types.EventCardUpdated:
-		var payload struct {
-			Card types.Card `json:"card"`
-		}
-		if err := json.Unmarshal(ev.Payload, &payload); err == nil {
-			if payload.Card.ReviewState == types.ReviewPending {
-				dm := &DisplayMessage{
-					IsCard:  true,
-					CardID:  string(payload.Card.ID),
-					Content: payload.Card.Title + "\n" + payload.Card.Description,
-				}
-				m.messagesPanel.SetPendingCard(dm)
-				m.pendingApprovalID = string(payload.Card.ID)
-				m.planPanel.SetNeedsApproval(true)
-			}
-		}
-
 	case types.EventError:
 		var payload struct {
 			Error string `json:"error"`
@@ -828,26 +784,6 @@ func (m *Model) handleEvent(ev protocol.EventFrame) tea.Cmd {
 	}
 
 	return nil
-}
-
-func (m *Model) approveCard(cardID string, approve bool) tea.Cmd {
-	return func() tea.Msg {
-		action := "approve"
-		if !approve {
-			action = "reject"
-		}
-		_, err := m.ipc.Call(protocol.MethodCardReview, map[string]any{
-			"cardId": cardID,
-			"action": action,
-		})
-		if err != nil {
-			return EventMsg{Frame: protocol.EventFrame{
-				Type:    string(types.EventError),
-				Payload: json.RawMessage(`{"error":"` + err.Error() + `"}`),
-			}}
-		}
-		return nil
-	}
 }
 
 func (m *Model) updateFocus() {
@@ -959,25 +895,6 @@ func (m *Model) View() string {
 	return base
 }
 
-func (m *Model) renderMidDivider(layout tuiLayout) string {
-	if layout.showRail {
-		// "+---chatW-1---+---rightW-1---+" = chatW + rightW + 1 = m.width
-		lFill := layout.chatW - 1
-		rFill := layout.rightW - 1
-		if lFill < 0 {
-			lFill = 0
-		}
-		if rFill < 0 {
-			rFill = 0
-		}
-		return fitVisible(
-			styleFrame.Render(frameCharLT+strings.Repeat(frameCharH, lFill)+frameCharCRS+strings.Repeat(frameCharH, rFill)+frameCharRT),
-			m.width,
-		)
-	}
-	return fitVisible(frameDivider(m.width), m.width)
-}
-
 func (m *Model) renderTopBar(w int) string {
 	// Right side: model · local/ssh · profile · pet — all on the title bar line
 	var rightParts []string
@@ -1061,49 +978,6 @@ func shortPath(p string) string {
 		return p
 	}
 	return "…/" + strings.Join(parts[len(parts)-2:], "/")
-}
-
-// overlayModal centers a modal string over a base string (already rendered lines).
-func overlayModal(base, modal string, w, h int) string {
-	modalLines := strings.Split(modal, "\n")
-	modalH := len(modalLines)
-	modalW := 0
-	for _, l := range modalLines {
-		if lw := lipgloss.Width(l); lw > modalW {
-			modalW = lw
-		}
-	}
-	topPad := (h - modalH) / 2
-	if topPad < 0 {
-		topPad = 0
-	}
-	leftPad := (w - modalW) / 2
-	if leftPad < 0 {
-		leftPad = 0
-	}
-	baseLines := strings.Split(base, "\n")
-	for len(baseLines) < h {
-		baseLines = append(baseLines, strings.Repeat(" ", w))
-	}
-	for i, ml := range modalLines {
-		row := topPad + i
-		if row >= len(baseLines) {
-			break
-		}
-		bl := baseLines[row]
-		blRunes := []rune(bl)
-		for len(blRunes) < w {
-			blRunes = append(blRunes, ' ')
-		}
-		mlRunes := []rune(ml)
-		end := leftPad + len(mlRunes)
-		if end > len(blRunes) {
-			end = len(blRunes)
-		}
-		copy(blRunes[leftPad:end], mlRunes[:end-leftPad])
-		baseLines[row] = string(blRunes)
-	}
-	return strings.Join(baseLines, "\n")
 }
 
 // handleSSHPanelKey processes keystrokes when the SSH panel is open.
@@ -1195,10 +1069,3 @@ func (m *Model) disconnectSSH() tea.Cmd {
 }
 
 type sshDisconnectMsg struct{}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

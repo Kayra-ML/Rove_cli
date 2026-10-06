@@ -18,15 +18,14 @@ type HarnessMutation struct {
 	Result string `json:"result,omitempty"`
 }
 
-// HarnessProfile is the full harness state attached to a Goal or Card.
+// HarnessProfile is the full harness state attached to a Goal.
 // It combines the current execution profile with the mutation trace.
 type HarnessProfile struct {
-	GoalID    string          `json:"goalId"`
-	CardID    string          `json:"cardId"`
-	Current   GoalExecProfile `json:"current"`
+	GoalID    string            `json:"goalId"`
+	Current   GoalExecProfile   `json:"current"`
 	Mutations []HarnessMutation `json:"mutations,omitempty"`
-	CreatedAt time.Time       `json:"createdAt"`
-	UpdatedAt time.Time       `json:"updatedAt"`
+	CreatedAt time.Time         `json:"createdAt"`
+	UpdatedAt time.Time         `json:"updatedAt"`
 }
 
 // Mutate applies a profile change and appends it to the mutation trace.

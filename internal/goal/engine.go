@@ -3,50 +3,86 @@ package goal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/Kayra-ML/rove/internal/agent"
 	"github.com/Kayra-ML/rove/internal/eventbus"
-	"github.com/Kayra-ML/rove/internal/gitwt"
 	"github.com/Kayra-ML/rove/internal/harness"
 	"github.com/Kayra-ML/rove/internal/id"
 	"github.com/Kayra-ML/rove/internal/judge"
-	"github.com/Kayra-ML/rove/internal/kanban"
 	"github.com/Kayra-ML/rove/internal/store"
 	"github.com/Kayra-ML/rove/internal/types"
 	"github.com/Kayra-ML/rove/internal/workspace"
 )
 
+// ErrRunning is returned when a goal is driven while it already runs.
+var ErrRunning = errors.New("goal is already running")
+
 // Engine drives autonomous goals using the harness execution kernel.
 type Engine struct {
-	store      *store.Store
-	bus        *eventbus.Bus
-	kanban     *kanban.Engine
-	agents     *agent.Runtime
-	judge      *judge.Engine
-	git        *gitwt.Manager
-	workspaces *workspace.Manager
+	store       *store.Store
+	bus         *eventbus.Bus
+	agents      *agent.Runtime
+	judge       *judge.Engine
+	workspaces  *workspace.Manager
 	checkpoints *harness.CheckpointStore
-	composer   *harness.HarnessComposer
+	composer    *harness.HarnessComposer
+
+	// ToolNames lists the registered tools, for the harness tool policy.
+	ToolNames func() []string
+	// Models lists the configured models, for model fallback.
+	Models func(ctx context.Context) []types.ModelRef
+	// Snapshot takes a restorable snapshot of a workspace (Sandboxed).
+	Snapshot func(dir, label string) error
+
+	mu      sync.Mutex
+	running map[types.ID]*run
+	base    context.Context
+	stop    context.CancelFunc
 }
 
-func New(s *store.Store, bus *eventbus.Bus, k *kanban.Engine, a *agent.Runtime, j *judge.Engine, g *gitwt.Manager, w *workspace.Manager) *Engine {
+type run struct {
+	sessionID types.ID
+	cancel    context.CancelFunc
+}
+
+func New(s *store.Store, bus *eventbus.Bus, a *agent.Runtime, j *judge.Engine, w *workspace.Manager) *Engine {
+	base, stop := context.WithCancel(context.Background())
 	return &Engine{
 		store:       s,
 		bus:         bus,
-		kanban:      k,
 		agents:      a,
 		judge:       j,
-		git:         g,
 		workspaces:  w,
-		checkpoints: harness.NewCheckpointStore(),
+		checkpoints: harness.NewCheckpointStoreWith(checkpointBackend{s}),
 		composer:    harness.NewComposer(),
+		running:     map[types.ID]*run{},
+		base:        base,
+		stop:        stop,
 	}
 }
 
+// checkpointBackend persists harness checkpoints in the store.
+type checkpointBackend struct{ st *store.Store }
+
+func (b checkpointBackend) PutCheckpoint(ctx context.Context, goalID, body string) error {
+	return b.st.PutGoalCheckpoint(ctx, types.ID(goalID), body)
+}
+func (b checkpointBackend) GetCheckpoint(ctx context.Context, goalID string) (string, error) {
+	return b.st.GetGoalCheckpoint(ctx, types.ID(goalID))
+}
+func (b checkpointBackend) DeleteCheckpoint(ctx context.Context, goalID string) error {
+	return b.st.DeleteGoalCheckpoint(ctx, types.ID(goalID))
+}
+
+// Create stores a new goal. A goal made in a chat works in that chat with
+// its agent.
 func (e *Engine) Create(ctx context.Context, g types.Goal) (types.Goal, error) {
 	now := time.Now().UTC()
 	if g.ID == "" {
@@ -58,23 +94,15 @@ func (e *Engine) Create(ctx context.Context, g types.Goal) (types.Goal, error) {
 	if g.CompletionContract.MaxIterations == 0 {
 		g.CompletionContract.MaxIterations = 8
 	}
-	g.CreatedAt, g.UpdatedAt = now, now
-	if g.CardID == "" && e.kanban != nil {
-		card, err := e.kanban.Create(ctx, types.Card{
-			Title:              g.Title,
-			Description:        g.Description,
-			Column:             types.ColReady,
-			GoalID:             g.ID,
-			GoalMode:           true,
-			AcceptanceCriteria: g.CompletionContract.Criteria,
-			WorkspaceID:        g.WorkspaceID,
-			AssigneeAgentID:    g.AgentID,
-		})
-		if err != nil {
-			return g, err
+	if g.AgentID == "" && g.SessionID != "" {
+		if s, err := e.store.GetSession(ctx, g.SessionID); err == nil {
+			g.AgentID = s.AgentID
+			if g.WorkspaceID == "" {
+				g.WorkspaceID = s.WorkspaceID
+			}
 		}
-		g.CardID = card.ID
 	}
+	g.CreatedAt, g.UpdatedAt = now, now
 	if err := e.store.UpsertGoal(ctx, g); err != nil {
 		return g, err
 	}
@@ -91,21 +119,65 @@ func (e *Engine) List(ctx context.Context) ([]types.Goal, error) {
 }
 
 func (e *Engine) Delete(ctx context.Context, id types.ID) error {
+	e.Cancel(id)
 	return e.store.DeleteGoal(ctx, id)
 }
+
+// Start drives a goal in the background, for as long as the engine lives
+// or until it is canceled.
+func (e *Engine) Start(goalID, sessionID types.ID, workspacePath string) error {
+	e.mu.Lock()
+	_, busy := e.running[goalID]
+	e.mu.Unlock()
+	if busy {
+		return ErrRunning
+	}
+	go func() { _, _ = e.Drive(e.base, goalID, sessionID, workspacePath) }()
+	return nil
+}
+
+// Cancel stops a running goal; it keeps its checkpoint and can be resumed.
+func (e *Engine) Cancel(goalID types.ID) bool {
+	e.mu.Lock()
+	r, ok := e.running[goalID]
+	e.mu.Unlock()
+	if ok {
+		r.cancel()
+	}
+	return ok
+}
+
+// CancelSession stops the goals running in a chat (its /stop).
+func (e *Engine) CancelSession(sessionID types.ID) int {
+	if sessionID == "" {
+		return 0
+	}
+	e.mu.Lock()
+	var hit []*run
+	for _, r := range e.running {
+		if r.sessionID == sessionID {
+			hit = append(hit, r)
+		}
+	}
+	e.mu.Unlock()
+	for _, r := range hit {
+		r.cancel()
+	}
+	return len(hit)
+}
+
+// Close stops every running goal.
+func (e *Engine) Close() { e.stop() }
 
 // HarnessFor returns (or auto-composes) the HarnessProfile for a goal.
 // The result is persisted so restarts reuse the same profile.
 func (e *Engine) HarnessFor(ctx context.Context, g types.Goal, workDir string) (*harness.HarnessProfile, error) {
-	// Try to load persisted profile.
 	if raw, err := e.store.LoadGoalHarness(ctx, g.ID); err == nil && raw != "" {
 		var hp harness.HarnessProfile
 		if json.Unmarshal([]byte(raw), &hp) == nil {
 			return &hp, nil
 		}
 	}
-
-	// Compose a new auto profile.
 	repoFiles := listRepoFiles(workDir)
 	analysis := harness.TaskAnalysis{
 		TaskType:          inferTaskType(g),
@@ -116,296 +188,416 @@ func (e *Engine) HarnessFor(ctx context.Context, g types.Goal, workDir string) (
 		EstimatedMinutes:  float64(g.CompletionContract.MaxIterations) * 5,
 		RequestedAutonomy: 0.7,
 	}
-	profile := e.composer.Compose(analysis)
-
 	hp := &harness.HarnessProfile{
 		GoalID:    string(g.ID),
-		CardID:    string(g.CardID),
-		Current:   profile,
+		Current:   e.composer.Compose(analysis),
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
 	raw, _ := json.Marshal(hp)
 	_ = e.store.SaveGoalHarness(ctx, g.ID, string(raw))
-
-	// Also save to card.
-	if g.CardID != "" {
-		_ = e.store.SaveCardHarness(ctx, g.CardID, string(raw))
-	}
 	return hp, nil
 }
 
-// Drive runs Goal → harness kernel → agent → gates → judge until DONE/BLOCKED/ctx cancel.
-// The harness profile governs how each iteration executes.
-// Agent claims of completion are ignored unless the judge agrees.
+// Hand-off budgets: a progress line per iteration, and how many are kept.
+const (
+	progressLine = 220
+	progressKeep = 12
+	retryCap     = 2 // retries of a failed agent run within one iteration
+)
+
+// Drive runs Goal → harness kernel → agent → gates → reviewer until DONE,
+// BLOCKED, the iteration limit, or a cancel. The harness profile governs
+// how each iteration runs; the agent's own claim of completion never ends a
+// goal — the reviewer and the quality gates do.
 func (e *Engine) Drive(ctx context.Context, goalID types.ID, sessionID types.ID, workspacePath string) (types.Goal, error) {
 	g, err := e.store.GetGoal(ctx, goalID)
 	if err != nil {
 		return g, err
 	}
+	if sessionID == "" {
+		sessionID = g.SessionID
+	} else if g.SessionID == "" {
+		g.SessionID = sessionID
+	}
+	if g.AgentID == "" && sessionID != "" {
+		if s, err := e.store.GetSession(ctx, sessionID); err == nil {
+			g.AgentID = s.AgentID
+		}
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	e.mu.Lock()
+	if _, busy := e.running[g.ID]; busy {
+		e.mu.Unlock()
+		return g, ErrRunning
+	}
+	e.running[g.ID] = &run{sessionID: sessionID, cancel: cancel}
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		delete(e.running, g.ID)
+		e.mu.Unlock()
+	}()
+
+	if e.agents != nil && g.AgentID == "" {
+		return e.finish(g, types.GoalBlocked, "no agent to work on this goal")
+	}
+
 	workDir := workspacePath
 	if workDir == "" && e.workspaces != nil && g.WorkspaceID != "" {
 		if ws, err2 := e.workspaces.Get(ctx, g.WorkspaceID); err2 == nil {
 			workDir = ws.Path
 		}
 	}
-
-	// Git worktree isolation.
-	if e.git != nil && workDir != "" && e.git.IsRepo(workDir) && g.CardID != "" {
-		branch := e.git.BranchForCard(g.CardID)
-		dest := e.git.WorktreePath(workDir, g.CardID)
-		if wt, wtErr := e.git.CreateWorktree(workDir, dest, branch); wtErr == nil {
-			workDir = wt.Path
-			if e.kanban != nil {
-				if c, err2 := e.kanban.Get(ctx, g.CardID); err2 == nil {
-					c.GitBranch = branch
-					c.WorktreePath = dest
-					_, _ = e.kanban.Update(ctx, c)
-				}
-			}
-		}
-	}
-
-	// Resolve or compose harness profile.
 	repoFiles := listRepoFiles(workDir)
 	hp, err := e.HarnessFor(ctx, g, workDir)
 	if err != nil {
 		hp = &harness.HarnessProfile{Current: harness.SmallBugProfile()}
 	}
-
-	// Build the execution kernel.
-	kernelOpts := harness.KernelOpts{
+	var tools []string
+	if e.ToolNames != nil {
+		tools = e.ToolNames()
+	}
+	kernel := harness.NewKernel(harness.KernelOpts{
 		GoalID:        string(g.ID),
-		CardID:        string(g.CardID),
-		AgentID:       string(g.AgentID),
-		SessionID:     string(sessionID),
-		WorkspaceID:   string(g.WorkspaceID),
 		WorkDir:       workDir,
 		Title:         g.Title,
-		Description:   g.Description,
 		Criteria:      g.CompletionContract.Criteria,
 		MaxIterations: g.CompletionContract.MaxIterations,
 		Profile:       hp.Current,
+		Harness:       hp,
+		AllTools:      tools,
 		RepoFiles:     repoFiles,
 		Keywords:      extractKeywords(g),
-		Checkpoints:   e.checkpoints,
+	})
+
+	// a resumed goal picks up its progress from the checkpoint
+	var progress []string
+	resumed := false
+	if cp, ok := e.checkpoints.Load(ctx, string(g.ID)); ok && hp.Current.HasRecovery(harness.CheckpointResume) {
+		progress, resumed = cp.Progress, g.Iteration > 0
 	}
-	kernel := harness.NewKernel(kernelOpts)
+	if hp.Current.HasExec(harness.Sandboxed) && e.Snapshot != nil && workDir != "" && g.Iteration == 0 {
+		_ = e.Snapshot(workDir, "goal: "+g.Title)
+	}
+	base := gitBase(workDir)
+	retries := (&harness.RecoveryStrategy{Profile: hp.Current}).Resolve().MaxRetries
 
 	g.Status = types.GoalRunning
 	g.UpdatedAt = time.Now().UTC()
 	_ = e.store.UpsertGoal(ctx, g)
-	if e.kanban != nil && g.CardID != "" {
-		_, _ = e.kanban.Move(ctx, g.CardID, types.ColRunning)
-	}
 	e.emit(g)
 	e.emitHarness(g, kernel)
 
-	// Save checkpoint for restart recovery.
-	e.checkpoints.Save(ctx, harness.Checkpoint{
-		GoalID:     string(g.ID),
-		CardID:     string(g.CardID),
-		Iteration:  g.Iteration,
-		ProfileVer: hp.Current.Version,
-		WorkDir:    workDir,
-		SavedAt:    time.Now().UTC(),
-	})
-
+	briefed := false
 	for {
-		if err := ctx.Err(); err != nil {
-			return g, err
+		if ctx.Err() != nil {
+			return e.finish(g, types.GoalCanceled, "stopped")
+		}
+		if max := g.CompletionContract.MaxIterations; max > 0 && g.Iteration >= max {
+			return e.finish(g, types.GoalBlocked, "max iterations reached without satisfying the completion contract")
 		}
 		g.Iteration++
-
-		// Resolve per-iteration configuration from the kernel.
 		itCfg := kernel.ResolveIteration(g.Iteration)
+		full := !briefed || itCfg.Fresh
+		prompt := e.iterationPrompt(g, itCfg, progress, full, resumed && !briefed)
+		briefed = true
 
-		// Build agent prompt incorporating harness context.
-		prompt := e.iterationPrompt(g, itCfg)
-
-		// Run agent.
 		var toolsCalled, filesEdited, errs []string
 		summary := ""
-		if e.agents != nil && g.AgentID != "" {
-			result, runErr := e.agents.Run(ctx, agent.RunRequest{
-				AgentID:     g.AgentID,
-				SessionID:   sessionID,
-				WorkspaceID: g.WorkspaceID,
-				Workspace:   workDir,
-				CardID:      g.CardID,
-				UserMessage: prompt,
-				SystemExtra: itCfg.SystemExtra,
-				MaxTurns:    itCfg.MaxTurns,
-			})
+		if e.agents != nil {
+			req := agent.RunRequest{
+				AgentID:         g.AgentID,
+				SessionID:       sessionID,
+				WorkspaceID:     g.WorkspaceID,
+				Workspace:       workDir,
+				UserMessage:     prompt,
+				SystemExtra:     itCfg.SystemExtra,
+				MaxTurns:        itCfg.MaxTurns,
+				HistoryTurns:    itCfg.HistoryTurns,
+				AllowedTools:    itCfg.ToolCfg.AllowedTools,
+				ToolConcurrency: itCfg.ToolCfg.MaxConcurrency,
+			}
+			if itCfg.UseFallbackModel {
+				if m, ok := e.fallbackModel(ctx, g, sessionID, hp.Current); ok {
+					req.Provider, req.Model = m.Provider, m.Model
+				}
+			}
+			result, runErr := e.agents.Run(ctx, req)
+			// Retry: the same iteration again, told what went wrong
+			for n := 0; runErr != nil && ctx.Err() == nil && hp.Current.HasRecovery(harness.Retry) && retries > 0 && n < retryCap; n++ {
+				retries--
+				req.UserMessage = "The previous attempt failed: " + clip(runErr.Error(), 300) + "\nContinue with the same increment."
+				result, runErr = e.agents.Run(ctx, req)
+			}
+			if ctx.Err() != nil {
+				return e.finish(g, types.GoalCanceled, "stopped")
+			}
 			if runErr != nil {
 				errs = append(errs, runErr.Error())
-				_ = e.kanbanLog(ctx, g, "error", runErr.Error())
+				if kernel.OnFailure() {
+					return e.finish(g, types.GoalBlocked, "the agent failed and this goal has no recovery: "+clip(runErr.Error(), 300))
+				}
 			}
 			summary = result.Assistant
 			toolsCalled = result.ToolsCalled
 			filesEdited = result.FilesEdited
 		}
 
-		// Determine if agent claimed completion.
-		claimed := looksComplete(summary)
-
-		// Run quality gates per verify config.
-		var failedGates []string
+		// evidence: what changed since the goal started, and the checks
+		stat, diff, changed := workspaceChanges(workDir, base)
+		if !itCfg.VerifyCfg.RequestIndependentReview {
+			diff = "" // the reviewer reads the diff only when the profile asks
+		}
 		var gateResults []types.GateResult
+		gatesRun := false
 		if itCfg.VerifyCfg.RunQualityGates && len(g.CompletionContract.QualityGates) > 0 {
 			gateResults = e.judge.RunGates(ctx, g.CompletionContract.QualityGates, workDir)
-			for _, gr := range gateResults {
-				if !gr.Passed {
-					failedGates = append(failedGates, gr.Name)
-				}
-			}
+			gatesRun = true
 		}
-
-		// Judge.
+		reviewers := 1
+		if itCfg.VerifyCfg.RequireDoubleReview {
+			reviewers = 2
+		}
 		verdict := e.judge.Judge(ctx, g, judge.Evidence{
-			AgentClaimedDone: claimed,
+			AgentClaimedDone: looksComplete(summary),
 			Summary:          summary,
 			CriteriaHits:     map[string]bool{},
+			AgentID:          g.AgentID,
+			DiffStat:         stat,
+			Diff:             diff,
+			FilesEdited:      union(filesEdited, changed),
+			GateResults:      gateResults,
+			GatesRun:         gatesRun,
+			Reviewers:        reviewers,
+			RequireChanges:   itCfg.VerifyCfg.RequireArtifacts,
 		}, workDir)
-		if len(gateResults) > 0 {
-			verdict.GateResults = gateResults
+		if ctx.Err() != nil {
+			return e.finish(g, types.GoalCanceled, "stopped")
+		}
+		var failedGates []string
+		for _, gr := range verdict.GateResults {
+			if !gr.Passed {
+				failedGates = append(failedGates, gr.Name)
+			}
 		}
 		g.LastVerdict = &verdict
 		_ = e.store.InsertVerdict(ctx, verdict)
 		g.UpdatedAt = time.Now().UTC()
 
-		// Persist checkpoint after each iteration.
+		progress = append(progress, progressOf(g.Iteration, summary, verdict))
+		if len(progress) > progressKeep {
+			progress = progress[len(progress)-progressKeep:]
+		}
 		e.checkpoints.Save(ctx, harness.Checkpoint{
 			GoalID:      string(g.ID),
-			CardID:      string(g.CardID),
 			Iteration:   g.Iteration,
 			ProfileVer:  kernel.Profile().Current.Version,
 			WorkDir:     workDir,
-			LastSummary: summary,
+			LastSummary: clip(summary, 1000),
+			Progress:    progress,
 			SavedAt:     time.Now().UTC(),
 		})
 
-		// Observe iteration for stuck detection + possible mutation.
-		mutated, mutReason := kernel.ObserveIteration(
-			g.Iteration, errs, failedGates, filesEdited, toolsCalled, summary,
-		)
-		if mutated {
-			_ = e.kanbanLog(ctx, g, "warn", "harness mutated: "+mutReason)
-			// Persist mutations to store.
+		if mutated, _ := kernel.ObserveIteration(g.Iteration, errs, failedGates, filesEdited, toolsCalled, summary); mutated {
 			for _, m := range kernel.Mutations() {
-				if m.Iteration == g.Iteration {
-					oldJSON, _ := json.Marshal(m.OldProfile)
-					newJSON, _ := json.Marshal(m.NewProfile)
-					_ = e.store.InsertHarnessMutation(ctx, store.HarnessMutationRow{
-						ID:         string(id.NewID()),
-						GoalID:     string(g.ID),
-						CardID:     string(g.CardID),
-						Iteration:  m.Iteration,
-						Reason:     m.Reason,
-						OldProfile: string(oldJSON),
-						NewProfile: string(newJSON),
-						CreatedAt:  m.Timestamp,
-					})
+				if m.Iteration != g.Iteration {
+					continue
 				}
+				oldJSON, _ := json.Marshal(m.OldProfile)
+				newJSON, _ := json.Marshal(m.NewProfile)
+				_ = e.store.InsertHarnessMutation(ctx, store.HarnessMutationRow{
+					ID:         string(id.NewID()),
+					GoalID:     string(g.ID),
+					Iteration:  m.Iteration,
+					Reason:     m.Reason,
+					OldProfile: string(oldJSON),
+					NewProfile: string(newJSON),
+					CreatedAt:  m.Timestamp,
+				})
 			}
-			// Re-persist updated harness.
 			hpJSON, _ := json.Marshal(kernel.Profile())
 			_ = e.store.SaveGoalHarness(ctx, g.ID, string(hpJSON))
 			e.emitHarness(g, kernel)
 		}
 
-		switch verdict.Decision {
-		case types.JudgeDONE:
-			g.Status = types.GoalDone
-			_ = e.store.UpsertGoal(ctx, g)
-			if e.kanban != nil && g.CardID != "" {
-				_, _ = e.kanban.Move(ctx, g.CardID, types.ColReview)
-			}
+		switch {
+		case verdict.Decision == types.JudgeDONE:
 			e.checkpoints.Delete(ctx, string(g.ID))
-			e.emit(g)
 			e.emitVerdict(verdict)
-			return g, nil
-
-		case types.JudgeBLOCKED:
-			g.Status = types.GoalBlocked
-			_ = e.store.UpsertGoal(ctx, g)
-			if e.kanban != nil && g.CardID != "" {
-				_, _ = e.kanban.Move(ctx, g.CardID, types.ColBlocked)
-			}
-			e.emit(g)
+			return e.finish(g, types.GoalDone, "")
+		case verdict.Decision == types.JudgeBLOCKED:
 			e.emitVerdict(verdict)
-			return g, fmt.Errorf("goal blocked: %s", verdict.Reason)
-
+			return e.finish(g, types.GoalBlocked, verdict.Reason)
+		case kernel.Escalate():
+			e.emitVerdict(verdict)
+			return e.finish(g, types.GoalBlocked, "needs your input: still stuck after the harness adapted — "+verdict.Reason)
 		default:
 			g.Status = types.GoalRunning
 			_ = e.store.UpsertGoal(ctx, g)
-			_ = e.kanbanLog(ctx, g, "info", "CONTINUE: "+verdict.Reason)
-			_ = e.kanbanLog(ctx, g, "info", kernel.Explain())
 			e.emit(g)
 			e.emitVerdict(verdict)
 		}
 	}
 }
 
-// ── Agent result adapter ──────────────────────────────────────────────────────
-
-// RunResult adapter — agent.Runtime.Run returns agent.RunResult; we wrap it
-// to extract ToolsCalled and FilesEdited from the RunResult fields.
-// (agent.RunResult currently only has Assistant/Turns/Done; we extend here.)
-
-func init() {
-	// Verify agent.RunResult has the fields we need at compile time.
-	var _ agent.RunResult = agent.RunResult{}
+// finish records how a drive ended. It writes with a fresh context: a
+// canceled drive must still be able to save that it stopped.
+func (e *Engine) finish(g types.Goal, status types.GoalStatus, reason string) (types.Goal, error) {
+	ctx := context.Background()
+	g.Status = status
+	g.UpdatedAt = time.Now().UTC()
+	if reason != "" && status != types.GoalDone && (g.LastVerdict == nil || g.LastVerdict.Reason != reason) {
+		v := types.JudgeVerdict{ID: id.NewID(), GoalID: g.ID, Iteration: g.Iteration, Reason: reason, CreatedAt: g.UpdatedAt}
+		if status == types.GoalBlocked {
+			v.Decision = types.JudgeBLOCKED
+		} else {
+			v.Decision = types.JudgeCONTINUE
+		}
+		g.LastVerdict = &v
+		_ = e.store.InsertVerdict(ctx, v)
+	}
+	_ = e.store.UpsertGoal(ctx, g)
+	e.emit(g)
+	switch status {
+	case types.GoalDone:
+		return g, nil
+	case types.GoalCanceled:
+		return g, context.Canceled
+	default:
+		return g, fmt.Errorf("goal %s: %s", status, reason)
+	}
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-func (e *Engine) iterationPrompt(g types.Goal, cfg harness.IterationConfig) string {
-	p := fmt.Sprintf("Goal: %s\n%s\n\nCompletion criteria:\n", g.Title, g.Description)
-	for _, c := range g.CompletionContract.Criteria {
-		p += "- " + c + "\n"
+// fallbackModel picks the model a failing goal switches to: the profile's
+// own fallback if configured, else the first configured model that is not
+// the one the chat runs on now.
+func (e *Engine) fallbackModel(ctx context.Context, g types.Goal, sessionID types.ID, p harness.GoalExecProfile) (types.ModelRef, bool) {
+	if e.Models == nil {
+		return types.ModelRef{}, false
 	}
-	p += fmt.Sprintf("\nIteration %d of %d.\n", g.Iteration, g.CompletionContract.MaxIterations)
-	if g.LastVerdict != nil {
-		p += "Previous judge decision: " + string(g.LastVerdict.Decision) + " — " + g.LastVerdict.Reason + "\n"
+	models := e.Models(ctx)
+	current := ""
+	if m, err := e.store.GetSessionModel(ctx, sessionID); err == nil {
+		current = m.Model
+	} else if ag, err := e.store.GetAgent(ctx, g.AgentID); err == nil {
+		current = ag.Model
 	}
-	if cfg.RunCtx.RepoMap != "" {
-		p += "\n" + cfg.RunCtx.RepoMap
-	}
-	if len(cfg.RunCtx.SelectiveFiles) > 0 {
-		p += fmt.Sprintf("\nRelevant files (%d):\n", len(cfg.RunCtx.SelectiveFiles))
-		for i, f := range cfg.RunCtx.SelectiveFiles {
-			if i >= 20 {
-				p += fmt.Sprintf("  … and %d more\n", len(cfg.RunCtx.SelectiveFiles)-20)
-				break
+	for _, want := range p.FallbackModelRefs {
+		for _, m := range models {
+			if want == m.Model || want == m.Provider+"/"+m.Model {
+				return m, true
 			}
-			p += "  " + f + "\n"
 		}
 	}
-	p += "\nImplement the next increment. Quality gates will run after you stop calling tools."
-	return p
+	for _, m := range models {
+		if m.Model != "" && m.Model != current {
+			return m, true
+		}
+	}
+	return types.ModelRef{}, false
 }
 
-func (e *Engine) kanbanLog(ctx context.Context, g types.Goal, level, msg string) error {
-	if e.kanban == nil || g.CardID == "" {
-		return nil
+// ── prompts ───────────────────────────────────────────────────────────────────
+
+// iterationPrompt is the user message of one iteration. The first (and any
+// fresh-context) iteration carries the whole brief; later ones, whose chat
+// history already holds it, carry only what changed — the chat is not sent
+// the same goal, file list and plan again every iteration.
+func (e *Engine) iterationPrompt(g types.Goal, cfg harness.IterationConfig, progress []string, full, resumed bool) string {
+	var b strings.Builder
+	if full {
+		fmt.Fprintf(&b, "Goal: %s\n", g.Title)
+		if d := strings.TrimSpace(g.Description); d != "" {
+			b.WriteString(d + "\n")
+		}
+		b.WriteString("\nCompletion criteria:\n")
+		for _, c := range g.CompletionContract.Criteria {
+			b.WriteString("- " + c + "\n")
+		}
+	} else {
+		fmt.Fprintf(&b, "Goal: %s\n", g.Title)
 	}
-	return e.kanban.AppendLog(ctx, g.CardID, types.LogEntry{Level: level, Message: msg, Source: "goal"})
+	fmt.Fprintf(&b, "\nIteration %d of %d.\n", g.Iteration, g.CompletionContract.MaxIterations)
+	if g.LastVerdict != nil && g.LastVerdict.Reason != "" {
+		b.WriteString("Reviewer: " + clip(g.LastVerdict.Reason, 600) + "\n")
+	}
+	if len(progress) > 0 && (full || resumed) {
+		keep := progress
+		if !cfg.RunCtx.CarryProgress && len(keep) > 2 {
+			keep = keep[len(keep)-2:]
+		}
+		if resumed {
+			b.WriteString("\nResuming. Progress so far:\n")
+		} else {
+			b.WriteString("\nProgress so far:\n")
+		}
+		for _, p := range keep {
+			b.WriteString("- " + p + "\n")
+		}
+	}
+	if cfg.Plan != nil && len(cfg.Plan.Steps) > 0 {
+		if cfg.Replanned {
+			b.WriteString("\nThe previous approach did not work. Make a new plan before changing code.\n")
+		}
+		if full || cfg.Replanned {
+			b.WriteString("\nPlan:\n")
+			for i, s := range cfg.Plan.Steps {
+				mark := "  "
+				if i == cfg.CurrentStep {
+					mark = "→ "
+				}
+				b.WriteString(mark + s.Description + "\n")
+			}
+		} else if cfg.CurrentStep < len(cfg.Plan.Steps) {
+			b.WriteString("Current step: " + cfg.Plan.Steps[cfg.CurrentStep].Description + "\n")
+		}
+	}
+	if full {
+		if cfg.RunCtx.RepoMap != "" {
+			b.WriteString("\n" + cfg.RunCtx.RepoMap)
+		}
+		if len(cfg.RunCtx.SelectiveFiles) > 0 {
+			fmt.Fprintf(&b, "\nRelevant files (%d):\n", len(cfg.RunCtx.SelectiveFiles))
+			for _, f := range cfg.RunCtx.SelectiveFiles {
+				b.WriteString("  " + f + "\n")
+			}
+		}
+	}
+	b.WriteString("\nWork on the next increment, then stop calling tools and say briefly what you did.")
+	return b.String()
+}
+
+// progressOf is one iteration's line in the hand-off.
+func progressOf(n int, summary string, v types.JudgeVerdict) string {
+	did := strings.TrimSpace(summary)
+	if i := strings.IndexByte(did, '\n'); i >= 0 {
+		did = did[:i]
+	}
+	if did == "" {
+		did = "(no report)"
+	}
+	return clip(fmt.Sprintf("%d: %s → %s: %s", n, did, v.Decision, v.Reason), progressLine)
 }
 
 func (e *Engine) emit(g types.Goal) {
 	if e.bus == nil {
 		return
 	}
-	e.bus.Publish(types.Event{
-		Type:  types.EventGoalUpdated,
-		Topic: "goal." + string(g.ID),
-		Payload: map[string]any{
-			"id":        string(g.ID),
-			"status":    string(g.Status),
-			"iteration": g.Iteration,
-		},
-	})
+	payload := map[string]any{
+		"id":        string(g.ID),
+		"status":    string(g.Status),
+		"iteration": g.Iteration,
+	}
+	if g.SessionID != "" {
+		payload["sessionId"] = string(g.SessionID)
+	}
+	e.bus.Publish(types.Event{Type: types.EventGoalUpdated, Topic: "goal." + string(g.ID), Payload: payload})
+	if g.SessionID != "" {
+		e.bus.Publish(types.Event{Type: types.EventGoalUpdated, Topic: "session." + string(g.SessionID), Payload: payload})
+	}
 }
 
 func (e *Engine) emitVerdict(v types.JudgeVerdict) {
@@ -439,20 +631,36 @@ func (e *Engine) emitHarness(g types.Goal, kernel *harness.ExecutionKernel) {
 	})
 }
 
-// ── Utility functions ─────────────────────────────────────────────────────────
+// ── task analysis (English and Turkish) ───────────────────────────────────────
+
+func has(text string, words ...string) bool {
+	l := lower(text)
+	for _, w := range words {
+		if strings.Contains(l, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// lower folds case, with Turkish dotted/dotless I folded the way a Turkish
+// speaker types them.
+func lower(s string) string {
+	return strings.ToLower(strings.NewReplacer("İ", "i", "I", "ı").Replace(s))
+}
 
 func inferTaskType(g types.Goal) string {
-	title := g.Title + " " + g.Description
+	text := g.Title + " " + g.Description
 	switch {
-	case containsFold(title, "bug") || containsFold(title, "fix"):
+	case has(text, "bug", "fix", "hata", "düzelt", "onar", "çöküyor", "crash"):
 		return "bug_fix"
-	case containsFold(title, "refactor"):
+	case has(text, "refactor", "refaktör", "yeniden düzenle", "yeniden yapılandır"):
 		return "refactor"
-	case containsFold(title, "research") || containsFold(title, "investigate"):
+	case has(text, "research", "investigate", "araştır", "incele"):
 		return "research"
-	case containsFold(title, "test"):
+	case has(text, "test"):
 		return "test"
-	case containsFold(title, "review"):
+	case has(text, "review", "gözden geçir"):
 		return "review"
 	default:
 		return "feature"
@@ -475,21 +683,27 @@ func inferComplexity(g types.Goal) float64 {
 
 func inferRisk(g types.Goal) float64 {
 	text := g.Title + " " + g.Description
-	if containsFold(text, "delete") || containsFold(text, "drop") || containsFold(text, "migrate") {
+	if has(text, "delete", "drop", "migrate", "migration", "sil", "kaldır", "taşı", "geçiş", "veritabanı şema") {
 		return 0.7
 	}
-	if containsFold(text, "refactor") || containsFold(text, "rewrite") {
+	if has(text, "refactor", "rewrite", "refaktör", "yeniden yaz") {
 		return 0.5
 	}
 	return 0.2
 }
 
+// looksComplete: the agent says it is done (only noted in the verdict; it
+// never ends a goal by itself).
+func looksComplete(s string) bool {
+	return has(s, "done", "complete", "finished", "bitti", "tamamlandı", "tamamladım", "hazır")
+}
+
 func extractKeywords(g types.Goal) []string {
-	words := splitWords(g.Title + " " + g.Description)
+	words := splitWords(lower(g.Title + " " + g.Description))
 	seen := map[string]bool{}
 	var out []string
 	for _, w := range words {
-		if len(w) > 3 && !seen[w] {
+		if len([]rune(w)) > 3 && !seen[w] {
 			seen[w] = true
 			out = append(out, w)
 		}
@@ -498,22 +712,9 @@ func extractKeywords(g types.Goal) []string {
 }
 
 func splitWords(s string) []string {
-	var words []string
-	var cur []rune
-	for _, r := range s {
-		if r == ' ' || r == '\n' || r == '\t' || r == ',' || r == '.' {
-			if len(cur) > 0 {
-				words = append(words, string(cur))
-				cur = cur[:0]
-			}
-		} else {
-			cur = append(cur, r)
-		}
-	}
-	if len(cur) > 0 {
-		words = append(words, string(cur))
-	}
-	return words
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return r == ' ' || r == '\n' || r == '\t' || r == ',' || r == '.' || r == ':' || r == ';' || r == '|' || r == '/'
+	})
 }
 
 func listRepoFiles(dir string) []string {
@@ -531,7 +732,7 @@ func listRepoFiles(dir string) []string {
 			// Skip common non-source directories.
 			if name == ".git" || name == "vendor" || name == "node_modules" ||
 				name == ".next" || name == "dist" || name == "build" ||
-				name == "__pycache__" || name == ".cache" {
+				name == "__pycache__" || name == ".cache" || name == ".aether" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -549,50 +750,24 @@ func listRepoFiles(dir string) []string {
 	return files
 }
 
-func lastAssistant(ctx context.Context, e *Engine, sessionID types.ID) string {
-	if e.store == nil || sessionID == "" {
-		return ""
-	}
-	msgs, err := e.store.ListMessages(ctx, sessionID)
-	if err != nil {
-		return ""
-	}
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == types.RoleAssistant {
-			return msgs[i].Content
-		}
-	}
-	return ""
-}
-
-func looksComplete(s string) bool {
-	return containsFold(s, "done") || containsFold(s, "complete")
-}
-
-func containsFold(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || (len(sub) > 0 && indexFold(s, sub) >= 0))
-}
-
-func indexFold(s, sub string) int {
-	ls, lsub := []rune(s), []rune(sub)
-	for i := 0; i+len(lsub) <= len(ls); i++ {
-		ok := true
-		for j := range lsub {
-			a, b := ls[i+j], lsub[j]
-			if a >= 'A' && a <= 'Z' {
-				a += 'a' - 'A'
-			}
-			if b >= 'A' && b <= 'Z' {
-				b += 'a' - 'A'
-			}
-			if a != b {
-				ok = false
-				break
+func union(a, b []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range [][]string{a, b} {
+		for _, v := range list {
+			if v != "" && !seen[v] {
+				seen[v] = true
+				out = append(out, v)
 			}
 		}
-		if ok {
-			return i
-		}
 	}
-	return -1
+	return out
+}
+
+func clip(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }

@@ -3,6 +3,10 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -173,7 +177,7 @@ func TestStuckDetectorRepeatedErrors(t *testing.T) {
 	sd := harness.NewStuckDetector()
 	err := "compilation failed: undefined symbol"
 	w := harness.ObservationWindow{
-		Errors:  []string{err, err, err},
+		Errors: []string{err, err, err},
 	}
 	signals := sd.Detect(w)
 	if len(signals) == 0 {
@@ -258,11 +262,9 @@ func TestKernelMutatesOnStuck(t *testing.T) {
 	p := harness.SmallBugProfile()
 	k := harness.NewKernel(harness.KernelOpts{
 		GoalID:        "test-goal",
-		CardID:        "test-card",
 		Title:         "test",
 		MaxIterations: 20,
 		Profile:       p,
-		Checkpoints:   harness.NewCheckpointStore(),
 	})
 
 	repeatedErr := "undefined: someSymbol"
@@ -292,7 +294,6 @@ func TestKernelMutationTracedWithTimestamp(t *testing.T) {
 		GoalID:        "ts-goal",
 		MaxIterations: 10,
 		Profile:       harness.SmallBugProfile(),
-		Checkpoints:   harness.NewCheckpointStore(),
 	})
 	before := time.Now()
 	for i := 1; i <= 4; i++ {
@@ -318,7 +319,6 @@ func TestKernelResolveIterationGoalLoop(t *testing.T) {
 		GoalID:        "gi",
 		MaxIterations: 8,
 		Profile:       p,
-		Checkpoints:   harness.NewCheckpointStore(),
 	})
 	cfg := k.ResolveIteration(1)
 	if cfg.MaxTurns < 8 {
@@ -434,4 +434,164 @@ func containsStr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// ─── Wiring: what the kernel hands the engine ─────────────────────────────────
+
+func TestToolPolicyUsesRegisteredToolNames(t *testing.T) {
+	all := []string{"read_file", "write_file", "patch_file", "list_dir", "shell", "git_status", "git_commit", "team_delegate", "mcp_web_search"}
+	coding := (&harness.ToolPolicy{Profile: harness.GoalExecProfile{Tools: harness.CodingTools}, AllAvailableTools: all}).Resolve()
+	has := func(list []string, n string) bool {
+		for _, x := range list {
+			if x == n {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(coding.AllowedTools, "write_file") || !has(coding.AllowedTools, "shell") || has(coding.AllowedTools, "mcp_web_search") || has(coding.AllowedTools, "team_delegate") {
+		t.Fatalf("coding tools = %v", coding.AllowedTools)
+	}
+	research := (&harness.ToolPolicy{Profile: harness.GoalExecProfile{Tools: harness.ResearchTools}, AllAvailableTools: all}).Resolve()
+	if !has(research.AllowedTools, "mcp_web_search") || !has(research.AllowedTools, "read_file") || has(research.AllowedTools, "write_file") {
+		t.Fatalf("research tools = %v", research.AllowedTools)
+	}
+	// no restriction means nil (every tool the session allows), not a list
+	if open := (&harness.ToolPolicy{AllAvailableTools: all}).Resolve(); open.AllowedTools != nil {
+		t.Fatalf("unrestricted = %v", open.AllowedTools)
+	}
+	if seq := coding.MaxConcurrency; seq != 1 {
+		t.Fatalf("sequential concurrency = %d", seq)
+	}
+	par := (&harness.ToolPolicy{Profile: harness.GoalExecProfile{Tools: harness.CodingTools | harness.ParallelTools}, AllAvailableTools: all}).Resolve()
+	if par.MaxConcurrency < 2 {
+		t.Fatalf("parallel concurrency = %d", par.MaxConcurrency)
+	}
+}
+
+func TestKernelRecoveryIsOneShot(t *testing.T) {
+	p := harness.GoalExecProfile{Execution: harness.PlanExecute, Recovery: harness.Retry | harness.Replan | harness.ContextReset | harness.ModelFallback}
+	k := harness.NewKernel(harness.KernelOpts{GoalID: "g", Title: "t", Criteria: []string{"a", "b"}, Profile: p})
+	first := k.ResolveIteration(1)
+	if first.Plan == nil || first.CurrentStep != 0 || first.Fresh || first.UseFallbackModel || first.HistoryTurns != 3 {
+		t.Fatalf("first = %+v", first)
+	}
+	if giveUp := k.OnFailure(); giveUp {
+		t.Fatal("gave up with recovery configured")
+	}
+	next := k.ResolveIteration(2)
+	if !next.Fresh || next.HistoryTurns != 1 || !next.UseFallbackModel || !next.Replanned || next.CurrentStep != 0 {
+		t.Fatalf("after a failure = %+v", next)
+	}
+	after := k.ResolveIteration(3)
+	if after.Fresh || after.UseFallbackModel || after.Replanned || after.CurrentStep != 1 || after.Plan != next.Plan {
+		t.Fatalf("recovery should last one iteration and keep the plan: %+v", after)
+	}
+	bare := harness.NewKernel(harness.KernelOpts{GoalID: "g", Profile: harness.GoalExecProfile{Execution: harness.Direct}})
+	if !bare.OnFailure() {
+		t.Fatal("no recovery configured should give up")
+	}
+}
+
+func TestKernelEscalatesWhenOutOfIdeas(t *testing.T) {
+	p := harness.GoalExecProfile{Execution: harness.Direct, Recovery: harness.Escalation}
+	k := harness.NewKernel(harness.KernelOpts{GoalID: "g", Profile: p})
+	for i := 1; i <= 6 && !k.Escalate(); i++ {
+		k.ResolveIteration(i)
+		k.ObserveIteration(i, []string{"same error"}, nil, nil, nil, "same")
+	}
+	if !k.Escalate() {
+		t.Fatalf("never escalated; mutations: %d", len(k.Mutations()))
+	}
+	if len(k.Mutations()) == 0 {
+		t.Fatal("escalated before trying to adapt")
+	}
+	calm := harness.NewKernel(harness.KernelOpts{GoalID: "g", Profile: harness.GoalExecProfile{Execution: harness.Direct}})
+	for i := 1; i <= 6; i++ {
+		calm.ObserveIteration(i, []string{"same error"}, nil, nil, nil, "same")
+	}
+	if calm.Escalate() {
+		t.Fatal("escalated without Escalation in the profile")
+	}
+}
+
+func TestKernelContinuesThePersistedTrace(t *testing.T) {
+	hp := &harness.HarnessProfile{GoalID: "g", Current: harness.GoalExecProfile{Execution: harness.Direct}}
+	hp.Mutate(harness.GoalExecProfile{Execution: harness.Direct, Recovery: harness.Retry}, "earlier run", 1)
+	k := harness.NewKernel(harness.KernelOpts{GoalID: "g", Harness: hp, Profile: hp.Current})
+	for i := 2; i <= 4; i++ {
+		k.ObserveIteration(i, []string{"boom"}, nil, nil, nil, "")
+	}
+	if n := len(k.Mutations()); n < 2 || k.Mutations()[0].Reason != "earlier run" {
+		t.Fatalf("trace = %+v", k.Mutations())
+	}
+}
+
+type memBackend struct {
+	mu sync.Mutex
+	m  map[string]string
+}
+
+func (b *memBackend) PutCheckpoint(_ context.Context, id, body string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.m[id] = body
+	return nil
+}
+func (b *memBackend) GetCheckpoint(_ context.Context, id string) (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if v, ok := b.m[id]; ok {
+		return v, nil
+	}
+	return "", errors.New("none")
+}
+func (b *memBackend) DeleteCheckpoint(_ context.Context, id string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.m, id)
+	return nil
+}
+
+func TestCheckpointStoreIsSafeAndSurvivesARestart(t *testing.T) {
+	ctx := context.Background()
+	be := &memBackend{m: map[string]string{}}
+	cs := harness.NewCheckpointStoreWith(be)
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cs.Save(ctx, harness.Checkpoint{GoalID: fmt.Sprintf("g%d", i%5), Iteration: i, Progress: []string{"x"}})
+			cs.Load(ctx, fmt.Sprintf("g%d", i%5))
+		}(i)
+	}
+	wg.Wait()
+	// a new store (a restarted daemon) reads through to the backend
+	again := harness.NewCheckpointStoreWith(be)
+	if cp, ok := again.Load(ctx, "g1"); !ok || len(cp.Progress) != 1 {
+		t.Fatalf("after restart = %+v %v", cp, ok)
+	}
+	again.Delete(ctx, "g1")
+	if _, ok := harness.NewCheckpointStoreWith(be).Load(ctx, "g1"); ok {
+		t.Fatal("delete did not reach the backend")
+	}
+}
+
+func TestContextBudgetCapsWhatIsListed(t *testing.T) {
+	var files []string
+	for i := 0; i < 500; i++ {
+		files = append(files, fmt.Sprintf("pkg%d/login_%d.go", i, i))
+	}
+	small := (&harness.ContextEngine{Profile: harness.GoalExecProfile{Context: harness.SelectiveContext | harness.RepositoryMap}, RepoFiles: files}).Build(context.Background(), []string{"login"})
+	if len(small.SelectiveFiles) != small.MaxListed || small.MaxListed > 80 {
+		t.Fatalf("listed %d of max %d", len(small.SelectiveFiles), small.MaxListed)
+	}
+	if lines := strings.Count(small.RepoMap, "\n"); lines > small.MaxListed+2 {
+		t.Fatalf("repo map has %d lines", lines)
+	}
+	none := (&harness.ContextEngine{Profile: harness.GoalExecProfile{Context: harness.SelectiveContext}, RepoFiles: files}).Build(context.Background(), []string{"payments"})
+	if len(none.SelectiveFiles) != 0 {
+		t.Fatalf("listed %d unrelated files", len(none.SelectiveFiles))
+	}
 }

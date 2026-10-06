@@ -9,8 +9,6 @@ import (
 	"github.com/Kayra-ML/rove/internal/eventbus"
 	"github.com/Kayra-ML/rove/internal/goal"
 	"github.com/Kayra-ML/rove/internal/id"
-	"github.com/Kayra-ML/rove/internal/kanban"
-	"github.com/Kayra-ML/rove/internal/orchestrator"
 	"github.com/Kayra-ML/rove/internal/store"
 	"github.com/Kayra-ML/rove/internal/types"
 )
@@ -18,21 +16,14 @@ import (
 type Engine struct {
 	store *store.Store
 	bus   *eventbus.Bus
-	kanban *kanban.Engine
-	orch  *orchestrator.Orchestrator
 	goals *goal.Engine
-	agents agentLister
 
-	mu      sync.Mutex
-	cancel  context.CancelFunc
+	mu     sync.Mutex
+	cancel context.CancelFunc
 }
 
-type agentLister interface {
-	List(ctx context.Context) ([]types.Agent, error)
-}
-
-func New(s *store.Store, bus *eventbus.Bus, k *kanban.Engine, o *orchestrator.Orchestrator, g *goal.Engine, a agentLister) *Engine {
-	return &Engine{store: s, bus: bus, kanban: k, orch: o, goals: g, agents: a}
+func New(s *store.Store, bus *eventbus.Bus, g *goal.Engine) *Engine {
+	return &Engine{store: s, bus: bus, goals: g}
 }
 
 func (e *Engine) List(ctx context.Context) ([]types.AutomationJob, error) {
@@ -49,7 +40,7 @@ func (e *Engine) Upsert(ctx context.Context, j types.AutomationJob) (types.Autom
 		j.EverySeconds = 30
 	}
 	if j.Kind == "" {
-		j.Kind = types.AutoSweepReady
+		j.Kind = types.AutoDriveGoals
 	}
 	if j.Name == "" {
 		j.Name = string(j.Kind)
@@ -141,73 +132,13 @@ func (e *Engine) Tick(ctx context.Context) ([]types.AutomationJob, error) {
 	return out, nil
 }
 
+// run does one job. Only goal driving has a runner; a template installed
+// for something else does nothing until it gets one.
 func (e *Engine) run(ctx context.Context, j types.AutomationJob) (string, error) {
-	switch j.Kind {
-	case types.AutoAssignIdle:
-		return e.assignIdle(ctx)
-	case types.AutoDriveGoals:
+	if j.Kind == types.AutoDriveGoals {
 		return e.driveGoals(ctx)
-	default:
-		return e.sweepReady(ctx)
 	}
-}
-
-func (e *Engine) sweepReady(ctx context.Context) (string, error) {
-	if e.kanban == nil || e.orch == nil {
-		return "noop", nil
-	}
-	cards, err := e.kanban.List(ctx, "")
-	if err != nil {
-		return "", err
-	}
-	n := 0
-	for _, c := range cards {
-		if c.Column != types.ColReady {
-			continue
-		}
-		if c.AssigneeAgentID == "" {
-			if id, err := e.pickIdleAgent(ctx); err == nil && id != "" {
-				c, err = e.kanban.Assign(ctx, c.ID, id)
-				if err != nil {
-					continue
-				}
-			}
-		}
-		if c.AssigneeAgentID == "" {
-			continue
-		}
-		if err := e.orch.Dispatch(ctx, orchestrator.DispatchOpts{CardID: c.ID, SessionID: c.SessionID}); err == nil {
-			n++
-		}
-	}
-	return fmt.Sprintf("dispatched %d", n), nil
-}
-
-func (e *Engine) assignIdle(ctx context.Context) (string, error) {
-	if e.kanban == nil {
-		return "noop", nil
-	}
-	cards, err := e.kanban.List(ctx, "")
-	if err != nil {
-		return "", err
-	}
-	n := 0
-	for _, c := range cards {
-		if c.Column != types.ColReady && c.Column != types.ColBacklog {
-			continue
-		}
-		if c.AssigneeAgentID != "" {
-			continue
-		}
-		id, err := e.pickIdleAgent(ctx)
-		if err != nil || id == "" {
-			continue
-		}
-		if _, err := e.kanban.Assign(ctx, c.ID, id); err == nil {
-			n++
-		}
-	}
-	return fmt.Sprintf("assigned %d", n), nil
+	return "noop", nil
 }
 
 func (e *Engine) driveGoals(ctx context.Context) (string, error) {
@@ -228,23 +159,4 @@ func (e *Engine) driveGoals(ctx context.Context) (string, error) {
 		}
 	}
 	return fmt.Sprintf("drove %d", n), nil
-}
-
-func (e *Engine) pickIdleAgent(ctx context.Context) (types.ID, error) {
-	if e.agents == nil {
-		return "", fmt.Errorf("no agents")
-	}
-	list, err := e.agents.List(ctx)
-	if err != nil {
-		return "", err
-	}
-	for _, a := range list {
-		if a.Status == types.AgentIdle || a.Status == "" {
-			return a.ID, nil
-		}
-	}
-	if len(list) > 0 {
-		return list[0].ID, nil
-	}
-	return "", fmt.Errorf("empty roster")
 }

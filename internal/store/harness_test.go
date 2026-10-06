@@ -76,7 +76,7 @@ func TestGoalHarnessOverwrite(t *testing.T) {
 	g := types.Goal{
 		ID: "g-harness-ow", Title: "ow", Status: types.GoalPending,
 		CompletionContract: types.CompletionContract{MaxIterations: 2},
-		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		CreatedAt:          time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	_ = s.UpsertGoal(ctx, g)
 
@@ -91,34 +91,6 @@ func TestGoalHarnessOverwrite(t *testing.T) {
 	}
 }
 
-// ── Card harness persist round-trip ──────────────────────────────────────────
-
-func TestCardHarnessRoundTrip(t *testing.T) {
-	s := openTestStore(t)
-	ctx := context.Background()
-
-	c := types.Card{
-		ID: "c-harness-1", Title: "card", Column: types.ColBacklog,
-		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
-	}
-	if err := s.UpsertCard(ctx, c); err != nil {
-		t.Fatalf("UpsertCard: %v", err)
-	}
-
-	profile := `{"cardId":"c-harness-1","current":{"mode":"manual","context":1}}`
-	if err := s.SaveCardHarness(ctx, "c-harness-1", profile); err != nil {
-		t.Fatalf("SaveCardHarness: %v", err)
-	}
-
-	got, err := s.LoadCardHarness(ctx, "c-harness-1")
-	if err != nil {
-		t.Fatalf("LoadCardHarness: %v", err)
-	}
-	if got != profile {
-		t.Errorf("round-trip mismatch\nwant: %s\ngot:  %s", profile, got)
-	}
-}
-
 // ── Harness mutations persist ─────────────────────────────────────────────────
 
 func TestHarnessMutationsRoundTrip(t *testing.T) {
@@ -128,20 +100,20 @@ func TestHarnessMutationsRoundTrip(t *testing.T) {
 	g := types.Goal{
 		ID: "g-mut-1", Title: "mut goal", Status: types.GoalRunning,
 		CompletionContract: types.CompletionContract{MaxIterations: 5},
-		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		CreatedAt:          time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	_ = s.UpsertGoal(ctx, g)
 
 	now := time.Now().UTC()
 	rows := []store.HarnessMutationRow{
 		{
-			ID: "m1", GoalID: "g-mut-1", CardID: "c1",
+			ID: "m1", GoalID: "g-mut-1",
 			Iteration: 2, Reason: "Direct→PlanExecute: repeated errors",
 			OldProfile: `{"execution":1}`, NewProfile: `{"execution":3}`,
 			Result: "pending", CreatedAt: now,
 		},
 		{
-			ID: "m2", GoalID: "g-mut-1", CardID: "c1",
+			ID: "m2", GoalID: "g-mut-1",
 			Iteration: 4, Reason: "added IndependentReview",
 			OldProfile: `{"verify":2}`, NewProfile: `{"verify":6}`,
 			Result: "applied", CreatedAt: now.Add(time.Second),
@@ -178,7 +150,7 @@ func TestHarnessMutationsEmptyForNewGoal(t *testing.T) {
 	g := types.Goal{
 		ID: "g-new", Title: "new", Status: types.GoalPending,
 		CompletionContract: types.CompletionContract{MaxIterations: 2},
-		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		CreatedAt:          time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	_ = s.UpsertGoal(ctx, g)
 
@@ -200,7 +172,7 @@ func TestLoadGoalHarnessNotFound(t *testing.T) {
 	g := types.Goal{
 		ID: "g-nohp", Title: "nohp", Status: types.GoalPending,
 		CompletionContract: types.CompletionContract{MaxIterations: 1},
-		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		CreatedAt:          time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	_ = s.UpsertGoal(ctx, g)
 

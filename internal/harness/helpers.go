@@ -18,7 +18,7 @@ func SystemExtraFromProfile(p GoalExecProfile) string {
 		parts = append(parts, "A repository map is provided — use it to navigate the codebase.")
 	}
 	if p.Has(FreshContext) {
-		parts = append(parts, "Your context budget is limited — be concise and targeted.")
+		parts = append(parts, "Earlier iterations are not in your context; the hand-off in the request says where things stand.")
 	}
 	if p.Has(MemoryHeavy) {
 		parts = append(parts, "Consult memory entries before starting new work.")
@@ -40,16 +40,16 @@ func SystemExtraFromProfile(p GoalExecProfile) string {
 		parts = append(parts, "Call one tool at a time; wait for each result before continuing.")
 	}
 	if p.HasTool(ParallelTools) {
-		parts = append(parts, "You may call independent tools in parallel to save time.")
+		parts = append(parts, "Read-only tool calls you make in one turn run in parallel; batch them.")
 	}
 	if p.HasTool(RestrictedTools) {
 		parts = append(parts, "Only use the explicitly listed tools; avoid other capabilities.")
 	}
 	if p.HasTool(CodingTools) {
-		parts = append(parts, "Primary tools: read_file, write_file, patch_file, run_command.")
+		parts = append(parts, "Primary tools: read_file, patch_file, write_file, list_dir, shell.")
 	}
 	if p.HasTool(ResearchTools) {
-		parts = append(parts, "Primary tools: web_search, read_file, summarize.")
+		parts = append(parts, "Read and look things up; do not change files.")
 	}
 
 	// Verification hints.
@@ -73,9 +73,6 @@ func MaxTurnsFromProfile(p GoalExecProfile) int {
 		base += 8
 	}
 	if p.HasExec(PlanExecute) {
-		base += 4
-	}
-	if p.HasExec(Parallel) {
 		base += 4
 	}
 	if p.HasVerify(IndependentReview) {

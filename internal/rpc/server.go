@@ -3,9 +3,13 @@ package rpc
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/Kayra-ML/rove/internal/sshtunnel"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -15,13 +19,14 @@ import (
 	"time"
 
 	"github.com/Kayra-ML/rove/internal/agent"
+	"github.com/Kayra-ML/rove/internal/approval"
 	"github.com/Kayra-ML/rove/internal/core"
-	"github.com/Kayra-ML/rove/internal/harness"
 	"github.com/Kayra-ML/rove/internal/id"
 	"github.com/Kayra-ML/rove/internal/marketplace"
-	"github.com/Kayra-ML/rove/internal/orchestrator"
+	"github.com/Kayra-ML/rove/internal/persona"
 	"github.com/Kayra-ML/rove/internal/terminal"
 	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Kayra-ML/rove/internal/usage"
 	"github.com/Kayra-ML/rove/pkg/protocol"
 )
 
@@ -37,7 +42,10 @@ func New(app *core.App) *Server { return &Server{app: app} }
 // maxBodyBytes caps incoming request bodies to 4 MiB to prevent OOM DoS.
 const maxBodyBytes = 4 << 20 // 4 MiB
 
-func (s *Server) ServeHTTP(addr string) error {
+// ServeHTTPOn serves on a listener the caller already bound, so a port
+// conflict surfaces before the daemon reports itself ready.
+func (s *Server) ServeHTTPOn(ln net.Listener) error {
+	addr := ln.Addr().String()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.app.Health())
@@ -51,10 +59,10 @@ func (s *Server) ServeHTTP(addr string) error {
 		// Reasonable timeouts — prevents slow-loris and hung connections.
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      120 * time.Second,
+		WriteTimeout:      httpWriteTimeout,
 		IdleTimeout:       60 * time.Second,
 	}
-	return s.http.ListenAndServe()
+	return s.http.Serve(ln)
 }
 
 func (s *Server) ServeIPC(path string) error {
@@ -75,6 +83,9 @@ func (s *Server) ServeIPC(path string) error {
 	s.mu.Unlock()
 	for {
 		c, err := ln.Accept()
+		if errors.Is(err, net.ErrClosed) {
+			return nil // Close
+		}
 		if err != nil {
 			return err
 		}
@@ -116,12 +127,24 @@ func (s *Server) serveConn(c net.Conn) {
 	}
 }
 
+// rpcWriteLimit bounds how long one call may take to answer over HTTP;
+// httpWriteTimeout is the server's default for everything else.
+const rpcWriteLimit = time.Hour
+
+var httpWriteTimeout = 120 * time.Second
+
 func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST required", http.StatusMethodNotAllowed)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	// A call answers when its work is done: a chat turn, a plan or a check
+	// can take minutes. The server-wide WriteTimeout (two minutes) would
+	// close the connection on the answer of a longer one — the work done,
+	// its result lost, the app shown an empty reply. The request body was
+	// read under ReadTimeout; the answer gets the time the work takes.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(rpcWriteLimit))
 	var req protocol.Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, protocol.Response{OK: false, Error: err.Error()})
@@ -174,7 +197,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	if tok == "" {
 		tok = bearer(r)
 	}
-	if tok != s.app.Token {
+	if !tokenOK(tok, s.app.Token) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -183,6 +206,10 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "stream unsupported", http.StatusInternalServerError)
 		return
 	}
+	// An event stream lives as long as the app is open; the server-wide
+	// WriteTimeout would cut it every two minutes and drop whatever fired
+	// while the client reconnects.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -191,7 +218,10 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, ": connected\n\n")
 	flusher.Flush()
 	filter := r.URL.Query().Get("filter")
-	ch := make(chan types.Event, 64)
+	// The desktop app multiplexes all its subscriptions over one unfiltered
+	// stream, so a burst (a streamed reply, terminal output) must fit here
+	// or events are dropped.
+	ch := make(chan types.Event, 1024)
 	unsub := s.app.Bus.Subscribe(filter, func(ev types.Event) {
 		select {
 		case ch <- ev:
@@ -210,6 +240,12 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// tokenOK compares in constant time, so the answer's timing says nothing
+// of the token; an app without a token lets nothing in.
+func tokenOK(got, want string) bool {
+	return want != "" && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 func bearer(r *http.Request) string {
@@ -264,11 +300,14 @@ func (s *Server) Dispatch(ctx context.Context, req protocol.Request) protocol.Re
 	if req.ID == "" {
 		req.ID = string(id.NewID())
 	}
-	if req.Method != protocol.MethodPing && req.Token != s.app.Token {
+	if req.Method != protocol.MethodPing && !tokenOK(req.Token, s.app.Token) {
 		return protocol.Response{ID: req.ID, OK: false, Error: "unauthorized"}
 	}
 	res, err := s.handle(ctx, req)
 	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			log.Printf("rpc %s: %v", req.Method, err)
+		}
 		return protocol.Response{ID: req.ID, OK: false, Error: err.Error()}
 	}
 	return protocol.Response{ID: req.ID, OK: true, Result: res}
@@ -281,6 +320,27 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		return core.MustJSON(a.Health()), nil
 	case protocol.MethodUsageGet:
 		return core.MustJSON(a.Health()), nil
+	case protocol.MethodUsageReport:
+		var p struct {
+			Days int `json:"days"`
+		}
+		if len(req.Params) > 0 && string(req.Params) != "null" {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				return nil, err
+			}
+		}
+		if p.Days <= 0 {
+			p.Days = 30
+		}
+		if p.Days > 366 {
+			p.Days = 366
+		}
+		now := time.Now()
+		entries, err := a.Store.ListUsageSince(ctx, usage.Start(p.Days, now, time.Local))
+		if err != nil {
+			return nil, err
+		}
+		return core.MustJSON(usage.Build(entries, p.Days, now, time.Local)), nil
 	case protocol.MethodAgentList:
 		list, err := a.Agents.List(ctx)
 		return core.MustJSON(list), err
@@ -293,11 +353,17 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		return core.MustJSON(out), err
 	case protocol.MethodSessionCreate:
 		var p struct {
-			Title       string   `json:"title"`
-			AgentID     types.ID `json:"agentId"`
-			WorkspaceID types.ID `json:"workspaceId"`
-			Workspace   string   `json:"workspace"`
-			Cwd         string   `json:"cwd"`
+			Title       string     `json:"title"`
+			AgentID     types.ID   `json:"agentId"`
+			WorkspaceID types.ID   `json:"workspaceId"`
+			Workspace   string     `json:"workspace"`
+			Cwd         string     `json:"cwd"`
+			ProfileIDs  []types.ID `json:"profileIds"`
+			// CharacterID starts the chat with that catalog character (an
+			// agent picked in Office).
+			CharacterID string `json:"characterId"`
+			// Space is types.SpaceOffice or types.SpaceChat.
+			Space string `json:"space"`
 		}
 		_ = json.Unmarshal(req.Params, &p)
 		if p.AgentID == "" {
@@ -311,7 +377,7 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 				path = strings.TrimSpace(p.Cwd)
 			}
 			if path == "" {
-				path, _ = os.Getwd()
+				path = fallbackDir()
 			}
 			if path != "" {
 				name := filepath.Base(path)
@@ -322,7 +388,27 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 				p.WorkspaceID = ws.ID
 			}
 		}
-		out, err := a.Sess.Create(ctx, p.Title, p.AgentID, p.WorkspaceID)
+		if p.CharacterID != "" {
+			if _, ok := persona.CharacterByID(p.CharacterID); !ok {
+				return nil, fmt.Errorf("unknown character %q", p.CharacterID)
+			}
+		}
+		switch p.Space {
+		case "", types.SpaceOffice, types.SpaceChat:
+		default:
+			return nil, fmt.Errorf("unknown space %q", p.Space)
+		}
+		out, err := a.Sess.CreateIn(ctx, p.Space, p.Title, p.AgentID, p.WorkspaceID)
+		if err == nil && p.CharacterID != "" {
+			err = a.Store.PutSessionPersona(ctx, types.SessionPersona{SessionID: out.ID, CharacterID: p.CharacterID, UpdatedAt: time.Now().UTC()})
+		}
+		if err == nil && len(p.ProfileIDs) > 0 {
+			// a new chat started with an Office agent picked: it answers there
+			if perr := setChatAgent(ctx, a, out.ID, p.ProfileIDs); perr != nil {
+				_ = a.Sess.Delete(ctx, out.ID)
+				return nil, perr
+			}
+		}
 		return core.MustJSON(out), err
 	case protocol.MethodSessionList:
 		var p struct {
@@ -347,8 +433,12 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			WorkspaceID types.ID `json:"workspaceId"`
 			Workspace   string   `json:"workspace"`
 			Content     string   `json:"content"`
+			Images      []string `json:"images"`
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if err := checkImages(p.Images); err != nil {
 			return nil, err
 		}
 		// Session identity is authoritative. Terminal and desktop clients only
@@ -371,10 +461,27 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			}
 		}
 		if p.Workspace == "" {
-			if cwd, err := os.Getwd(); err == nil {
+			if cwd := fallbackDir(); cwd != "" {
 				if ws, err := a.WS.Open(ctx, cwd, filepath.Base(cwd)); err == nil {
 					p.WorkspaceID = ws.ID
 					p.Workspace = ws.Path
+				}
+			}
+		}
+		// Name a fresh chat after its first message before the run starts, so
+		// the session list shows the topic right away, not when the reply ends.
+		if p.SessionID != "" {
+			if sess, gerr := a.Sess.Get(ctx, p.SessionID); gerr == nil && sess.ParentID == "" && placeholderTitle(sess.Title) {
+				if title := sessionTitleFrom(p.Content); title != "" {
+					_ = a.Sess.Rename(ctx, p.SessionID, title)
+				}
+			} else if gerr == nil && sess.Space == types.SpaceTerminal {
+				// a session opened in a second terminal is named by that
+				// terminal's first message
+				if parent, perr := a.Sess.Get(ctx, sess.ParentID); perr == nil && placeholderTitle(parent.Title) {
+					if title := sessionTitleFrom(p.Content); title != "" {
+						_ = a.Sess.Rename(ctx, parent.ID, title)
+					}
 				}
 			}
 		}
@@ -384,14 +491,8 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			WorkspaceID: p.WorkspaceID,
 			Workspace:   p.Workspace,
 			UserMessage: p.Content,
+			Images:      p.Images,
 		})
-		if err == nil && p.SessionID != "" && strings.TrimSpace(p.Content) != "" {
-			if sess, gerr := a.Sess.Get(ctx, p.SessionID); gerr == nil {
-				if sess.Title == "" || sess.Title == "Untitled" || sess.Title == "New chat" {
-					_ = a.Sess.Rename(ctx, p.SessionID, sessionTitleFrom(p.Content))
-				}
-			}
-		}
 		return core.MustJSON(res), err
 	case protocol.MethodSessionRename:
 		var p struct {
@@ -411,6 +512,9 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			return nil, err
 		}
 		err := a.Sess.Delete(ctx, p.ID)
+		if err == nil {
+			_ = a.Store.DeleteMapNode(ctx, p.ID)
+		}
 		return core.MustJSON(map[string]any{"ok": err == nil}), err
 	case protocol.MethodSessionTruncate:
 		var p struct {
@@ -424,6 +528,8 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			p.Keep = 0
 		}
 		err := a.Sess.Truncate(ctx, p.SessionID, p.Keep)
+		// a connected agent system's session still holds what was cut
+		a.AgentSessions.Forget(string(p.SessionID))
 		if err != nil {
 			return nil, err
 		}
@@ -451,87 +557,6 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			return nil, herr
 		}
 		return core.MustJSON(hist), nil
-	case protocol.MethodAgentCancel:
-		var p struct {
-			AgentID types.ID `json:"agentId"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		a.Agents.Cancel(p.AgentID)
-		return core.MustJSON(map[string]any{"ok": true}), nil
-	case protocol.MethodCardList:
-		var p struct {
-			WorkspaceID types.ID `json:"workspaceId"`
-		}
-		_ = json.Unmarshal(req.Params, &p)
-		out, err := a.Kanban.List(ctx, p.WorkspaceID)
-		return core.MustJSON(out), err
-	case protocol.MethodCardCreate:
-		var c types.Card
-		if err := json.Unmarshal(req.Params, &c); err != nil {
-			return nil, err
-		}
-		out, err := a.Kanban.Create(ctx, c)
-		return core.MustJSON(out), err
-	case protocol.MethodCardGet:
-		var p struct {
-			ID types.ID `json:"id"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		out, err := a.Kanban.Get(ctx, p.ID)
-		return core.MustJSON(out), err
-	case protocol.MethodCardMove:
-		var p struct {
-			ID     types.ID           `json:"id"`
-			Column types.KanbanColumn `json:"column"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		out, err := a.Kanban.Move(ctx, p.ID, p.Column)
-		return core.MustJSON(out), err
-	case protocol.MethodCardReview:
-		var p struct {
-			ID    types.ID          `json:"id"`
-			State types.ReviewState `json:"state"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		out, err := a.Kanban.SetReview(ctx, p.ID, p.State)
-		return core.MustJSON(out), err
-	case protocol.MethodCardDispatch:
-		var p struct {
-			CardID    types.ID `json:"cardId"`
-			SessionID types.ID `json:"sessionId"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		err := a.Orch.Dispatch(ctx, orchestrator.DispatchOpts{CardID: p.CardID, SessionID: p.SessionID})
-		return core.MustJSON(map[string]any{"ok": err == nil}), err
-	case protocol.MethodCardAssign:
-		var p struct {
-			ID      types.ID `json:"id"`
-			AgentID types.ID `json:"agentId"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		out, err := a.Kanban.Assign(ctx, p.ID, p.AgentID)
-		return core.MustJSON(out), err
-	case protocol.MethodCardDelete:
-		var p struct {
-			ID types.ID `json:"id"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		err := a.Kanban.Delete(ctx, p.ID)
-		return core.MustJSON(map[string]any{"ok": err == nil}), err
 	case protocol.MethodGoalCreate:
 		var g types.Goal
 		if err := json.Unmarshal(req.Params, &g); err != nil {
@@ -569,9 +594,10 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, err
 		}
-		go func() {
-			_, _ = a.Goals.Drive(context.Background(), p.ID, p.SessionID, p.Workspace)
-		}()
+		// runs as long as the daemon, until done or canceled
+		if err := a.Goals.Start(p.ID, p.SessionID, p.Workspace); err != nil {
+			return nil, err
+		}
 		return core.MustJSON(map[string]any{"started": true}), nil
 	case protocol.MethodWorkspaceOpen:
 		var p struct {
@@ -616,15 +642,6 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		err := a.Term.Resize(p.ID, p.Cols, p.Rows)
 		return core.MustJSON(map[string]any{"ok": err == nil}), err
-	case protocol.MethodTerminalKill:
-		var p struct {
-			ID types.ID `json:"id"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		err := a.Term.Kill(p.ID)
-		return core.MustJSON(map[string]any{"ok": err == nil}), err
 	case protocol.MethodTerminalRestart:
 		var p struct {
 			ID types.ID `json:"id"`
@@ -652,6 +669,13 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		err := a.Term.Detach(p.ID)
 		return core.MustJSON(map[string]any{"ok": err == nil}), err
+	case protocol.MethodFileDirs:
+		return s.handleDirs(ctx, req)
+	case protocol.MethodTerminalPanes, protocol.MethodTerminalNewPane, protocol.MethodTerminalSendPane,
+		protocol.MethodTerminalLayoutGet, protocol.MethodTerminalLayoutSet:
+		return s.handlePanes(ctx, req)
+	case protocol.MethodSSHDiscover:
+		return core.MustJSON(sshtunnel.Discover("")), nil
 	case protocol.MethodSSHOpen:
 		var p types.SSHTarget
 		if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -659,35 +683,17 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		out, err := a.SSH.Open(ctx, p, "", "")
 		return core.MustJSON(out), err
-	case protocol.MethodGitStatus:
-		var p struct {
-			Path string `json:"path"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		st, err := a.Git.Status(p.Path)
-		return core.MustJSON(st), err
-	case protocol.MethodGitDiff:
-		var p struct {
-			Path string `json:"path"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		diff, err := a.Git.Diff(p.Path)
-		return core.MustJSON(map[string]any{"path": p.Path, "diff": diff}), err
 	case protocol.MethodSkillList:
 		out, err := a.Skills.List()
 		return core.MustJSON(out), err
 	case protocol.MethodSkillInstall:
 		var p struct {
-			Path string `json:"path"`
+			Name string `json:"name"`
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, err
 		}
-		out, err := a.Skills.InstallFromDir(p.Path)
+		out, err := a.Market.Install(p.Name)
 		return core.MustJSON(out), err
 	case protocol.MethodSkillUninstall:
 		var p struct {
@@ -733,25 +739,6 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		_ = json.Unmarshal(req.Params, &p)
 		out, err := a.Market.Search(p.Q)
 		return core.MustJSON(out), err
-	case protocol.MethodMarketPublish:
-		var p struct {
-			Path string `json:"path"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		out, err := a.Market.PublishLocal(p.Path)
-		return core.MustJSON(out), err
-	case protocol.MethodMarketInstall:
-		var p struct {
-			Name    string `json:"name"`
-			Version string `json:"version"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		out, err := a.Market.Install(p.Name, p.Version)
-		return core.MustJSON(out), err
 	case protocol.MethodProviderList:
 		out, err := a.Store.ListProviders(ctx)
 		return core.MustJSON(out), err
@@ -760,7 +747,16 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, err
 		}
-		out, err := a.ApplyProvider(ctx, p)
+		out, err := a.SaveProvider(ctx, p)
+		return core.MustJSON(out), err
+	case protocol.MethodProviderRefresh:
+		var p struct {
+			ID types.ID `json:"id"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		out, err := a.RefreshProviderModels(ctx, p.ID)
 		return core.MustJSON(out), err
 	case protocol.MethodSecretPut:
 		var p struct {
@@ -782,6 +778,25 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		err := a.Perm.Put(ctx, r)
 		return core.MustJSON(r), err
+	case protocol.MethodPermissionAsks:
+		if a.Approvals == nil {
+			return core.MustJSON([]approval.Request{}), nil
+		}
+		return core.MustJSON(a.Approvals.Pending()), nil
+	case protocol.MethodPermissionAnswer:
+		if a.Approvals == nil {
+			return nil, fmt.Errorf("approvals not available")
+		}
+		var p struct {
+			ID       types.ID `json:"id"`
+			Allow    bool     `json:"allow"`
+			Remember bool     `json:"remember"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		err := a.Approvals.Answer(p.ID, approval.Answer{Allow: p.Allow, Remember: p.Remember})
+		return core.MustJSON(map[string]any{"ok": err == nil}), err
 	case protocol.MethodMemoryPut:
 		var p struct {
 			Scope   types.MemoryScope `json:"scope"`
@@ -866,8 +881,6 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			b = b[:256*1024]
 		}
 		return core.MustJSON(map[string]any{"content": string(b)}), nil
-	case protocol.MethodHealthStream:
-		return core.MustJSON(a.Health()), nil
 	case protocol.MethodShutdown:
 		go func() {
 			time.Sleep(100 * time.Millisecond)
@@ -876,117 +889,7 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		return core.MustJSON(map[string]any{"ok": true}), nil
 
 	// ── Harness policy ────────────────────────────────────────────────────────
-	case protocol.MethodHarnessGet:
-		var p struct {
-			GoalID string `json:"goalId"`
-			CardID string `json:"cardId"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		var raw string
-		var lerr error
-		if p.GoalID != "" {
-			raw, lerr = a.Store.LoadGoalHarness(ctx, types.ID(p.GoalID))
-		} else if p.CardID != "" {
-			raw, lerr = a.Store.LoadCardHarness(ctx, types.ID(p.CardID))
-		} else {
-			return nil, fmt.Errorf("goalId or cardId required")
-		}
-		if lerr != nil {
-			return nil, lerr
-		}
-		return json.RawMessage(raw), nil
 
-	case protocol.MethodHarnessSet:
-		var p struct {
-			GoalID  string          `json:"goalId"`
-			CardID  string          `json:"cardId"`
-			Profile json.RawMessage `json:"profile"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		profileStr := string(p.Profile)
-		if p.GoalID != "" {
-			if err := a.Store.SaveGoalHarness(ctx, types.ID(p.GoalID), profileStr); err != nil {
-				return nil, err
-			}
-		}
-		if p.CardID != "" {
-			if err := a.Store.SaveCardHarness(ctx, types.ID(p.CardID), profileStr); err != nil {
-				return nil, err
-			}
-		}
-		return core.MustJSON(map[string]any{"ok": true}), nil
-
-	case protocol.MethodHarnessCompose:
-		var p struct {
-			Analysis harness.TaskAnalysis `json:"analysis"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		composer := harness.NewComposer()
-		profile := composer.Compose(p.Analysis)
-		now := time.Now().UTC()
-		hp := harness.HarnessProfile{
-			Current:   profile,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-		return core.MustJSON(hp), nil
-
-	case protocol.MethodHarnessPresets:
-		return core.MustJSON(map[string]any{
-			"small": harness.SmallBugProfile(),
-			"large": harness.LargeRefactorProfile(),
-			"hard":  harness.HardLongTaskProfile(),
-		}), nil
-
-	case protocol.MethodHarnessMutations:
-		var p struct {
-			GoalID string `json:"goalId"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		if p.GoalID == "" {
-			return nil, fmt.Errorf("goalId required")
-		}
-		rows, err := a.Store.ListHarnessMutations(ctx, types.ID(p.GoalID))
-		if err != nil {
-			return nil, err
-		}
-		return core.MustJSON(rows), nil
-
-	case protocol.MethodCardLogs:
-		var p struct {
-			ID types.ID `json:"id"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		c, err := a.Kanban.Get(ctx, p.ID)
-		if err != nil {
-			return nil, err
-		}
-		return core.MustJSON(c.Logs), nil
-	case protocol.MethodCardAddArtifact:
-		var p struct {
-			ID       types.ID       `json:"id"`
-			Artifact types.Artifact `json:"artifact"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		c, err := a.Kanban.Get(ctx, p.ID)
-		if err != nil {
-			return nil, err
-		}
-		c.Artifacts = append(c.Artifacts, p.Artifact)
-		out, err := a.Kanban.Update(ctx, c)
-		return core.MustJSON(out), err
 	case protocol.MethodAgentDelete:
 		var p struct {
 			ID types.ID `json:"id"`
@@ -996,29 +899,6 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		err := a.Store.DeleteAgent(ctx, p.ID)
 		return core.MustJSON(map[string]any{"ok": err == nil}), err
-	case protocol.MethodGitCommit:
-		var p struct {
-			Path    string `json:"path"`
-			Message string `json:"message"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		err := a.Git.CommitAll(p.Path, p.Message)
-		return core.MustJSON(map[string]any{"ok": err == nil}), err
-	case protocol.MethodGitLog:
-		var p struct {
-			Path  string `json:"path"`
-			Limit int    `json:"limit"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		if p.Limit <= 0 {
-			p.Limit = 20
-		}
-		out, err := a.Git.Log(p.Path, p.Limit)
-		return core.MustJSON(out), err
 	case protocol.MethodAutomationList:
 		if a.Auto == nil {
 			return core.MustJSON([]types.AutomationJob{}), nil
@@ -1084,38 +964,8 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		err := a.Checkpt.Restore(p.Path, p.Ref)
 		return core.MustJSON(map[string]any{"ok": err == nil}), err
-	case protocol.MethodCheckpointDrop:
-		var p struct {
-			Path string `json:"path"`
-			Ref  string `json:"ref"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		err := a.Checkpt.Drop(p.Path, p.Ref)
-		return core.MustJSON(map[string]any{"ok": err == nil}), err
 
 	// ── Diff hunk accept/reject ────────────────────────────────────────────
-	case protocol.MethodGitApplyHunk:
-		var p struct {
-			Path  string `json:"path"`
-			Patch string `json:"patch"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		err := a.Git.ApplyHunk(p.Path, p.Patch)
-		return core.MustJSON(map[string]any{"ok": err == nil}), err
-	case protocol.MethodGitRejectHunk:
-		var p struct {
-			Path  string `json:"path"`
-			Patch string `json:"patch"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		err := a.Git.RejectHunk(p.Path, p.Patch)
-		return core.MustJSON(map[string]any{"ok": err == nil}), err
 
 	// ── Session export / import ────────────────────────────────────────────
 	case protocol.MethodSessionExport:
@@ -1141,109 +991,7 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		filename := "session-" + string(p.SessionID) + ".md"
 		return core.MustJSON(map[string]any{"markdown": sb.String(), "filename": filename}), nil
 
-	case protocol.MethodSessionImport:
-		var p struct {
-			AgentID     types.ID `json:"agentId"`
-			WorkspaceID types.ID `json:"workspaceId"`
-			Title       string   `json:"title"`
-			Markdown    string   `json:"markdown"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		if p.Title == "" {
-			p.Title = "Imported session"
-		}
-		sess, err := a.Sess.Create(ctx, p.Title, p.AgentID, p.WorkspaceID)
-		if err != nil {
-			return nil, err
-		}
-		blocks := strings.Split(p.Markdown, "\n---\n")
-		validRoles := map[types.MessageRole]struct{}{
-			types.RoleUser:      {},
-			types.RoleAssistant: {},
-			types.RoleSystem:    {},
-			types.RoleTool:      {},
-		}
-		for _, block := range blocks {
-			block = strings.TrimSpace(block)
-			if block == "" {
-				continue
-			}
-			lines := strings.SplitN(block, "\n", 3)
-			if len(lines) < 2 {
-				continue
-			}
-			roleLine := strings.TrimPrefix(strings.TrimSpace(lines[0]), "## ")
-			var content string
-			if len(lines) == 3 {
-				content = strings.TrimSpace(lines[2])
-			} else {
-				content = strings.TrimSpace(lines[1])
-			}
-			if roleLine == "" || content == "" {
-				continue
-			}
-			role := types.MessageRole(roleLine)
-			if _, ok := validRoles[role]; !ok {
-				// Skip messages with unrecognised roles — prevents injection
-				// of arbitrary role strings from crafted import payloads.
-				continue
-			}
-			msg := types.Message{
-				SessionID: sess.ID,
-				Role:      role,
-				Content:   content,
-			}
-			if _, err := a.Sess.Append(ctx, msg); err != nil {
-				return nil, err
-			}
-		}
-		hist, herr := a.Sess.History(ctx, sess.ID)
-		if herr != nil {
-			return nil, herr
-		}
-		return core.MustJSON(map[string]any{"session": sess, "messages": hist}), nil
-
 	// ── Git branch / push / PR ─────────────────────────────────────────────
-	case protocol.MethodGitBranch:
-		var p struct {
-			Path string `json:"path"`
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		err := a.Git.CreateBranch(p.Path, p.Name)
-		return core.MustJSON(map[string]any{"ok": err == nil}), err
-
-	case protocol.MethodGitPush:
-		var p struct {
-			Path   string `json:"path"`
-			Remote string `json:"remote"`
-			Branch string `json:"branch"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		if p.Remote == "" {
-			p.Remote = "origin"
-		}
-		err := a.Git.PushBranch(p.Path, p.Remote, p.Branch)
-		return core.MustJSON(map[string]any{"ok": err == nil}), err
-
-	case protocol.MethodGitPR:
-		var p struct {
-			Path  string `json:"path"`
-			Title string `json:"title"`
-			Body  string `json:"body"`
-			Base  string `json:"base"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		url, err := a.Git.CreatePR(p.Path, p.Title, p.Body, p.Base)
-		return core.MustJSON(map[string]any{"url": url}), err
 
 	// ── MCP server registry ────────────────────────────────────────────────
 	case protocol.MethodMCPList:
@@ -1273,9 +1021,18 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		if srv.ID == "" {
 			srv.ID = string(id.NewID())
 		}
+		// a renamed server stops under its old name
+		if list, err := a.Store.ListMCPServers(ctx); err == nil && a.MCP != nil {
+			for _, prev := range list {
+				if prev.ID == srv.ID && prev.Name != srv.Name {
+					_ = a.MCP.Stop(prev.Name)
+				}
+			}
+		}
 		if err := a.Store.UpsertMCPServer(ctx, srv); err != nil {
 			return nil, err
 		}
+		go func() { _ = a.StartMCP(context.Background(), srv) }()
 		return core.MustJSON(srv), nil
 
 	case protocol.MethodMCPRemove:
@@ -1284,6 +1041,13 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, err
+		}
+		if list, err := a.Store.ListMCPServers(ctx); err == nil && a.MCP != nil {
+			for _, srv := range list {
+				if srv.ID == p.ID {
+					_ = a.MCP.Stop(srv.Name)
+				}
+			}
 		}
 		err := a.Store.DeleteMCPServer(ctx, p.ID)
 		return core.MustJSON(map[string]any{"ok": err == nil}), err
@@ -1442,7 +1206,33 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		if p.ID == "" {
 			p.ID = id.NewID()
 		}
+		// an office agent is checked like a picked model or character: a
+		// typo here would only show up as a failed chat later
+		p.Name = strings.TrimSpace(p.Name)
+		if p.Name == "" {
+			return nil, fmt.Errorf("an agent needs a name")
+		}
+		if p.Model != "" && p.Model != "default" {
+			if err := s.knownModel(ctx, p.Provider, p.Model); err != nil {
+				return nil, err
+			}
+		}
+		if p.CharacterID != "" {
+			if _, ok := persona.CharacterByID(p.CharacterID); !ok {
+				return nil, fmt.Errorf("unknown character %q", p.CharacterID)
+			}
+		}
+		if p.PromptMode != "" && p.PromptMode != types.PromptOwn {
+			return nil, fmt.Errorf("unknown prompt mode %q", p.PromptMode)
+		}
+		if p.Role == "" {
+			p.Role = types.RoleDeveloper
+		}
 		out, err := a.Store.UpsertAgentProfile(ctx, p)
+		if err == nil && p.IsDefault {
+			// only one default profile
+			err = a.Store.SetDefaultProfile(ctx, p.ID)
+		}
 		return core.MustJSON(out), err
 
 	case protocol.MethodProfileDelete:
@@ -1453,6 +1243,14 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			return nil, err
 		}
 		err := a.Store.DeleteAgentProfile(ctx, p.ID)
+		if err == nil {
+			// a removed agent's tasks and watches go with it
+			_ = a.Store.DeleteStaffTasks(ctx, p.ID)
+			_ = a.Store.DeleteStaffWatchesOf(ctx, p.ID)
+			_ = a.Store.DeleteStaffSchedulesOf(ctx, p.ID)
+			_ = a.Store.DeleteStaffMonitorsOf(ctx, p.ID)
+			_ = a.Store.DeleteStaffHandoffsOf(ctx, p.ID)
+		}
 		return core.MustJSON(map[string]any{"ok": err == nil}), err
 
 	case protocol.MethodProfileSetDefault:
@@ -1464,16 +1262,6 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		err := a.Store.SetDefaultProfile(ctx, p.ID)
 		return core.MustJSON(map[string]any{"ok": err == nil}), err
-
-	case protocol.MethodProfileGetDefault:
-		out, err := a.Store.GetDefaultProfile(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if out == nil {
-			return core.MustJSON(map[string]any{"profile": nil}), nil
-		}
-		return core.MustJSON(map[string]any{"profile": out}), nil
 
 	// ── Session linking & relay ─────────────────────────────────────────────
 	case protocol.MethodSessionLink:
@@ -1537,39 +1325,126 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		return core.MustJSON(res), err
 
 	// ── Agent role management ───────────────────────────────────────────────
-	case protocol.MethodAgentSetRole:
-		var p struct {
-			AgentID types.ID        `json:"agentId"`
-			Role    types.AgentRole `json:"role"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		err := a.Store.SetAgentRole(ctx, p.AgentID, p.Role)
-		return core.MustJSON(map[string]any{"ok": err == nil}), err
 
-	case protocol.MethodAgentRoles:
-		roles := []string{"leader", "frontend", "backend", "developer", "designer", "tester", "debugger", "reviewer", "researcher"}
-		return core.MustJSON(roles), nil
+	case protocol.MethodMapStatus, protocol.MethodMapBuild, protocol.MethodMapGraph,
+		protocol.MethodMapQuery, protocol.MethodMapNeighbors,
+		protocol.MethodMapImpact, protocol.MethodMapShare:
+		return s.handleMap(ctx, req)
+
+	case protocol.MethodCtxGet, protocol.MethodCtxPlace, protocol.MethodCtxRemove, protocol.MethodCtxLink,
+		protocol.MethodCtxUpdateLink, protocol.MethodCtxUnlink, protocol.MethodCtxSend, protocol.MethodCtxRelays, protocol.MethodCtxAssistant:
+		return s.handleCtx(ctx, req)
+
+	case protocol.MethodConnectCatalog, protocol.MethodConnectTerminal, protocol.MethodConnectAdd:
+		return s.handleConnect(ctx, req)
+
+	case protocol.MethodPersonaCatalog, protocol.MethodPersonaGet, protocol.MethodPersonaSet,
+		protocol.MethodPersonaClear, protocol.MethodPersonaBadges, protocol.MethodSessionCancel:
+		return s.handlePersona(ctx, req)
+
+	case protocol.MethodSubagentList, protocol.MethodSubagentStop, protocol.MethodSubagentSteer,
+		protocol.MethodSubagentApply, protocol.MethodSubagentDiscard:
+		return s.handleSubagents(ctx, req)
+
+	case protocol.MethodWorkPlan, protocol.MethodWorkGet, protocol.MethodWorkRemovePhase, protocol.MethodWorkRemoveAgent,
+		protocol.MethodWorkApprove, protocol.MethodWorkCancel, protocol.MethodWorkDiscard, protocol.MethodWorkRetry:
+		return s.handleTeamwork(ctx, req)
+	case protocol.MethodStaffMembers, protocol.MethodStaffAssign, protocol.MethodStaffTasks, protocol.MethodStaffSeen,
+		protocol.MethodStaffStop, protocol.MethodStaffNoteAdd, protocol.MethodStaffNoteDelete,
+		protocol.MethodStaffWatches, protocol.MethodStaffWatchSave, protocol.MethodStaffWatchDelete,
+		protocol.MethodStaffSchedules, protocol.MethodStaffScheduleSave, protocol.MethodStaffScheduleDelete,
+		protocol.MethodStaffDiff, protocol.MethodStaffApply, protocol.MethodStaffDiscard, protocol.MethodStaffPR,
+		protocol.MethodStaffMonitors, protocol.MethodStaffMonitorSave, protocol.MethodStaffMonitorDelete, protocol.MethodStaffMonitorPresets,
+		protocol.MethodStaffHandoffs, protocol.MethodStaffHandoffSave, protocol.MethodStaffHandoffDelete:
+		return s.handleStaff(ctx, req)
+
+	case protocol.MethodModelList, protocol.MethodSessionModel, protocol.MethodSessionSetModel:
+		return s.handleModels(ctx, req)
+
+	case protocol.MethodEditsList, protocol.MethodEditsAccept, protocol.MethodEditsRevert,
+		protocol.MethodSessionCompact, protocol.MethodSessionSetEffort, protocol.MethodWorkspaceRules:
+		return s.handleReview(ctx, req)
 
 	default:
 		return nil, fmt.Errorf("unknown method %s", req.Method)
 	}
 }
 
+// placeholderTitle is a title nobody chose: what a new chat starts with in
+// any client language.
+func placeholderTitle(t string) bool {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "", "untitled", "new chat", "new session", "chat", "yeni sohbet", "yeni oturum", "sohbet":
+		return true
+	}
+	return false
+}
+
+// sessionTitleFrom turns a first message into a short topic line: context
+// blocks, code and links are dropped, then the first sentence is cut at a
+// word boundary. Empty when nothing readable is left (e.g. a slash command).
 func sessionTitleFrom(content string) string {
-	line := strings.TrimSpace(strings.ReplaceAll(content, "\n", " "))
-	if line == "" {
-		return "New chat"
+	s := content
+	for _, tag := range []string{"codebase-context", "context"} {
+		for {
+			i := strings.Index(s, "<"+tag+">")
+			j := strings.Index(s, "</"+tag+">")
+			if i < 0 || j < i {
+				break
+			}
+			s = s[:i] + s[j+len(tag)+3:]
+		}
 	}
-	fields := strings.Fields(line)
-	if len(fields) > 8 {
-		fields = fields[:8]
+	for {
+		i := strings.Index(s, "```")
+		if i < 0 {
+			break
+		}
+		j := strings.Index(s[i+3:], "```")
+		if j < 0 {
+			s = s[:i]
+			break
+		}
+		s = s[:i] + " " + s[i+3+j+3:]
 	}
-	title := strings.Join(fields, " ")
-	runes := []rune(title)
+	var words []string
+	for _, w := range strings.Fields(s) {
+		if strings.HasPrefix(w, "http://") || strings.HasPrefix(w, "https://") || strings.HasPrefix(w, "@") || (len(words) == 0 && strings.HasPrefix(w, "/")) {
+			continue
+		}
+		words = append(words, w)
+	}
+	line := strings.Join(words, " ")
+	if i := strings.IndexAny(line, ".?!\n"); i > 12 {
+		line = line[:i]
+	}
+	line = strings.Trim(line, " .,;:-–—")
+	runes := []rune(line)
 	if len(runes) > 48 {
-		title = string(runes[:45]) + "…"
+		cut := string(runes[:48])
+		if k := strings.LastIndex(cut, " "); k > 24 {
+			cut = cut[:k]
+		}
+		line = strings.TrimRight(cut, " .,;:-") + "…"
 	}
-	return title
+	if line == "" {
+		return ""
+	}
+	r := []rune(line)
+	return strings.ToUpper(string(r[0])) + string(r[1:])
+}
+
+// fallbackDir is where a chat with no folder of its own works: the daemon's
+// directory — unless that is the disk root, which is what a desktop app
+// started from the Finder or the Dock gets. Nobody means to hand an agent
+// the whole disk; the home folder is where a shell would start instead.
+func fallbackDir() string {
+	cwd, err := os.Getwd()
+	if err == nil && cwd != "" && filepath.Dir(cwd) != cwd {
+		return cwd
+	}
+	if home, herr := os.UserHomeDir(); herr == nil && home != "" {
+		return home
+	}
+	return cwd
 }

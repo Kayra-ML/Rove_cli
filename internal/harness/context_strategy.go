@@ -11,9 +11,9 @@ import (
 // what information the agent will receive. This is a value type; call
 // Build() to resolve it for a specific workspace.
 type ContextEngine struct {
-	Profile     GoalExecProfile
+	Profile      GoalExecProfile
 	WorkspaceDir string
-	RepoFiles   []string // populated by RepositoryMap scan
+	RepoFiles    []string // populated by RepositoryMap scan
 }
 
 // RunContext is the resolved context spec passed to the agent runtime.
@@ -27,11 +27,16 @@ type RunContext struct {
 	// RepoMap is the structural outline of the repository (RepositoryMap).
 	RepoMap string
 
-	// FreshHandoff indicates the agent should start a new context window.
+	// FreshHandoff: the iteration sees only its own chat turn and a hand-off
+	// of earlier progress (see IterationConfig.HistoryTurns).
 	FreshHandoff bool
 
-	// MemoryLoad indicates all available memory should be loaded.
-	MemoryLoad bool
+	// CarryProgress: the hand-off lists every earlier iteration's progress
+	// line, not only the last one.
+	CarryProgress bool
+
+	// MaxListed caps how many files the prompt lists, from TokenBudget.
+	MaxListed int
 
 	// Explanation describes why these context choices were made.
 	Explanation string
@@ -45,19 +50,26 @@ func (ce *ContextEngine) Build(ctx context.Context, taskKeywords []string) RunCo
 
 	var reasons []string
 
+	// what the prompt may spend on paths: about a fiftieth of the budget,
+	// at ~10 tokens a path
+	rc.MaxListed = clampInt(rc.TokenBudget/500, 10, 80)
+
 	if ce.Profile.Has(SelectiveContext) {
 		rc.SelectiveFiles = selectRelevantFiles(ce.RepoFiles, taskKeywords)
+		if len(rc.SelectiveFiles) > rc.MaxListed {
+			rc.SelectiveFiles = rc.SelectiveFiles[:rc.MaxListed]
+		}
 		reasons = append(reasons, "selective: "+itoa(len(rc.SelectiveFiles))+" files filtered by task keywords")
 	}
 
 	if ce.Profile.Has(RepositoryMap) {
-		rc.RepoMap = buildRepoMap(ce.RepoFiles)
+		rc.RepoMap = buildRepoMap(ce.RepoFiles, rc.MaxListed)
 		reasons = append(reasons, "repo map: "+itoa(len(ce.RepoFiles))+" files indexed")
 	}
 
 	if ce.Profile.Has(FreshContext) {
 		rc.FreshHandoff = true
-		reasons = append(reasons, "fresh context: new model context window will be started")
+		reasons = append(reasons, "fresh context: this iteration's turn plus a hand-off")
 	}
 
 	if ce.Profile.Has(LargeContext) {
@@ -66,8 +78,8 @@ func (ce *ContextEngine) Build(ctx context.Context, taskKeywords []string) RunCo
 	}
 
 	if ce.Profile.Has(MemoryHeavy) {
-		rc.MemoryLoad = true
-		reasons = append(reasons, "memory heavy: all available agent memory loaded")
+		rc.CarryProgress = true
+		reasons = append(reasons, "memory heavy: every iteration's progress carried forward")
 	}
 
 	rc.Explanation = strings.Join(reasons, "; ")
@@ -75,10 +87,11 @@ func (ce *ContextEngine) Build(ctx context.Context, taskKeywords []string) RunCo
 }
 
 // selectRelevantFiles filters files by keyword relevance.
-// Files whose path contains a keyword score higher.
+// Files whose path contains a keyword score higher. Nothing matching means
+// nothing is listed: a list of unrelated files only costs tokens.
 func selectRelevantFiles(files []string, keywords []string) []string {
 	if len(keywords) == 0 {
-		return files
+		return nil
 	}
 	type scored struct {
 		path  string
@@ -102,20 +115,12 @@ func selectRelevantFiles(files []string, keywords []string) []string {
 	for _, s := range ss {
 		out = append(out, s.path)
 	}
-	// if nothing matched, fall back to all files up to a cap
-	if len(out) == 0 {
-		cap := 50
-		if len(files) < cap {
-			cap = len(files)
-		}
-		return files[:cap]
-	}
 	return out
 }
 
 // buildRepoMap produces a compact structural outline of the repository.
-// It groups files by top-level directory with file counts.
-func buildRepoMap(files []string) string {
+// It groups files by top-level directory with file counts, at most max lines.
+func buildRepoMap(files []string, max int) string {
 	dirs := map[string]int{}
 	for _, f := range files {
 		parts := strings.SplitN(filepath.ToSlash(f), "/", 3)
@@ -127,7 +132,10 @@ func buildRepoMap(files []string) string {
 		}
 		dirs[key]++
 	}
-	type kv struct{ k string; v int }
+	type kv struct {
+		k string
+		v int
+	}
 	var pairs []kv
 	for k, v := range dirs {
 		pairs = append(pairs, kv{k, v})
@@ -137,7 +145,11 @@ func buildRepoMap(files []string) string {
 	})
 	var sb strings.Builder
 	sb.WriteString("Repository map:\n")
-	for _, p := range pairs {
+	for i, p := range pairs {
+		if max > 0 && i >= max {
+			sb.WriteString("  … " + itoa(len(pairs)-i) + " more folders\n")
+			break
+		}
 		sb.WriteString("  " + p.k + " (" + itoa(p.v) + " files)\n")
 	}
 	return sb.String()

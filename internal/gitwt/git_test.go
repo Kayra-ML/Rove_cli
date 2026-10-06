@@ -31,11 +31,11 @@ func TestWorktreeIsolation(t *testing.T) {
 	if err := m.Commit(repo, "init"); err != nil {
 		t.Fatal(err)
 	}
-	wt, err := m.CreateWorktree(repo, m.WorktreePath(repo, "c1"), m.BranchForCard("c1"))
+	wt, err := m.CreateWorktree(repo, filepath.Join(repo, ".aether", "worktrees", "w1"), "aether/w1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wt.Branch != "aether/c1" {
+	if wt.Branch != "aether/w1" {
 		t.Fatalf("branch %s", wt.Branch)
 	}
 	if err := os.WriteFile(filepath.Join(wt.Path, "agent.txt"), []byte("from agent"), 0o644); err != nil {

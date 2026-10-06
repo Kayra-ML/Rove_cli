@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -48,12 +48,34 @@ func FromEnv() (*Client, error) {
 	}, nil
 }
 
+// NewHTTP is a client for a daemon reached over HTTP only — one on a
+// server, through an SSH tunnel.
+func NewHTTP(base, token string) *Client {
+	return &Client{HTTP: base, Token: token, client: &http.Client{Timeout: 5 * time.Minute}}
+}
+
+// RemoteError is an error the daemon returned for a request it handled.
+// Anything else from Call is a transport failure (daemon down, socket gone).
+type RemoteError struct{ Msg string }
+
+func (e *RemoteError) Error() string { return e.Msg }
+
+// IsRemote reports whether err came from the daemon rather than the wire.
+func IsRemote(err error) bool {
+	var re *RemoteError
+	return errors.As(err, &re)
+}
+
 func (c *Client) Call(method string, params any) (json.RawMessage, error) {
 	raw, _ := json.Marshal(params)
 	req := protocol.Request{Method: method, Params: raw, Token: c.Token}
 	if c.IPC != "" {
-		if res, err := c.callIPC(req); err == nil {
-			return res, nil
+		res, err := c.callIPC(req)
+		// Fall back to HTTP only when the socket failed. A request the
+		// daemon already handled must not run a second time (a sent
+		// message would be sent twice).
+		if err == nil || IsRemote(err) {
+			return res, err
 		}
 	}
 	return c.callHTTP(req)
@@ -77,7 +99,7 @@ func (c *Client) callHTTP(req protocol.Request) (json.RawMessage, error) {
 		return nil, err
 	}
 	if !out.OK {
-		return nil, fmt.Errorf("%s", out.Error)
+		return nil, &RemoteError{Msg: out.Error}
 	}
 	return out.Result, nil
 }
@@ -96,7 +118,7 @@ func (c *Client) callIPC(req protocol.Request) (json.RawMessage, error) {
 		return nil, err
 	}
 	if !out.OK {
-		return nil, fmt.Errorf("%s", out.Error)
+		return nil, &RemoteError{Msg: out.Error}
 	}
 	return out.Result, nil
 }

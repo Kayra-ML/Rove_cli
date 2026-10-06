@@ -22,4 +22,4 @@ An agent claim of completion while gates or criteria fail is forced to `CONTINUE
 
 ## Consequences
 
-Goals can loop without a human in the seat. Max iterations prevent runaway spend. Kanban cards in goal mode move to Review on DONE and Blocked on BLOCKED.
+Goals can loop without a human in the seat. Max iterations prevent runaway spend.

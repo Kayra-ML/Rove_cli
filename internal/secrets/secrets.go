@@ -10,8 +10,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
+	"testing"
 )
 
 var ErrNotFound = errors.New("secrets: not found")
@@ -36,6 +36,9 @@ type fileKeyring struct{ path string }
 
 func (f fileKeyring) Get(_, _ string) ([]byte, error) {
 	b, err := os.ReadFile(f.path)
+	if os.IsNotExist(err) {
+		return nil, ErrNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -54,9 +57,14 @@ func Open(dataDir string, kr Keyring) (*Store, error) {
 		return nil, err
 	}
 	if kr == nil {
-		kr = fileKeyring{path: filepath.Join(dataDir, "secrets", "master.key")}
+		kr = defaultKeyring(dataDir)
 	}
 	master, err := loadOrCreateMaster(kr)
+	if mk, ok := kr.(movingKeyring); ok && err != nil && !hasBlobs(filepath.Join(dataDir, "secrets")) {
+		// nothing saved yet, so nothing to lose: start with a key in the file
+		kr = mk.file
+		master, err = loadOrCreateMaster(kr)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +84,11 @@ func loadOrCreateMaster(kr Keyring) ([]byte, error) {
 		b, err := kr.Get(service, "master")
 		if err == nil && len(b) == 32 {
 			return b, nil
+		}
+		// a key store that could not be read (a locked keychain) is not an
+		// empty one: making a new key would lose every saved secret
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return nil, err
 		}
 	}
 	key := make([]byte, 32)
@@ -133,29 +146,57 @@ func (s *Store) Get(id string) (string, error) {
 	return string(pt), nil
 }
 
-func (s *Store) Delete(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.mem, id)
-	err := os.Remove(s.blobPath(id))
-	if os.IsNotExist(err) {
-		return ErrNotFound
-	}
-	return err
-}
-
 func (s *Store) blobPath(id string) string {
 	safe := base64.RawURLEncoding.EncodeToString([]byte(id))
 	return filepath.Join(s.dir, safe+".enc")
 }
 
-func PlatformHint() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return "macOS Keychain (fallback: 0600 master.key)"
-	case "windows":
-		return "Windows Credential Manager (fallback: 0600 master.key)"
-	default:
-		return "libsecret / 0600 master.key"
+// defaultKeyring is the system key store (the macOS keychain) holding the
+// key, with the old 0600 file moved into it on first use. Tests, and
+// ROVECODE_KEYRING=file, keep the file.
+func defaultKeyring(dataDir string) Keyring {
+	file := fileKeyring{path: filepath.Join(dataDir, "secrets", "master.key")}
+	if testing.Testing() || os.Getenv("ROVECODE_KEYRING") == "file" {
+		return file
 	}
+	sys := osKeyring(dataDir)
+	if sys == nil {
+		return file
+	}
+	return movingKeyring{sys: sys, file: file}
+}
+
+// movingKeyring keeps the key in the system store. A key still in the file
+// (from before, or written there when the store could not be) is the one in
+// use: it is moved into the store, and the file removed only once the store
+// gives the same key back.
+type movingKeyring struct {
+	sys  Keyring
+	file fileKeyring
+}
+
+func (m movingKeyring) Get(service, user string) ([]byte, error) {
+	b, err := m.file.Get(service, user)
+	if err == nil {
+		if m.sys.Set(service, user, b) == nil {
+			_ = os.Remove(m.file.path)
+		}
+		return b, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	return m.sys.Get(service, user)
+}
+
+func (m movingKeyring) Set(service, user string, secret []byte) error {
+	if err := m.sys.Set(service, user, secret); err != nil {
+		return m.file.Set(service, user, secret)
+	}
+	return nil
+}
+
+func hasBlobs(dir string) bool {
+	m, _ := filepath.Glob(filepath.Join(dir, "*.enc"))
+	return len(m) > 0
 }

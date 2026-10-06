@@ -5,7 +5,6 @@ export function Icon({
   name:
     | "workspace"
     | "chat"
-    | "kanban"
     | "terminal"
     | "agents"
     | "skills"
@@ -20,17 +19,54 @@ export function Icon({
     | "sliders"
     | "palette"
     | "lightning"
-    | "trash";
+    | "trash"
+    | "graph"
+    | "cable"
+    | "mic"
+    | "sun"
+    | "moon"
+    | "folder"
+    | "home"
+    | "check"
+    | "copy"
+    | "modes"
+    | "teamwork"
+    | "branch"
+    | "merge";
   size?: number;
 }) {
   const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (name) {
+    case "modes":
+      return <svg {...p}><rect x="4" y="4" width="7" height="7" rx="1.8"/><rect x="13" y="4" width="7" height="7" rx="1.8"/><rect x="4" y="13" width="7" height="7" rx="1.8"/><circle cx="16.5" cy="16.5" r="3.6"/></svg>;
+    case "teamwork":
+      return <svg {...p}><circle cx="12" cy="6" r="2.4"/><circle cx="6" cy="17" r="2.4"/><circle cx="18" cy="17" r="2.4"/><path d="M10.8 8.2 7.2 14.8M13.2 8.2l3.6 6.6M8.5 17h7"/></svg>;
+    case "branch":
+      return <svg {...p}><circle cx="6" cy="5.5" r="2"/><circle cx="6" cy="18.5" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7.5v9M18 10c0 4-6 3.5-11 7"/></svg>;
+    case "merge":
+      return <svg {...p}><circle cx="6" cy="5.5" r="2"/><circle cx="6" cy="18.5" r="2"/><circle cx="18" cy="16" r="2"/><path d="M6 7.5v9M6.8 7.4C8.5 12 12 15.5 16 16"/></svg>;
+    case "home":
+      return <svg {...p}><path d="M4 11.2 12 4.5l8 6.7"/><path d="M6.2 9.6V19a1 1 0 0 0 1 1h3.3v-5.2h3V20h3.3a1 1 0 0 0 1-1V9.6"/></svg>;
+    case "check":
+      return <svg {...p}><path d="M5 12.5l4.2 4.2L19 7"/></svg>;
+    case "copy":
+      return <svg {...p}><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5.5 15H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v.5"/></svg>;
+    case "folder":
+      return <svg {...p}><path d="M3.5 6.5a1.5 1.5 0 0 1 1.5-1.5h4l2 2h8a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5v-11Z"/></svg>;
+    case "mic":
+      return <svg {...p}><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21M9 21h6"/></svg>;
+    case "sun":
+      return <svg {...p}><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>;
+    case "moon":
+      return <svg {...p}><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5Z"/></svg>;
+    case "cable":
+      return <svg {...p}><rect x="2.5" y="4" width="7" height="5" rx="1.5"/><rect x="14.5" y="15" width="7" height="5" rx="1.5"/><path d="M9.5 6.5c5 0 0 11 5 11"/></svg>;
+    case "graph":
+      return <svg {...p}><circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="17" r="2.6"/><circle cx="19" cy="15" r="1.6"/><path d="M8 7.6l8-1.2M7.2 8.9l3.6 6.2M17 7.9l-3.8 7M14.5 16.4l3-1"/></svg>;
     case "workspace":
       return <svg {...p}><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M4 10h16"/></svg>;
     case "chat":
       return <svg {...p}><path d="M5 6h14a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 19 16H10l-5 3.5V7.5A1.5 1.5 0 0 1 6.5 6Z"/></svg>;
-    case "kanban":
-      return <svg {...p}><rect x="4" y="5" width="4.5" height="14" rx="1"/><rect x="10" y="5" width="4.5" height="9" rx="1"/><rect x="16" y="5" width="4" height="11" rx="1"/></svg>;
     case "terminal":
       return <svg {...p}><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7 10l3 2-3 2M12 14h5"/></svg>;
     case "agents":

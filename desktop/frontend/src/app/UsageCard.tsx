@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { pollWhileVisible } from "~/lib/poll";
 import { rpc } from "~/lib/rpc";
 import { usePrefs } from "~/hooks/usePrefs";
 import { t } from "~/lib/i18n";
@@ -8,6 +9,8 @@ export type UsageSnapshot = {
   promptTokens: number;
   completionTokens: number;
   calls: number;
+  // prompt tokens the provider served from its cache (cheaper)
+  cachedTokens?: number;
   activeAgents: number;
   days: number;
   uptime?: string;
@@ -39,9 +42,7 @@ export function UsageCard() {
   }, []);
 
   useEffect(() => {
-    void load();
-    const id = window.setInterval(() => void load(), 8000);
-    return () => window.clearInterval(id);
+    return pollWhileVisible(() => void load(), 8000);
   }, [load]);
 
   const tokens = u?.totalTokens ?? 0;
@@ -56,7 +57,10 @@ export function UsageCard() {
       <div className="usage-grid">
         <div className="usage-cell">
           <div className="usage-val">{compact(tokens)}</div>
-          <div className="usage-key">{t("tokens", lang)}</div>
+          <div className="usage-key">
+            {t("tokens", lang)}
+            {(u?.cachedTokens ?? 0) > 0 && <span className="usage-cached"> · {compact(u?.cachedTokens ?? 0)} {t("cachedTokens", lang)}</span>}
+          </div>
         </div>
         <div className="usage-cell">
           <div className="usage-val">{agents}</div>

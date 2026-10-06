@@ -1,89 +1,103 @@
-import { Fragment, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
+import { highlight } from "./highlight";
+import { t } from "./i18n";
 
-function inline(text: string): ReactNode[] {
-  const out: ReactNode[] = [];
-  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)]+\))/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let k = 0;
-  while ((m = re.exec(text))) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    const tok = m[0];
-    if (tok.startsWith("`")) {
-      out.push(<code key={k++} className="md-code">{tok.slice(1, -1)}</code>);
-    } else if (tok.startsWith("**")) {
-      out.push(<strong key={k++}>{tok.slice(2, -2)}</strong>);
-    } else if (tok.startsWith("*")) {
-      out.push(<em key={k++}>{tok.slice(1, -1)}</em>);
-    } else {
-      const link = tok.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-      if (link) {
-        out.push(
-          <a key={k++} href={link[2]} target="_blank" rel="noreferrer" className="md-a">
-            {link[1]}
-          </a>,
-        );
-      }
-    }
-    last = m.index + tok.length;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return out;
+// The answers an agent writes are ordinary Markdown: numbered steps, nested
+// lists, quotes, rules, task boxes, tables. Parsing that by hand is a long
+// tail of rules that are easy to get subtly wrong — emphasis alone turned
+// "4 * 5 * 6" into italics — so the parsing is remark's (CommonMark + GFM)
+// and what stays ours is the part that belongs to this app: a fenced block
+// is a foldable card with the theme's own colours, never a wall of text.
+
+// OPEN is how many lines a block may have and still be shown as it stands:
+// a couple of lines are already small, while a script is folded away until
+// it is asked for.
+const OPEN = 6;
+
+// CodeBlock is one fenced block: a header line saying what it is, and the
+// code itself — coloured, and folded away when it is long.
+function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  const lines = code.split("\n");
+  const [open, setOpen] = useState(lines.length <= OPEN);
+  const label = lang.trim() || t("code");
+  return (
+    <div className={`md-code-block${open ? " open" : ""}`}>
+      <button type="button" className="code-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span className="code-caret" aria-hidden>›</span>
+        <span className="code-lang">{label}</span>
+        <span className="code-lines">{lines.length} {t("codeLines")}</span>
+      </button>
+      {open && (
+        <pre className="md-pre" data-lang={lang || undefined}>
+          <code>
+            {highlight(code, lang).map((tok, n) =>
+              tok.kind === "plain" ? tok.text : <span key={n} className={`tok-${tok.kind}`}>{tok.text}</span>,
+            )}
+          </code>
+        </pre>
+      )}
+    </div>
+  );
 }
 
-export function Markdown({ text }: { text: string }) {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  const blocks: ReactNode[] = [];
-  let i = 0;
-  let k = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (line.startsWith("```")) {
-      const lang = line.slice(3).trim();
-      const body: string[] = [];
-      i += 1;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        body.push(lines[i]);
-        i += 1;
-      }
-      i += 1;
-      blocks.push(
-        <pre key={k++} className="md-pre" data-lang={lang || undefined}>
-          <code>{body.join("\n")}</code>
-        </pre>,
-      );
-      continue;
+// text pulls the plain source back out of a fenced block's children, which
+// remark hands over as nested nodes rather than as a string.
+function text(node: ReactNode): string {
+  if (node == null || node === false || node === true) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(text).join("");
+  const el = node as { props?: { children?: ReactNode } };
+  return el.props ? text(el.props.children) : "";
+}
+
+const components: Components = {
+  // A fenced block becomes our card; an inline span stays a plain <code>.
+  // remark marks the difference by putting the block inside a <pre>, so the
+  // pre is dropped here and rebuilt by CodeBlock.
+  pre: ({ children }) => <>{children}</>,
+  code: ({ className, children, ...rest }) => {
+    const fence = /language-(\S+)/.exec(className ?? "");
+    const body = text(children);
+    // remark keeps a fenced block's trailing newline; a card should not
+    // show it as an empty last line
+    if (fence || body.includes("\n")) {
+      return <CodeBlock lang={fence ? fence[1] : ""} code={body.replace(/\n$/, "")} />;
     }
-    if (/^#{1,6}\s/.test(line)) {
-      const level = line.match(/^#+/)![0].length;
-      const Tag = (`h${Math.min(level, 4)}` as unknown) as "h1";
-      blocks.push(<Tag key={k++} className="md-h">{inline(line.replace(/^#{1,6}\s/, ""))}</Tag>);
-      i += 1;
-      continue;
-    }
-    if (/^[-*]\s+/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^[-*]\s+/, ""));
-        i += 1;
-      }
-      blocks.push(
-        <ul key={k++} className="md-ul">
-          {items.map((it, n) => <li key={n}>{inline(it)}</li>)}
-        </ul>,
-      );
-      continue;
-    }
-    if (line.trim() === "") {
-      i += 1;
-      continue;
-    }
-    const para: string[] = [];
-    while (i < lines.length && lines[i].trim() !== "" && !lines[i].startsWith("```") && !/^#{1,6}\s/.test(lines[i]) && !/^[-*]\s+/.test(lines[i])) {
-      para.push(lines[i]);
-      i += 1;
-    }
-    blocks.push(<p key={k++} className="md-p">{inline(para.join(" "))}</p>);
-  }
-  return <div className="md">{blocks.map((b, n) => <Fragment key={n}>{b}</Fragment>)}</div>;
+    return <code className="md-code" {...rest}>{children}</code>;
+  },
+  p: ({ children }) => <p className="md-p">{children}</p>,
+  h1: ({ children }) => <h1 className="md-h md-h1">{children}</h1>,
+  h2: ({ children }) => <h2 className="md-h md-h2">{children}</h2>,
+  h3: ({ children }) => <h3 className="md-h md-h3">{children}</h3>,
+  h4: ({ children }) => <h4 className="md-h md-h4">{children}</h4>,
+  h5: ({ children }) => <h5 className="md-h md-h5">{children}</h5>,
+  h6: ({ children }) => <h6 className="md-h md-h6">{children}</h6>,
+  ul: ({ children, className }) => <ul className={`md-ul${className?.includes("contains-task-list") ? " md-tasks" : ""}`}>{children}</ul>,
+  ol: ({ children, start }) => <ol className="md-ol" start={start ?? undefined}>{children}</ol>,
+  li: ({ children }) => <li>{children}</li>,
+  // a task box is read, never set: the answer already happened
+  input: ({ checked, type }) => (type === "checkbox" ? <input className="md-task" type="checkbox" checked={!!checked} readOnly /> : null),
+  blockquote: ({ children }) => <blockquote className="md-quote">{children}</blockquote>,
+  hr: () => <hr className="md-hr" />,
+  table: ({ children }) => <div className="md-table-wrap"><table className="md-table">{children}</table></div>,
+  a: ({ href, children }) => (
+    <a className="md-a" href={href} target="_blank" rel="noreferrer noopener">{children}</a>
+  ),
+  // an image in an answer is usually a broken remote URL; show what it was
+  img: ({ alt, src }) => <code className="md-code">{alt || String(src ?? "")}</code>,
+};
+
+export function Markdown({ text: source }: { text: string }) {
+  return (
+    <div className="md">
+      {/* breaks: in a chat a line the agent broke is a line the reader sees
+          broken, which plain CommonMark would join into one paragraph */}
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
+        {source}
+      </ReactMarkdown>
+    </div>
+  );
 }

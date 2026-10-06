@@ -9,7 +9,6 @@ import (
 	"github.com/Kayra-ML/rove/internal/agent"
 	"github.com/Kayra-ML/rove/internal/eventbus"
 	"github.com/Kayra-ML/rove/internal/judge"
-	"github.com/Kayra-ML/rove/internal/kanban"
 	"github.com/Kayra-ML/rove/internal/provider"
 	"github.com/Kayra-ML/rove/internal/session"
 	"github.com/Kayra-ML/rove/internal/store"
@@ -25,7 +24,6 @@ func TestDriveStopsOnPassingGates(t *testing.T) {
 	defer s.Close()
 	bus := eventbus.New()
 	defer bus.Close()
-	k := kanban.New(s, bus)
 	r := provider.NewRouter()
 	r.Register("fake", &provider.Fake{Responses: []string{"implemented hello"}})
 	sess := session.New(s, bus)
@@ -36,7 +34,7 @@ func TestDriveStopsOnPassingGates(t *testing.T) {
 		t.Fatal(err)
 	}
 	j := judge.New(nil)
-	e := New(s, bus, k, ag, j, nil, nil)
+	e := New(s, bus, ag, j, nil)
 	g, err := e.Create(ctx, types.Goal{
 		Title:       "hello",
 		AgentID:     a.ID,
@@ -61,13 +59,6 @@ func TestDriveStopsOnPassingGates(t *testing.T) {
 	if g.Status != types.GoalDone {
 		t.Fatalf("status %s verdict %+v", g.Status, g.LastVerdict)
 	}
-	card, err := k.Get(ctx, g.CardID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if card.Column != types.ColReview {
-		t.Fatalf("card column %s", card.Column)
-	}
 }
 
 func TestDriveBlocksAtMaxIterations(t *testing.T) {
@@ -77,7 +68,7 @@ func TestDriveBlocksAtMaxIterations(t *testing.T) {
 	}
 	defer s.Close()
 	j := judge.New(nil)
-	e := New(s, nil, nil, nil, j, nil, nil)
+	e := New(s, nil, nil, j, nil)
 	ctx := context.Background()
 	g, err := e.Create(ctx, types.Goal{
 		Title: "never",

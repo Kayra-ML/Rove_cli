@@ -11,15 +11,18 @@ package harness
 type ContextTactic uint32
 
 const (
-	// SelectiveContext: filter workspace to only relevant files/rules.
+	// SelectiveContext: list only the files that match the task's keywords.
 	SelectiveContext ContextTactic = 1 << iota
-	// LargeContext: allocate a higher token budget for context window.
+	// LargeContext: a larger budget for the files, map and chat history an
+	// iteration carries.
 	LargeContext
-	// FreshContext: start a new model context via checkpoint+handoff.
+	// FreshContext: each iteration sees only its own turn of the chat plus a
+	// short hand-off of earlier progress, instead of the growing history.
 	FreshContext
 	// RepositoryMap: include a structural map of the repository.
 	RepositoryMap
-	// MemoryHeavy: load all available agent memory into context.
+	// MemoryHeavy: carry every earlier iteration's progress line forward
+	// (not just the last one). Saved memory notes are always included.
 	MemoryHeavy
 )
 
@@ -35,11 +38,13 @@ const (
 	PlanExecute
 	// GoalLoop: loop until judge says DONE, ignoring agent completion claims.
 	GoalLoop
-	// Parallel: run independent subtasks as parallel sub-agents.
+	// Parallel and Delegated are retired: parallel agents are Teamwork's
+	// job. They stay so stored profiles still decode; nothing sets or reads
+	// them.
 	Parallel
-	// Delegated: hand subtasks to separate specialized agents.
 	Delegated
-	// Sandboxed: run in an isolated worktree/workspace.
+	// Sandboxed: snapshot the workspace before the goal starts (undo with
+	// /restore) and keep the agent inside it.
 	Sandboxed
 )
 
@@ -51,7 +56,7 @@ type ToolTactic uint32
 const (
 	// SequentialTools: one tool call at a time.
 	SequentialTools ToolTactic = 1 << iota
-	// ParallelTools: safe independent tool calls run concurrently.
+	// ParallelTools: a turn's read-only tool calls run concurrently.
 	ParallelTools
 	// RestrictedTools: only the explicitly allowed tool set is exposed.
 	RestrictedTools
@@ -67,15 +72,17 @@ const (
 type VerifyTactic uint32
 
 const (
-	// FastVerify: minimal verification (syntax check only).
+	// FastVerify: quality gates run only once the reviewer finds the
+	// criteria met, not every iteration.
 	FastVerify VerifyTactic = 1 << iota
-	// TestVerify: run task-specific test/build quality gates.
+	// TestVerify: run the contract's test/build quality gates every iteration.
 	TestVerify
-	// IndependentReview: spawn a separate fresh-context reviewer agent.
+	// IndependentReview: the reviewer (a fresh, tool-less model call) reads
+	// the diff itself, not only the agent's summary and the diff stat.
 	IndependentReview
 	// DoubleReview: two independent reviewers must agree.
 	DoubleReview
-	// ArtifactVerify: require diff/log/screenshot/build artifact evidence.
+	// ArtifactVerify: done needs evidence in the workspace — changed files.
 	ArtifactVerify
 )
 
@@ -85,17 +92,22 @@ const (
 type RecoveryTactic uint32
 
 const (
-	// Retry: retry the last action on transient failure.
+	// Retry: run a failed agent run again (bounded by the plan's retries).
 	Retry RecoveryTactic = 1 << iota
-	// Replan: rebuild the execution plan after a failure.
+	// Replan: after a failure or when stuck, the next iteration is told to
+	// drop its approach and plan again.
 	Replan
-	// ModelFallback: switch to a fallback model from a checkpoint.
+	// ModelFallback: after a failure or when stuck, switch to another
+	// configured model.
 	ModelFallback
-	// ContextReset: start a fresh model context + handoff state.
+	// ContextReset: after a failure, the next iteration starts from a fresh
+	// context plus the hand-off.
 	ContextReset
-	// CheckpointResume: resume from the last persisted execution checkpoint.
+	// CheckpointResume: a restarted or resumed goal picks up from its last
+	// persisted checkpoint (iteration and progress).
 	CheckpointResume
-	// Escalation: block and wait for human intervention.
+	// Escalation: when still stuck after the harness has adapted, block and
+	// ask the user.
 	Escalation
 )
 
@@ -111,7 +123,7 @@ const (
 
 // ── Composed profile ─────────────────────────────────────────────────────────
 
-// GoalExecProfile is the central execution policy for a Goal or Kanban Card.
+// GoalExecProfile is the central execution policy for a Goal.
 // Each field is a bitmask so multiple tactics can be active simultaneously.
 // E.g. Context = SelectiveContext | RepositoryMap is valid.
 type GoalExecProfile struct {
@@ -126,7 +138,6 @@ type GoalExecProfile struct {
 
 	// Runtime limits derived from tactics.
 	ContextBudgetTokens int `json:"contextBudgetTokens,omitempty"`
-	MaxParallelAgents   int `json:"maxParallelAgents,omitempty"`
 	MaxToolConcurrency  int `json:"maxToolConcurrency,omitempty"`
 
 	// Auto-composed metadata (set by HarnessComposer).
@@ -200,12 +211,6 @@ func (p GoalExecProfile) execExplain() string {
 	}
 	if p.HasExec(GoalLoop) {
 		parts = append(parts, "Loop")
-	}
-	if p.HasExec(Parallel) {
-		parts = append(parts, "Parallel")
-	}
-	if p.HasExec(Delegated) {
-		parts = append(parts, "Delegated")
 	}
 	if p.HasExec(Sandboxed) {
 		parts = append(parts, "Sandboxed")
@@ -324,17 +329,6 @@ func (p GoalExecProfile) EffectiveToolConcurrency() int {
 	return 1
 }
 
-// EffectiveMaxParallelAgents returns max parallel sub-agents.
-func (p GoalExecProfile) EffectiveMaxParallelAgents() int {
-	if p.MaxParallelAgents > 0 {
-		return p.MaxParallelAgents
-	}
-	if p.HasExec(Parallel) {
-		return 4
-	}
-	return 1
-}
-
 // ── Predefined profiles ───────────────────────────────────────────────────────
 
 // SmallBugProfile is for small, well-scoped bug fixes.
@@ -347,31 +341,5 @@ func SmallBugProfile() GoalExecProfile {
 		Verify:         TestVerify,
 		Recovery:       Retry,
 		ComposerReason: "small bug: selective context, direct execution, test verify, retry on failure",
-	}
-}
-
-// LargeRefactorProfile is for large, cross-cutting refactors.
-func LargeRefactorProfile() GoalExecProfile {
-	return GoalExecProfile{
-		Mode:           ProfileAuto,
-		Context:        RepositoryMap | SelectiveContext,
-		Execution:      PlanExecute | Parallel | Sandboxed,
-		Tools:          CodingTools | ParallelTools,
-		Verify:         TestVerify | IndependentReview,
-		Recovery:       CheckpointResume | Replan,
-		ComposerReason: "large refactor: repo map, plan+execute, parallel worktrees, independent review, checkpoint resume",
-	}
-}
-
-// HardLongTaskProfile is for complex, multi-day autonomous tasks.
-func HardLongTaskProfile() GoalExecProfile {
-	return GoalExecProfile{
-		Mode:           ProfileAuto,
-		Context:        SelectiveContext | RepositoryMap | FreshContext,
-		Execution:      GoalLoop | Delegated | Parallel,
-		Tools:          CodingTools | ParallelTools,
-		Verify:         IndependentReview | ArtifactVerify,
-		Recovery:       Replan | ContextReset | ModelFallback | CheckpointResume,
-		ComposerReason: "hard/long task: multi-context loop, delegated parallel agents, full verification, full recovery stack",
 	}
 }

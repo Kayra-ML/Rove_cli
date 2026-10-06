@@ -20,3 +20,11 @@ desktop/frontend/.next/
 # OS
 .DS_Store
 Thumbs.db
+
+# Binaries and build outputs
+*.dmg
+desktop/build/
+desktop/desktop
+desktop/remotebin/
+desktop/frontend/package.json.md5
+

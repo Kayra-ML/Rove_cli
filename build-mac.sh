@@ -91,6 +91,30 @@ if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
 fi
 ok "App bundle: $APP_PATH"
 
+# ── 6b. Daemon, uygulamanın içinde ───────────────────────────────────────────
+# Uygulama kendi daemon'unu Contents/MacOS/rovecode'dan başlatır; güncelleme
+# için ayrıca sudo ile /usr/local/bin'e kurulum gerekmez. Eski bir daemon
+# çalışıyorsa uygulama açılışta onu yenisiyle değiştirir.
+VERSION="v$(sed -n 's/.*"productVersion": *"\([^"]*\)".*/\1/p' "$SCRIPT_DIR/desktop/wails.json")"
+log "Daemon derleniyor ($VERSION, universal)..."
+cd "$SCRIPT_DIR"
+DAEMON_TMP="$(mktemp -d "${TMPDIR:-/tmp}/rovecode-daemon.XXXXXX")"
+for arch in arm64 amd64; do
+  CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -ldflags="-s -w -X main.version=$VERSION" \
+    -o "$DAEMON_TMP/rovecode-$arch" ./cmd/sextant
+done
+lipo -create -output "$APP_PATH/Contents/MacOS/rovecode" "$DAEMON_TMP/rovecode-arm64" "$DAEMON_TMP/rovecode-amd64"
+rm -rf "$DAEMON_TMP"
+ok "daemon: $APP_PATH/Contents/MacOS/rovecode"
+
+# ── 6c. İmza ──────────────────────────────────────────────────────────────────
+# ROVECODE_SIGN_ID verilirse Developer ID ile imzalanır (hardened runtime);
+# ROVECODE_NOTARY_PROFILE de verilirse Apple'a notarize ettirilir:
+#   xcrun notarytool store-credentials rovecode --apple-id … --team-id …
+#   ROVECODE_SIGN_ID="Developer ID Application: … (TEAMID)" ROVECODE_NOTARY_PROFILE=rovecode ./build-mac.sh
+# Verilmezse ad-hoc imzalanır: bu Mac'te çalışır, başka Mac'te Gatekeeper sorar.
+"$SCRIPT_DIR/scripts/sign-mac.sh" "$APP_PATH"
+
 # ── 7. DMG oluştur ────────────────────────────────────────────────────────────
 log "DMG oluşturuluyor..."
 DMG_PATH="$SCRIPT_DIR/RoveCode.dmg"
@@ -114,6 +138,13 @@ hdiutil create \
 
 rm -rf "$TMP_DMG"
 
+if [ -n "${ROVECODE_SIGN_ID:-}" ]; then
+  codesign --force --sign "$ROVECODE_SIGN_ID" --timestamp "$DMG_PATH"
+  if [ -n "${ROVECODE_NOTARY_PROFILE:-}" ]; then
+    xcrun notarytool submit "$DMG_PATH" --keychain-profile "$ROVECODE_NOTARY_PROFILE" --wait
+    xcrun stapler staple "$DMG_PATH"
+  fi
+fi
 ok "DMG hazır: $DMG_PATH"
 echo ""
 echo -e "${GREEN}══════════════════════════════════════${NC}"

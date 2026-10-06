@@ -13,15 +13,13 @@ import (
 )
 
 type Runtime struct {
-	store  *store.Store
+	store    *store.Store
 	skillDir string
 }
 
 func New(s *store.Store, dir string) *Runtime {
 	return &Runtime{store: s, skillDir: dir}
 }
-
-func (r *Runtime) Dir() string { return r.skillDir }
 
 func LoadManifest(path string) (types.SkillManifest, error) {
 	b, err := os.ReadFile(path)
@@ -46,28 +44,6 @@ func LoadManifest(path string) (types.SkillManifest, error) {
 		return m, fmt.Errorf("skill %s missing version", m.Name)
 	}
 	return m, nil
-}
-
-func (r *Runtime) InstallFromDir(ctxDir string) (types.InstalledSkill, error) {
-	manPath := findManifest(ctxDir)
-	if manPath == "" {
-		return types.InstalledSkill{}, fmt.Errorf("no skill.yaml/json in %s", ctxDir)
-	}
-	m, err := LoadManifest(manPath)
-	if err != nil {
-		return types.InstalledSkill{}, err
-	}
-	dest := filepath.Join(r.skillDir, m.Name)
-	if err := copyTree(ctxDir, dest); err != nil {
-		return types.InstalledSkill{}, err
-	}
-	sk := types.InstalledSkill{Manifest: m, Path: dest, Source: "local", Enabled: true}
-	if r.store != nil {
-		if err := r.store.UpsertSkill(background(), sk); err != nil {
-			return sk, err
-		}
-	}
-	return sk, nil
 }
 
 func (r *Runtime) List() ([]types.InstalledSkill, error) {
@@ -144,18 +120,6 @@ func (r *Runtime) Uninstall(name string) error {
 	return os.RemoveAll(sk.Path)
 }
 
-func (r *Runtime) SlashCommands() []types.SlashCommand {
-	all, _ := r.List()
-	var out []types.SlashCommand
-	for _, s := range all {
-		if !s.Enabled {
-			continue
-		}
-		out = append(out, s.Manifest.Commands...)
-	}
-	return out
-}
-
 func findManifest(dir string) string {
 	for _, n := range []string{"skill.yaml", "skill.yml", "SKILL.md", "skill.json", "manifest.yaml"} {
 		p := filepath.Join(dir, n)
@@ -169,10 +133,36 @@ func findManifest(dir string) string {
 	return ""
 }
 
-func copyTree(src, dest string) error {
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		return err
+// Install copies a prepared skill directory into the machine's skill folder
+// and records it, so a catalog entry becomes something the agent can reach.
+// Installing over an existing copy replaces it, which is how an upgrade
+// works: the name is the identity, the version rides along in the manifest.
+func (r *Runtime) Install(srcDir string) (types.InstalledSkill, error) {
+	mp := findManifest(srcDir)
+	if mp == "" {
+		return types.InstalledSkill{}, fmt.Errorf("no skill manifest in %s", srcDir)
 	}
+	m, err := LoadManifest(mp)
+	if err != nil {
+		return types.InstalledSkill{}, err
+	}
+	dest := filepath.Join(r.skillDir, m.Name)
+	if err := os.RemoveAll(dest); err != nil {
+		return types.InstalledSkill{}, err
+	}
+	if err := copyTree(srcDir, dest); err != nil {
+		return types.InstalledSkill{}, err
+	}
+	sk := types.InstalledSkill{Manifest: m, Path: dest, Source: "market", Enabled: true}
+	if r.store != nil {
+		if err := r.store.UpsertSkill(background(), sk); err != nil {
+			return sk, err
+		}
+	}
+	return sk, nil
+}
+
+func copyTree(src, dest string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -187,6 +177,9 @@ func copyTree(src, dest string) error {
 		}
 		b, err := os.ReadFile(path)
 		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
 		return os.WriteFile(target, b, info.Mode())

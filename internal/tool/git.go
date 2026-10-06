@@ -32,8 +32,10 @@ func (t GitStatusTool) Call(_ context.Context, tc Context, _ json.RawMessage) (R
 
 type GitCommitTool struct{ Git *gitwt.Manager }
 
-func (GitCommitTool) Name() string        { return "git_commit" }
-func (GitCommitTool) Description() string { return "Stage all and commit in the workspace (or worktree)." }
+func (GitCommitTool) Name() string { return "git_commit" }
+func (GitCommitTool) Description() string {
+	return "Stage all and commit in the workspace (or worktree)."
+}
 func (GitCommitTool) Parameters() json.RawMessage {
 	return schema(`{"message":{"type":"string"}}`)
 }

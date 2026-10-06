@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ type ChatMessage struct {
 	Content    string           `json:"content"`
 	ToolCalls  []types.ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
+	// Images are data: URLs sent with a user message to vision models.
+	Images []string `json:"images,omitempty"`
 }
 
 type ToolSpec struct {
@@ -35,6 +38,18 @@ type ChatRequest struct {
 	Messages []ChatMessage `json:"messages"`
 	Tools    []ToolSpec    `json:"tools,omitempty"`
 	Stream   bool          `json:"stream"`
+	// ReasoningEffort ("low", "medium", "high"; empty = the model's own
+	// default) asks reasoning models to think less or more.
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
+	// CacheKey groups requests that share a prefix (a chat), so providers
+	// that cache prompts can reuse it.
+	CacheKey string `json:"cacheKey,omitempty"`
+	// Workdir is the chat's folder: an agent system on this computer works
+	// there.
+	Workdir string `json:"workdir,omitempty"`
+	// Ask marks a question to answer in text (a plan, a split, a summary),
+	// not work: an agent system on this computer gets it read-only.
+	Ask bool `json:"ask,omitempty"`
 }
 
 type ChatDelta struct {
@@ -47,6 +62,9 @@ type ChatDelta struct {
 type Usage struct {
 	PromptTokens     int `json:"promptTokens"`
 	CompletionTokens int `json:"completionTokens"`
+	// CachedTokens is the part of PromptTokens served from the provider's
+	// prompt cache (cheaper).
+	CachedTokens int `json:"cachedTokens,omitempty"`
 }
 
 type MeterSnapshot struct {
@@ -54,12 +72,14 @@ type MeterSnapshot struct {
 	CompletionTokens int64 `json:"completionTokens"`
 	TotalTokens      int64 `json:"totalTokens"`
 	Calls            int64 `json:"calls"`
+	CachedTokens     int64 `json:"cachedTokens"`
 }
 
 type Meter struct {
 	mu               sync.Mutex
 	promptTokens     int64
 	completionTokens int64
+	cachedTokens     int64
 	calls            int64
 	persist          func(MeterSnapshot)
 }
@@ -77,10 +97,11 @@ func (m *Meter) Add(u Usage) {
 	m.mu.Lock()
 	m.promptTokens += int64(u.PromptTokens)
 	m.completionTokens += int64(u.CompletionTokens)
+	m.cachedTokens += int64(u.CachedTokens)
 	m.calls++
 	snap := MeterSnapshot{
 		PromptTokens: m.promptTokens, CompletionTokens: m.completionTokens,
-		TotalTokens: m.promptTokens + m.completionTokens, Calls: m.calls,
+		TotalTokens: m.promptTokens + m.completionTokens, Calls: m.calls, CachedTokens: m.cachedTokens,
 	}
 	persist := m.persist
 	m.mu.Unlock()
@@ -94,7 +115,7 @@ func (m *Meter) Snapshot() MeterSnapshot {
 	defer m.mu.Unlock()
 	return MeterSnapshot{
 		PromptTokens: m.promptTokens, CompletionTokens: m.completionTokens,
-		TotalTokens: m.promptTokens + m.completionTokens, Calls: m.calls,
+		TotalTokens: m.promptTokens + m.completionTokens, Calls: m.calls, CachedTokens: m.cachedTokens,
 	}
 }
 
@@ -285,11 +306,24 @@ func (o *OpenAICompat) Complete(ctx context.Context, req ChatRequest) (<-chan Ch
 			return nil, err
 		}
 	}
+	host := hostOf(o.BaseURL)
 	body := map[string]any{
 		"model":          req.Model,
-		"messages":       toOpenAIMessages(req.Messages),
+		"messages":       toOpenAIMessages(req.Messages, host == "openrouter.ai"),
 		"stream":         true,
 		"stream_options": map[string]any{"include_usage": true},
+	}
+	// extras only where the endpoint is known to take them: an unknown
+	// field can make a strict OpenAI-compatible server reject the request
+	if req.ReasoningEffort != "" {
+		if host == "openrouter.ai" {
+			body["reasoning"] = map[string]any{"effort": req.ReasoningEffort}
+		} else {
+			body["reasoning_effort"] = req.ReasoningEffort
+		}
+	}
+	if req.CacheKey != "" && host == "api.openai.com" {
+		body["prompt_cache_key"] = req.CacheKey
 	}
 	if len(req.Tools) > 0 {
 		tools := make([]map[string]any, 0, len(req.Tools))
@@ -328,6 +362,24 @@ func (o *OpenAICompat) Complete(ctx context.Context, req ChatRequest) (<-chan Ch
 	go func() {
 		defer close(ch)
 		defer resp.Body.Close()
+		// Tool calls arrive in pieces: the first piece of each (by index)
+		// has its id and name, the rest only more of its arguments. They are
+		// put together here and sent once, whole, when the stream ends.
+		var calls []*types.ToolCall
+		byIndex := map[int]*types.ToolCall{}
+		flushCalls := func() []types.ToolCall {
+			out := make([]types.ToolCall, 0, len(calls))
+			for _, c := range calls {
+				if c.Name != "" {
+					if c.ID == "" {
+						c.ID = fmt.Sprintf("call_%d", len(out))
+					}
+					out = append(out, *c)
+				}
+			}
+			calls, byIndex = nil, map[int]*types.ToolCall{}
+			return out
+		}
 		dec := json.NewDecoder(resp.Body)
 		// SSE: read line-oriented
 		buf := make([]byte, 0, 4096)
@@ -348,7 +400,7 @@ func (o *OpenAICompat) Complete(ctx context.Context, req ChatRequest) (<-chan Ch
 					}
 					payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 					if payload == "[DONE]" {
-						ch <- ChatDelta{Done: true}
+						ch <- ChatDelta{Done: true, ToolCalls: flushCalls()}
 						return
 					}
 					var chunk sseChunk
@@ -356,10 +408,17 @@ func (o *OpenAICompat) Complete(ctx context.Context, req ChatRequest) (<-chan Ch
 						continue
 					}
 					if chunk.Usage != nil && (chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0) {
+						u := &Usage{PromptTokens: chunk.Usage.PromptTokens, CompletionTokens: chunk.Usage.CompletionTokens}
+						if d := chunk.Usage.PromptDetails; d != nil {
+							u.CachedTokens = d.CachedTokens
+						}
+						if chunk.Usage.CacheRead > u.CachedTokens {
+							u.CachedTokens = chunk.Usage.CacheRead
+						}
 						select {
 						case <-ctx.Done():
 							return
-						case ch <- ChatDelta{Done: len(chunk.Choices) == 0, Usage: &Usage{PromptTokens: chunk.Usage.PromptTokens, CompletionTokens: chunk.Usage.CompletionTokens}}:
+						case ch <- ChatDelta{Usage: u}:
 						}
 						if len(chunk.Choices) == 0 {
 							continue
@@ -370,8 +429,29 @@ func (o *OpenAICompat) Complete(ctx context.Context, req ChatRequest) (<-chan Ch
 					}
 					d := chunk.Choices[0].Delta
 					ev := ChatDelta{Content: d.Content}
-					for _, tc := range d.ToolCalls {
-						ev.ToolCalls = append(ev.ToolCalls, types.ToolCall{ID: tc.ID, Name: tc.Function.Name, ArgsJSON: tc.Function.Arguments})
+					for n, tc := range d.ToolCalls {
+						idx := n
+						if tc.Index != nil {
+							idx = *tc.Index
+						}
+						c, ok := byIndex[idx]
+						// a piece with a new id starts a new call even
+						// without an index (some servers send none)
+						if !ok || (tc.ID != "" && c.ID != "" && tc.ID != c.ID) {
+							c = &types.ToolCall{}
+							byIndex[idx] = c
+							calls = append(calls, c)
+						}
+						if tc.ID != "" {
+							c.ID = tc.ID
+						}
+						if tc.Function.Name != "" {
+							c.Name = tc.Function.Name
+						}
+						c.ArgsJSON += tc.Function.Arguments
+					}
+					if ev.Content == "" {
+						continue
 					}
 					select {
 					case <-ctx.Done():
@@ -381,13 +461,9 @@ func (o *OpenAICompat) Complete(ctx context.Context, req ChatRequest) (<-chan Ch
 				}
 			}
 			if err != nil {
-				if !errors.Is(err, io.EOF) {
-					select {
-					case ch <- ChatDelta{Content: "", Done: true}:
-					default:
-					}
-				} else {
-					ch <- ChatDelta{Done: true}
+				select {
+				case ch <- ChatDelta{Done: true, ToolCalls: flushCalls()}:
+				case <-ctx.Done():
 				}
 				return
 			}
@@ -402,6 +478,7 @@ type sseChunk struct {
 		Delta struct {
 			Content   string `json:"content"`
 			ToolCalls []struct {
+				Index    *int   `json:"index"`
 				ID       string `json:"id"`
 				Function struct {
 					Name      string `json:"name"`
@@ -413,17 +490,59 @@ type sseChunk struct {
 	Usage *struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
+		PromptDetails    *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
+		CacheRead int `json:"cache_read_input_tokens"`
 	} `json:"usage"`
 }
 
-func toOpenAIMessages(msgs []ChatMessage) []map[string]any {
+// toOpenAIMessages writes the chat for an OpenAI-compatible endpoint. An
+// assistant turn keeps its tool_calls (the tool results that follow refer
+// to them); a user turn with images becomes text + image parts. markCache
+// marks the system prompt as cacheable (OpenRouter passes it to Anthropic
+// and Gemini models, which cache only what is marked).
+func toOpenAIMessages(msgs []ChatMessage, markCache bool) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
 	for _, m := range msgs {
 		item := map[string]any{"role": m.Role, "content": m.Content}
+		switch {
+		case m.Role == "system" && markCache && m.Content != "":
+			item["content"] = []map[string]any{{"type": "text", "text": m.Content, "cache_control": map[string]any{"type": "ephemeral"}}}
+		case len(m.Images) > 0:
+			parts := []map[string]any{{"type": "text", "text": m.Content}}
+			for _, img := range m.Images {
+				parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": img}})
+			}
+			item["content"] = parts
+		}
+		if len(m.ToolCalls) > 0 {
+			calls := make([]map[string]any, 0, len(m.ToolCalls))
+			for _, tc := range m.ToolCalls {
+				args := tc.ArgsJSON
+				if args == "" {
+					args = "{}"
+				}
+				calls = append(calls, map[string]any{"id": tc.ID, "type": "function", "function": map[string]any{"name": tc.Name, "arguments": args}})
+			}
+			item["tool_calls"] = calls
+			if m.Content == "" {
+				item["content"] = nil
+			}
+		}
 		if m.ToolCallID != "" {
 			item["tool_call_id"] = m.ToolCallID
 		}
 		out = append(out, item)
 	}
 	return out
+}
+
+// hostOf is the base URL's host ("api.openai.com"), lower-cased.
+func hostOf(base string) string {
+	u, err := url.Parse(strings.TrimSpace(base))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
 }

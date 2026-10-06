@@ -19,6 +19,8 @@ func NormalizeProviderKind(k ProviderKind) ProviderKind {
 		return ProviderAnthropic
 	case "fake":
 		return ProviderFake
+	case "agent-cli", "agent", "cli":
+		return ProviderAgentCLI
 	default:
 		if k == "" {
 			return ProviderOpenAICompat
@@ -55,8 +57,41 @@ type AgentProfile struct {
 	IsDefault    bool      `json:"isDefault"` // if true, auto-applied to new sessions
 	IsLeader     bool      `json:"isLeader"`  // only one leader per workspace
 	Color        string    `json:"color,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	// CharacterID picks an expert from the built-in catalog; SystemPrompt
+	// then adds to it instead of replacing it. Features lists the enabled
+	// feature keys; nil means "the character's defaults".
+	CharacterID string   `json:"characterId,omitempty"`
+	Features    []string `json:"features,omitempty"`
+	// Mark is the agent's logo in the office: "shape:face" (agentmark in
+	// the app draws it), tinted with Color. Empty: one picked from its id.
+	Mark string `json:"mark,omitempty"`
+	// PromptMode says what SystemPrompt is: "" adds it to the character's
+	// prompt (or is the whole prompt when there is no character), "own"
+	// replaces the character's prompt with it.
+	PromptMode string `json:"promptMode,omitempty"`
+	// Integrations are the MCP servers (by name) this agent may use; nil
+	// lets it use every one, as before integrations were picked per agent.
+	Integrations []string `json:"integrations"`
+	// Title is the agent's job title in the Agent space ("Senior backend
+	// developer"): how colleagues and the user know what to hand it.
+	Title     string    `json:"title,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// PromptOwn is AgentProfile.PromptMode for a prompt of the user's own.
+const PromptOwn = "own"
+
+// SessionPersona is who the agent is inside one session: a catalog
+// character or a saved profile, plus feature overrides. It never touches
+// the shared agent row, so other sessions are unaffected.
+type SessionPersona struct {
+	SessionID   ID        `json:"sessionId"`
+	CharacterID string    `json:"characterId,omitempty"`
+	ProfileID   ID        `json:"profileId,omitempty"`
+	Features    []string  `json:"features,omitempty"` // nil = defaults
+	ExtraPrompt string    `json:"extraPrompt,omitempty"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 type AgentStatus string
@@ -94,21 +129,135 @@ const (
 )
 
 type Session struct {
-	ID          ID        `json:"id"`
-	Title       string    `json:"title"`
-	AgentID     ID        `json:"agentId"`
-	WorkspaceID ID        `json:"workspaceId"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          ID     `json:"id"`
+	Title       string `json:"title"`
+	AgentID     ID     `json:"agentId"`
+	WorkspaceID ID     `json:"workspaceId"`
+	// ParentID is set on a team member's channel: a child session that holds
+	// one member's own conversation inside a team (orchestra) session. Child
+	// sessions stay out of the session list.
+	ParentID ID `json:"parentId,omitempty"`
+	// Space is the part of the app a chat belongs to: SpaceOffice (talking
+	// to an agent) or SpaceChat (session work). Empty on chats made before
+	// spaces existed; clients place those themselves.
+	Space     string    `json:"space,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+const (
+	SpaceOffice = "office"
+	SpaceChat   = "chat"
+	// SpaceTeamwork marks the channels a Teamwork plan opens for its agents
+	// (child sessions of the chat); they are not Orchestra team members.
+	SpaceTeamwork = "teamwork"
+	// SpaceTerminal marks a terminal of a multi-terminal session: a pane of
+	// the terminal mode, a child of the session it belongs to.
+	SpaceTerminal = "terminal"
+	// SpaceWorker marks a subagent the lead spun up for one task: a child of
+	// the chat with no persona and no standing on the team. It is kept so
+	// its transcript can be read, and shown only in the subagent roster.
+	SpaceWorker = "worker"
+	// SpaceMap marks a chat's context-map assistant: a child of the chat you
+	// ask about its context from the map. It is never a team member or pane
+	// and is shown only on the map.
+	SpaceMap = "map"
+	// SpaceOrchestra marks a member of one Teamwork part's orchestra: a
+	// child of the part's conductor channel (itself a SpaceTeamwork child of
+	// the chat). The conductor hands it work with team_delegate.
+	SpaceOrchestra = "orchestra"
+)
+
 // SessionLink connects two sessions so they can relay messages to each other.
+// It is a cable on the context map.
 type SessionLink struct {
-	ID        ID        `json:"id"`
-	SessionA  ID        `json:"sessionA"`
-	SessionB  ID        `json:"sessionB"`
-	Label     string    `json:"label,omitempty"`
+	ID        ID     `json:"id"`
+	SessionA  ID     `json:"sessionA"`
+	SessionB  ID     `json:"sessionB"`
+	Label     string `json:"label,omitempty"`
+	Direction string `json:"direction"` // LinkBoth, LinkAToB or LinkBToA
+	Auto      bool   `json:"auto"`      // relay file changes without being asked
+	Mode      string `json:"mode"`      // LinkSmart or LinkAlways
+	// Color is the cable's colour on the map, one of CableColors; empty is
+	// the default.
+	Color     string    `json:"color,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+// CableColors are the colours a map cable may take: the categorical
+// palette's hues, each drawn in the step that suits the theme.
+var CableColors = []string{"blue", "orange", "aqua", "yellow", "magenta", "green", "violet", "red"}
+
+// ValidCableColor reports whether c is a cable colour (empty included).
+func ValidCableColor(c string) bool {
+	if c == "" {
+		return true
+	}
+	for _, x := range CableColors {
+		if x == c {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	LinkBoth = "both"
+	LinkAToB = "a2b"
+	LinkBToA = "b2a"
+
+	// LinkSmart runs the far agent only when a zero-token check finds a
+	// counterpart of the change in its workspace. LinkAlways always runs it.
+	LinkSmart  = "smart"
+	LinkAlways = "always"
+)
+
+// Flows reports whether changes in session from travel to session to.
+func (l SessionLink) Flows(from, to ID) bool {
+	switch {
+	case l.SessionA == from && l.SessionB == to:
+		return l.Direction != LinkBToA
+	case l.SessionB == from && l.SessionA == to:
+		return l.Direction != LinkAToB
+	}
+	return false
+}
+
+// Other returns the session on the far end of the link from id.
+func (l SessionLink) Other(id ID) ID {
+	if l.SessionA == id {
+		return l.SessionB
+	}
+	return l.SessionA
+}
+
+// MapNode is a session placed on the context map canvas.
+type MapNode struct {
+	SessionID ID        `json:"sessionId"`
+	X         float64   `json:"x"`
+	Y         float64   `json:"y"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// Relay is one message carried along a link: an automatic change notice or
+// a manual message. Status: queued, running, done, skipped, failed.
+type Relay struct {
+	ID      ID       `json:"id"`
+	LinkID  ID       `json:"linkId,omitempty"`
+	From    ID       `json:"from"`
+	To      ID       `json:"to"`
+	Kind    string   `json:"kind"` // auto | manual | agent
+	Status  string   `json:"status"`
+	Hop     int      `json:"hop"`
+	Files   []string `json:"files,omitempty"`
+	Summary string   `json:"summary,omitempty"`
+	Error   string   `json:"error,omitempty"`
+	// Matches are the target files the pre-check found; Tokens estimates the
+	// notice size (0 when the relay was skipped without calling a model).
+	Matches   []string  `json:"matches,omitempty"`
+	Tokens    int       `json:"tokens"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type ToolCall struct {
@@ -122,7 +271,15 @@ type ToolResult struct {
 	Name       string `json:"name"`
 	Content    string `json:"content"`
 	IsError    bool   `json:"isError"`
+	// Kind tells a refusal from a failure: ToolRefused when a rule or the
+	// session's tool policy would not let the call run, "" otherwise. The
+	// model treats both as failed; the app shows them differently, since a
+	// refusal is a decision and not something that went wrong.
+	Kind string `json:"kind,omitempty"`
 }
+
+// ToolRefused is the Kind of a tool result the app must not show as an error.
+const ToolRefused = "refused"
 
 type Message struct {
 	ID         ID          `json:"id"`
@@ -131,38 +288,31 @@ type Message struct {
 	Content    string      `json:"content"`
 	ToolCalls  []ToolCall  `json:"toolCalls,omitempty"`
 	ToolResult *ToolResult `json:"toolResult,omitempty"`
-	CreatedAt  time.Time   `json:"createdAt"`
+	// Images are data: URLs attached to a user message.
+	Images []string `json:"images,omitempty"`
+	// Kind marks special messages: "summary" is a compaction summary that
+	// stands for every message before it.
+	Kind      string    `json:"kind,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
-// --- Kanban ---
+// MessageSummary is the Kind of a compaction summary.
+const MessageSummary = "summary"
 
-type KanbanColumn string
-
-const (
-	ColBacklog KanbanColumn = "backlog"
-	ColReady   KanbanColumn = "ready"
-	ColRunning KanbanColumn = "running"
-	ColReview  KanbanColumn = "review"
-	ColDone    KanbanColumn = "done"
-	ColBlocked KanbanColumn = "blocked"
-)
-
-func ValidColumn(c KanbanColumn) bool {
-	switch c {
-	case ColBacklog, ColReady, ColRunning, ColReview, ColDone, ColBlocked:
-		return true
-	}
-	return false
+// TurnEdit is a file a run changed, with what it held before, so the change
+// can be reviewed and taken back.
+type TurnEdit struct {
+	RunID     ID        `json:"runId"`
+	SessionID ID        `json:"sessionId"`
+	Workspace string    `json:"workspace"`
+	Path      string    `json:"path"` // relative to Workspace
+	Before    string    `json:"-"`
+	Existed   bool      `json:"existed"`
+	Status    string    `json:"status"` // pending | accepted | reverted
+	CreatedAt time.Time `json:"createdAt"`
 }
 
-type ReviewState string
-
-const (
-	ReviewNone     ReviewState = ""
-	ReviewPending  ReviewState = "pending"
-	ReviewApproved ReviewState = "approved"
-	ReviewRejected ReviewState = "rejected"
-)
+// --- Goals / Judge ---
 
 type Artifact struct {
 	Name  string `json:"name"`
@@ -172,43 +322,6 @@ type Artifact struct {
 	Kind  string `json:"kind"`
 }
 
-type LogEntry struct {
-	At      time.Time `json:"at"`
-	Level   string    `json:"level"`
-	Message string    `json:"message"`
-	Source  string    `json:"source,omitempty"`
-}
-
-type Card struct {
-	ID                 ID           `json:"id"`
-	Title              string       `json:"title"`
-	Description        string       `json:"description"`
-	Column             KanbanColumn `json:"column"`
-	AssigneeAgentID    ID           `json:"assigneeAgentId,omitempty"`
-	Profile            string       `json:"profile"`
-	Model              string       `json:"model"`
-	Dependencies       []ID         `json:"dependencies,omitempty"`
-	AcceptanceCriteria []string     `json:"acceptanceCriteria,omitempty"`
-	GoalID             ID           `json:"goalId,omitempty"`
-	GoalMode           bool         `json:"goalMode"`
-	Status             string       `json:"status"`
-	TerminalID         ID           `json:"terminalId,omitempty"`
-	GitBranch          string       `json:"gitBranch,omitempty"`
-	WorktreePath       string       `json:"worktreePath,omitempty"`
-	ReviewState        ReviewState  `json:"reviewState,omitempty"`
-	Artifacts          []Artifact   `json:"artifacts,omitempty"`
-	Logs               []LogEntry   `json:"logs,omitempty"`
-	WorkspaceID        ID           `json:"workspaceId"`
-	SessionID          ID           `json:"sessionId,omitempty"`
-	LeaseHolder        string       `json:"leaseHolder,omitempty"`
-	// HarnessProfileJSON stores the JSON-serialised harness.HarnessProfile.
-	HarnessProfileJSON string    `json:"-"`
-	CreatedAt          time.Time `json:"createdAt"`
-	UpdatedAt          time.Time `json:"updatedAt"`
-}
-
-// --- Goals / Judge ---
-
 type GoalStatus string
 
 const (
@@ -217,6 +330,9 @@ const (
 	GoalDone    GoalStatus = "done"
 	GoalBlocked GoalStatus = "blocked"
 	GoalFailed  GoalStatus = "failed"
+	// GoalCanceled: stopped by the user (/stop or goal.cancel); it can be
+	// resumed from its checkpoint.
+	GoalCanceled GoalStatus = "canceled"
 )
 
 type QualityGateKind string
@@ -275,11 +391,12 @@ type Goal struct {
 	Description        string             `json:"description"`
 	CompletionContract CompletionContract `json:"completionContract"`
 	Status             GoalStatus         `json:"status"`
-	CardID             ID                 `json:"cardId"`
 	WorkspaceID        ID                 `json:"workspaceId"`
 	AgentID            ID                 `json:"agentId"`
-	Iteration          int                `json:"iteration"`
-	LastVerdict        *JudgeVerdict      `json:"lastVerdict,omitempty"`
+	// SessionID is the chat the goal works in (empty for a goal of its own).
+	SessionID   ID            `json:"sessionId,omitempty"`
+	Iteration   int           `json:"iteration"`
+	LastVerdict *JudgeVerdict `json:"lastVerdict,omitempty"`
 	// Harness execution policy — persisted with the goal.
 	HarnessProfileJSON string    `json:"-"` // raw JSON for store
 	CreatedAt          time.Time `json:"createdAt"`
@@ -408,6 +525,10 @@ const (
 	ProviderOpenAICompat ProviderKind = "openai-compat"
 	ProviderAnthropic    ProviderKind = "anthropic"
 	ProviderFake         ProviderKind = "fake"
+	// ProviderAgentCLI is an agent system on this computer (Claude Code,
+	// Codex, Antigravity, Hermes) signed in with the user's own account; its
+	// base URL is agent://<system>?access=edits|full.
+	ProviderAgentCLI ProviderKind = "agent-cli"
 )
 
 type Provider struct {
@@ -439,7 +560,6 @@ type Workspace struct {
 type Worktree struct {
 	Path     string `json:"path"`
 	Branch   string `json:"branch"`
-	CardID   ID     `json:"cardId,omitempty"`
 	Head     string `json:"head,omitempty"`
 	Detached bool   `json:"detached"`
 }
@@ -462,6 +582,9 @@ const (
 	MemWorkspace MemoryScope = "workspace"
 	MemSession   MemoryScope = "session"
 	MemAgent     MemoryScope = "agent"
+	// MemProfile is an Office agent's own notes (scope id: its profile),
+	// carried into every conversation it has.
+	MemProfile MemoryScope = "profile"
 )
 
 type MemoryEntry struct {
@@ -513,16 +636,17 @@ const (
 	EventToolStart      EventType = "tool.start"
 	EventToolResult     EventType = "tool.result"
 	EventSessionUpdated EventType = "session.updated"
-	EventCardUpdated    EventType = "card.updated"
-	EventCardMoved      EventType = "card.moved"
 	EventGoalUpdated    EventType = "goal.updated"
 	EventJudgeVerdict   EventType = "judge.verdict"
 	EventTerminalData   EventType = "terminal.data"
 	EventTerminalExit   EventType = "terminal.exit"
 	EventAgentStatus    EventType = "agent.status"
+	EventRunDone        EventType = "run.done"
 	EventLog            EventType = "log"
 	EventError          EventType = "error"
 	EventAutomation     EventType = "automation.tick"
+	EventRelay          EventType = "ctxmap.relay"
+	EventMapChanged     EventType = "ctxmap.changed"
 )
 
 type Event struct {
@@ -530,15 +654,6 @@ type Event struct {
 	Topic     string         `json:"topic,omitempty"`
 	Payload   map[string]any `json:"payload,omitempty"`
 	Timestamp time.Time      `json:"timestamp"`
-}
-
-// --- File coordination ---
-
-type FileLease struct {
-	Path      string    `json:"path"`
-	Holder    string    `json:"holder"`
-	CardID    ID        `json:"cardId,omitempty"`
-	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // --- Webhook ---
@@ -556,6 +671,37 @@ type WebhookRule struct {
 
 // --- MCP servers ---
 
+var mcpFold = map[rune]rune{'ş': 's', 'ç': 'c', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ü': 'u', 'â': 'a', 'î': 'i', 'û': 'u', 'é': 'e', 'è': 'e', 'á': 'a', 'à': 'a', 'ñ': 'n', 'ä': 'a', 'ß': 's'}
+
+// MCPSlug is a server's name as it appears in its tools' names
+// ("mcp_<slug>_<tool>"): lower case letters, digits and dashes, so the
+// names pass every provider's tool-name rules and one server's prefix is
+// never another's.
+func MCPSlug(name string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		if a, ok := mcpFold[r]; ok {
+			r = a
+		}
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			dash = false
+		} else if !dash && b.Len() > 0 {
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	out := strings.TrimRight(b.String(), "-")
+	if len(out) > 24 {
+		out = strings.TrimRight(out[:24], "-")
+	}
+	if out == "" {
+		out = "server"
+	}
+	return out
+}
+
 type MCPServerConfig struct {
 	ID      string            `json:"id"`
 	Name    string            `json:"name"`
@@ -569,8 +715,6 @@ type MCPServerConfig struct {
 type AutomationKind string
 
 const (
-	AutoSweepReady AutomationKind = "sweep_ready"
-	AutoAssignIdle AutomationKind = "assign_idle"
 	AutoDriveGoals AutomationKind = "drive_goals"
 )
 

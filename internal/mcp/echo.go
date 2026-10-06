@@ -10,6 +10,9 @@ import (
 func runEcho() {
 	in := bufio.NewScanner(os.Stdin)
 	w := bufio.NewWriter(os.Stdout)
+	// a server may write notifications before any answer
+	w.WriteString(`{"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info"}}` + "\n")
+	w.Flush()
 	for in.Scan() {
 		var req map[string]any
 		if err := json.Unmarshal(in.Bytes(), &req); err != nil {
@@ -22,7 +25,7 @@ func runEcho() {
 		case "initialize":
 			result = map[string]any{"protocolVersion": "2024-11-05", "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]any{"name": "echo"}}
 		case "tools/list":
-			result = map[string]any{"tools": []map[string]any{{"name": "ping", "description": "pong", "inputSchema": map[string]any{"type": "object"}}}}
+			result = map[string]any{"tools": []map[string]any{{"name": "ping.now", "description": "pong", "inputSchema": map[string]any{"type": "object"}}}}
 		case "tools/call":
 			result = map[string]any{"content": []map[string]any{{"type": "text", "text": "pong"}}}
 		default:

@@ -16,10 +16,6 @@ vi.mock("../lib/rpc", () => {
       { id: "m1", sessionId: "s1", role: "user", content: "hello", createdAt: "" },
       { id: "m2", sessionId: "s1", role: "assistant", content: "world", createdAt: "" },
     ],
-    "card.list": [
-      { id: "c1", title: "task", column: "ready", status: "", description: "",
-        profile: "", model: "", goalMode: false, workspaceId: "" },
-    ],
     "goal.list": [],
     "workspace.list": [],
     "skill.list": [],
@@ -36,7 +32,7 @@ vi.mock("../lib/rpc", () => {
 });
 
 import { renderHook, waitFor } from "@testing-library/react";
-import { useAgents, useHistory, useCards } from "../hooks/useApi";
+import { useAgents, useHistory } from "../hooks/useApi";
 
 describe("useAgents", () => {
   it("loads agents", async () => {
@@ -56,13 +52,5 @@ describe("useHistory", () => {
   it("returns empty for null session", async () => {
     const { result } = renderHook(() => useHistory(null));
     await waitFor(() => expect(result.current.messages).toHaveLength(0));
-  });
-});
-
-describe("useCards", () => {
-  it("loads cards", async () => {
-    const { result } = renderHook(() => useCards());
-    await waitFor(() => expect(result.current.cards).toHaveLength(1));
-    expect(result.current.cards[0].column).toBe("ready");
   });
 });

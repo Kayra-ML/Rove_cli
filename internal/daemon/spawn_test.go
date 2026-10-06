@@ -54,3 +54,21 @@ func TestCommandFallsBackToAetherd(t *testing.T) {
 		}
 	}
 }
+
+// A GUI app launched from Finder has a bare PATH; the daemon installed in
+// /usr/local/bin must still be found.
+func TestCommandFindsWellKnownInstallWithBarePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix install paths")
+	}
+	bin := t.TempDir()
+	want := writeStub(t, bin, "rovecode")
+	t.Setenv("PATH", t.TempDir())
+	prev := wellKnownDirs
+	wellKnownDirs = func() []string { return []string{filepath.Join(t.TempDir(), "missing"), bin} }
+	defer func() { wellKnownDirs = prev }()
+	cmd := Command()
+	if cmd == nil || cmd.Path != want || len(cmd.Args) != 2 || cmd.Args[1] != "daemon" {
+		t.Fatalf("got %+v", cmd)
+	}
+}

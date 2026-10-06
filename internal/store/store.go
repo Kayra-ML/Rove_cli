@@ -79,39 +79,12 @@ func (s *Store) migrate() error {
 			FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at)`,
-		`CREATE TABLE IF NOT EXISTS cards (
-			id TEXT PRIMARY KEY,
-			title TEXT NOT NULL,
-			description TEXT NOT NULL DEFAULT '',
-			column_name TEXT NOT NULL,
-			assignee_agent_id TEXT NOT NULL DEFAULT '',
-			profile TEXT NOT NULL DEFAULT '',
-			model TEXT NOT NULL DEFAULT '',
-			dependencies TEXT NOT NULL DEFAULT '[]',
-			acceptance TEXT NOT NULL DEFAULT '[]',
-			goal_id TEXT NOT NULL DEFAULT '',
-			goal_mode INTEGER NOT NULL DEFAULT 0,
-			status TEXT NOT NULL DEFAULT '',
-			terminal_id TEXT NOT NULL DEFAULT '',
-			git_branch TEXT NOT NULL DEFAULT '',
-			worktree_path TEXT NOT NULL DEFAULT '',
-			review_state TEXT NOT NULL DEFAULT '',
-			artifacts TEXT NOT NULL DEFAULT '[]',
-			logs TEXT NOT NULL DEFAULT '[]',
-			workspace_id TEXT NOT NULL DEFAULT '',
-			lease_holder TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_cards_column ON cards(column_name)`,
-		`ALTER TABLE cards ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS goals (
 			id TEXT PRIMARY KEY,
 			title TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
 			contract TEXT NOT NULL,
 			status TEXT NOT NULL,
-			card_id TEXT NOT NULL DEFAULT '',
 			workspace_id TEXT NOT NULL DEFAULT '',
 			agent_id TEXT NOT NULL DEFAULT '',
 			iteration INTEGER NOT NULL DEFAULT 0,
@@ -186,24 +159,53 @@ func (s *Store) migrate() error {
 			source TEXT NOT NULL DEFAULT 'local',
 			enabled INTEGER NOT NULL DEFAULT 1
 		)`,
-		`CREATE TABLE IF NOT EXISTS file_leases (
-			path TEXT PRIMARY KEY,
-			holder TEXT NOT NULL,
-			card_id TEXT NOT NULL DEFAULT '',
-			expires_at TEXT NOT NULL
-		)`,
 		`CREATE TABLE IF NOT EXISTS kv (
 			k TEXT PRIMARY KEY,
 			v TEXT NOT NULL
 		)`,
 		// Harness profile columns (idempotent ALTER — ignored if column exists).
-		`ALTER TABLE cards ADD COLUMN harness_profile TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE goals ADD COLUMN harness_profile TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE goals ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`,
+		// the usage ledger: Rove's own count of each call beside the provider's
+		`ALTER TABLE usage_ledger ADD COLUMN kind TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE usage_ledger ADD COLUMN sent_chars INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_ledger ADD COLUMN sent_tokens INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_ledger ADD COLUMN recv_chars INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_ledger ADD COLUMN recv_tokens INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_ledger ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_ledger ADD COLUMN reported INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_ledger ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE messages ADD COLUMN images TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT ''`,
+		`CREATE TABLE IF NOT EXISTS turn_edits (
+			run_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			workspace TEXT NOT NULL,
+			path TEXT NOT NULL,
+			before TEXT NOT NULL,
+			existed INTEGER NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			created_at TEXT NOT NULL,
+			PRIMARY KEY(run_id, path)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_turn_edits_session ON turn_edits(session_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS terminal_layouts (
+			session_id TEXT PRIMARY KEY,
+			body TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS session_effort (
+			session_id TEXT PRIMARY KEY,
+			effort TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS goal_checkpoints (
+			goal_id TEXT PRIMARY KEY,
+			body TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 		// Harness mutation log.
 		`CREATE TABLE IF NOT EXISTS harness_mutations (
 			id TEXT PRIMARY KEY,
 			goal_id TEXT NOT NULL,
-			card_id TEXT NOT NULL DEFAULT '',
 			iteration INTEGER NOT NULL DEFAULT 0,
 			reason TEXT NOT NULL DEFAULT '',
 			old_profile TEXT NOT NULL DEFAULT '{}',
@@ -244,6 +246,7 @@ func (s *Store) migrate() error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_ledger_session ON usage_ledger(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_ledger_time ON usage_ledger(created_at)`,
 		`CREATE TABLE IF NOT EXISTS mcp_servers (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL UNIQUE,
@@ -273,6 +276,98 @@ func (s *Store) migrate() error {
 			UNIQUE(session_a, session_b)
 		)`,
 		`ALTER TABLE agents ADD COLUMN role TEXT NOT NULL DEFAULT 'developer'`,
+		`ALTER TABLE session_links ADD COLUMN direction TEXT NOT NULL DEFAULT 'both'`,
+		`ALTER TABLE session_links ADD COLUMN auto INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE session_links ADD COLUMN mode TEXT NOT NULL DEFAULT 'smart'`,
+		`ALTER TABLE agent_profiles ADD COLUMN character_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_profiles ADD COLUMN features TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_profiles ADD COLUMN mark TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_profiles ADD COLUMN prompt_mode TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_profiles ADD COLUMN title TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_profiles ADD COLUMN integrations TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE session_links ADD COLUMN color TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE sessions ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE sessions ADD COLUMN space TEXT NOT NULL DEFAULT ''`,
+		`CREATE TABLE IF NOT EXISTS teamwork_plans (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			body TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_teamwork_plans_session ON teamwork_plans(session_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS staff_tasks (
+			id TEXT PRIMARY KEY,
+			profile_id TEXT NOT NULL,
+			session_id TEXT NOT NULL DEFAULT '',
+			body TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_staff_tasks_profile ON staff_tasks(profile_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS staff_watches (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			profile_id TEXT NOT NULL,
+			body TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_staff_watches_session ON staff_watches(session_id)`,
+		`CREATE TABLE IF NOT EXISTS staff_handoffs (
+			id TEXT PRIMARY KEY,
+			from_id TEXT NOT NULL,
+			to_id TEXT NOT NULL,
+			body TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS staff_monitors (
+			id TEXT PRIMARY KEY,
+			profile_id TEXT NOT NULL,
+			body TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS staff_schedules (
+			id TEXT PRIMARY KEY,
+			profile_id TEXT NOT NULL,
+			body TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS session_models (
+			session_id TEXT PRIMARY KEY,
+			provider TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS session_personas (
+			session_id TEXT PRIMARY KEY,
+			character_id TEXT NOT NULL DEFAULT '',
+			profile_id TEXT NOT NULL DEFAULT '',
+			features TEXT NOT NULL DEFAULT '',
+			extra_prompt TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS context_map_nodes (
+			session_id TEXT PRIMARY KEY,
+			x REAL NOT NULL DEFAULT 0,
+			y REAL NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS context_relays (
+			id TEXT PRIMARY KEY,
+			link_id TEXT NOT NULL DEFAULT '',
+			from_session TEXT NOT NULL,
+			to_session TEXT NOT NULL,
+			kind TEXT NOT NULL DEFAULT 'auto',
+			status TEXT NOT NULL DEFAULT 'queued',
+			hop INTEGER NOT NULL DEFAULT 1,
+			files TEXT NOT NULL DEFAULT '[]',
+			summary TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT '',
+			matches TEXT NOT NULL DEFAULT '[]',
+			tokens INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 	}
 	// Split: DDL statements run in a transaction; ALTER TABLE statements
 	// run individually outside it (SQLite ignores "duplicate column" errors).
@@ -313,11 +408,17 @@ func (s *Store) migrate() error {
 	return nil
 }
 
+// tsLayout is RFC 3339 with a fixed nine-digit fraction. Columns are sorted
+// as text (ORDER BY created_at / updated_at), so every value must have the
+// same width: RFC3339Nano drops trailing zeros, and then ".5Z" sorts after
+// the later ".51Z". parseTS reads both forms, so older rows still load.
+const tsLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
 func ts(t time.Time) string {
 	if t.IsZero() {
 		t = time.Now().UTC()
 	}
-	return t.UTC().Format(time.RFC3339Nano)
+	return t.UTC().Format(tsLayout)
 }
 
 func parseTS(s string) time.Time {
@@ -408,31 +509,84 @@ func (s *Store) DeleteAgent(ctx context.Context, id types.ID) error {
 }
 
 func (s *Store) UpsertSession(ctx context.Context, sess types.Session) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(id,title,agent_id,workspace_id,created_at,updated_at)
-		VALUES(?,?,?,?,?,?)
+	// parent_id and space are fixed at creation: a member channel never moves
+	// teams, a chat never moves between Office and Chat
+	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(id,title,agent_id,workspace_id,parent_id,space,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET title=excluded.title, agent_id=excluded.agent_id, workspace_id=excluded.workspace_id, updated_at=excluded.updated_at`,
-		sess.ID, sess.Title, sess.AgentID, sess.WorkspaceID, ts(sess.CreatedAt), ts(sess.UpdatedAt))
+		sess.ID, sess.Title, sess.AgentID, sess.WorkspaceID, sess.ParentID, sess.Space, ts(sess.CreatedAt), ts(sess.UpdatedAt))
 	return err
 }
 
-func (s *Store) GetSession(ctx context.Context, id types.ID) (types.Session, error) {
+const sessionCols = `id,title,agent_id,workspace_id,parent_id,space,created_at,updated_at`
+
+func scanSession(sc interface{ Scan(...any) error }) (types.Session, error) {
 	var sess types.Session
 	var created, updated string
-	err := s.db.QueryRowContext(ctx, `SELECT id,title,agent_id,workspace_id,created_at,updated_at FROM sessions WHERE id=?`, id).
-		Scan(&sess.ID, &sess.Title, &sess.AgentID, &sess.WorkspaceID, &created, &updated)
-	if errors.Is(err, sql.ErrNoRows) {
-		return sess, ErrNotFound
-	}
+	err := sc.Scan(&sess.ID, &sess.Title, &sess.AgentID, &sess.WorkspaceID, &sess.ParentID, &sess.Space, &created, &updated)
 	sess.CreatedAt, sess.UpdatedAt = parseTS(created), parseTS(updated)
 	return sess, err
 }
 
+func (s *Store) GetSession(ctx context.Context, id types.ID) (types.Session, error) {
+	sess, err := scanSession(s.db.QueryRowContext(ctx, `SELECT `+sessionCols+` FROM sessions WHERE id=?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return sess, ErrNotFound
+	}
+	return sess, err
+}
+
+// DeleteSession removes a session, its messages, and — for a team session —
+// every member channel under it.
 func (s *Store) DeleteSession(ctx context.Context, id types.ID) error {
+	kids, err := s.ListChildSessions(ctx, id)
+	if err != nil {
+		return err
+	}
+	for _, k := range kids {
+		if err := s.DeleteSession(ctx, k.ID); err != nil {
+			return err
+		}
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM session_personas WHERE session_id=?`, k.ID)
+	}
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM session_models WHERE session_id=?`, id)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM turn_edits WHERE session_id=?`, id)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM session_effort WHERE session_id=?`, id)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM terminal_layouts WHERE session_id=?`, id)
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM messages WHERE session_id=?`, id); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id=?`, id)
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM teamwork_plans WHERE session_id=?`, id); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id=?`, id)
 	return err
+}
+
+// ListChildSessions returns a team session's member channels, oldest first
+// (the order members joined).
+func (s *Store) ListChildSessions(ctx context.Context, parentID types.ID) ([]types.Session, error) {
+	if parentID == "" {
+		return nil, nil
+	}
+	return s.querySessions(ctx, `SELECT `+sessionCols+` FROM sessions WHERE parent_id=? ORDER BY created_at ASC, rowid ASC`, parentID)
+}
+
+func (s *Store) querySessions(ctx context.Context, q string, args ...any) ([]types.Session, error) {
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []types.Session
+	for rows.Next() {
+		sess, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sess)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) DeleteWorkspace(ctx context.Context, id types.ID) error {
@@ -445,30 +599,17 @@ func (s *Store) DeleteProvider(ctx context.Context, id types.ID) error {
 	return err
 }
 
+// ListSessions lists top-level sessions; team member channels are reached
+// through ListChildSessions instead.
 func (s *Store) ListSessions(ctx context.Context, workspaceID types.ID) ([]types.Session, error) {
-	q := `SELECT id,title,agent_id,workspace_id,created_at,updated_at FROM sessions`
+	q := `SELECT ` + sessionCols + ` FROM sessions WHERE parent_id=''`
 	args := []any{}
 	if workspaceID != "" {
-		q += ` WHERE workspace_id=?`
+		q += ` AND workspace_id=?`
 		args = append(args, workspaceID)
 	}
 	q += ` ORDER BY updated_at DESC`
-	rows, err := s.db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []types.Session
-	for rows.Next() {
-		var sess types.Session
-		var created, updated string
-		if err := rows.Scan(&sess.ID, &sess.Title, &sess.AgentID, &sess.WorkspaceID, &created, &updated); err != nil {
-			return nil, err
-		}
-		sess.CreatedAt, sess.UpdatedAt = parseTS(created), parseTS(updated)
-		out = append(out, sess)
-	}
-	return out, rows.Err()
+	return s.querySessions(ctx, q, args...)
 }
 
 func (s *Store) InsertMessage(ctx context.Context, m types.Message) error {
@@ -476,13 +617,17 @@ func (s *Store) InsertMessage(ctx context.Context, m types.Message) error {
 	if m.ToolResult != nil {
 		tr = mustJSON(m.ToolResult)
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO messages(id,session_id,role,content,tool_calls,tool_result,created_at) VALUES(?,?,?,?,?,?,?)`,
-		m.ID, m.SessionID, m.Role, m.Content, mustJSON(m.ToolCalls), tr, ts(m.CreatedAt))
+	images := m.Images
+	if images == nil {
+		images = []string{}
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO messages(id,session_id,role,content,tool_calls,tool_result,images,kind,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+		m.ID, m.SessionID, m.Role, m.Content, mustJSON(m.ToolCalls), tr, mustJSON(images), m.Kind, ts(m.CreatedAt))
 	return err
 }
 
 func (s *Store) ListMessages(ctx context.Context, sessionID types.ID) ([]types.Message, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,session_id,role,content,tool_calls,tool_result,created_at FROM messages WHERE session_id=? ORDER BY created_at`, sessionID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,session_id,role,content,tool_calls,tool_result,images,kind,created_at FROM messages WHERE session_id=? ORDER BY created_at, rowid`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -490,12 +635,16 @@ func (s *Store) ListMessages(ctx context.Context, sessionID types.ID) ([]types.M
 	var out []types.Message
 	for rows.Next() {
 		var m types.Message
-		var calls, created string
+		var calls, images, created string
 		var tr sql.NullString
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &calls, &tr, &created); err != nil {
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &calls, &tr, &images, &m.Kind, &created); err != nil {
 			return nil, err
 		}
 		unmarshal(calls, &m.ToolCalls)
+		unmarshal(images, &m.Images)
+		if len(m.Images) == 0 {
+			m.Images = nil
+		}
 		if tr.Valid && tr.String != "" {
 			var r types.ToolResult
 			unmarshal(tr.String, &r)
@@ -512,86 +661,13 @@ func (s *Store) TruncateMessages(ctx context.Context, sessionID types.ID, keep i
 		keep = 0
 	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM messages WHERE rowid IN (
-		SELECT rowid FROM messages WHERE session_id=? ORDER BY created_at LIMIT -1 OFFSET ?
+		SELECT rowid FROM messages WHERE session_id=? ORDER BY created_at, rowid LIMIT -1 OFFSET ?
 	)`, sessionID, keep)
 	return err
 }
 
-func (s *Store) UpsertCard(ctx context.Context, c types.Card) error {
-	goalMode := 0
-	if c.GoalMode {
-		goalMode = 1
-	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO cards(id,title,description,column_name,assignee_agent_id,profile,model,dependencies,acceptance,goal_id,goal_mode,status,terminal_id,git_branch,worktree_path,review_state,artifacts,logs,workspace_id,session_id,lease_holder,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-		ON CONFLICT(id) DO UPDATE SET title=excluded.title, description=excluded.description, column_name=excluded.column_name,
-		assignee_agent_id=excluded.assignee_agent_id, profile=excluded.profile, model=excluded.model, dependencies=excluded.dependencies,
-		acceptance=excluded.acceptance, goal_id=excluded.goal_id, goal_mode=excluded.goal_mode, status=excluded.status,
-		terminal_id=excluded.terminal_id, git_branch=excluded.git_branch, worktree_path=excluded.worktree_path,
-		review_state=excluded.review_state, artifacts=excluded.artifacts, logs=excluded.logs, workspace_id=excluded.workspace_id,
-		session_id=excluded.session_id, lease_holder=excluded.lease_holder, updated_at=excluded.updated_at`,
-		c.ID, c.Title, c.Description, c.Column, c.AssigneeAgentID, c.Profile, c.Model, mustJSON(c.Dependencies), mustJSON(c.AcceptanceCriteria),
-		c.GoalID, goalMode, c.Status, c.TerminalID, c.GitBranch, c.WorktreePath, c.ReviewState, mustJSON(c.Artifacts), mustJSON(c.Logs),
-		c.WorkspaceID, c.SessionID, c.LeaseHolder, ts(c.CreatedAt), ts(c.UpdatedAt))
-	return err
-}
-
-func scanCard(scanner interface{ Scan(dest ...any) error }) (types.Card, error) {
-	var c types.Card
-	var deps, acc, arts, logs, created, updated string
-	var goalMode int
-	err := scanner.Scan(&c.ID, &c.Title, &c.Description, &c.Column, &c.AssigneeAgentID, &c.Profile, &c.Model, &deps, &acc, &c.GoalID, &goalMode, &c.Status, &c.TerminalID, &c.GitBranch, &c.WorktreePath, &c.ReviewState, &arts, &logs, &c.WorkspaceID, &c.SessionID, &c.LeaseHolder, &created, &updated)
-	if err != nil {
-		return c, err
-	}
-	c.GoalMode = goalMode == 1
-	unmarshal(deps, &c.Dependencies)
-	unmarshal(acc, &c.AcceptanceCriteria)
-	unmarshal(arts, &c.Artifacts)
-	unmarshal(logs, &c.Logs)
-	c.CreatedAt, c.UpdatedAt = parseTS(created), parseTS(updated)
-	return c, nil
-}
-
-func (s *Store) GetCard(ctx context.Context, id types.ID) (types.Card, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id,title,description,column_name,assignee_agent_id,profile,model,dependencies,acceptance,goal_id,goal_mode,status,terminal_id,git_branch,worktree_path,review_state,artifacts,logs,workspace_id,session_id,lease_holder,created_at,updated_at FROM cards WHERE id=?`, id)
-	c, err := scanCard(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return c, ErrNotFound
-	}
-	return c, err
-}
-
-func (s *Store) ListCards(ctx context.Context, workspaceID types.ID) ([]types.Card, error) {
-	q := `SELECT id,title,description,column_name,assignee_agent_id,profile,model,dependencies,acceptance,goal_id,goal_mode,status,terminal_id,git_branch,worktree_path,review_state,artifacts,logs,workspace_id,session_id,lease_holder,created_at,updated_at FROM cards`
-	args := []any{}
-	if workspaceID != "" {
-		q += ` WHERE workspace_id=?`
-		args = append(args, workspaceID)
-	}
-	q += ` ORDER BY created_at`
-	rows, err := s.db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []types.Card
-	for rows.Next() {
-		c, err := scanCard(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) DeleteCard(ctx context.Context, id types.ID) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM cards WHERE id=?`, id)
-	return err
-}
-
 func (s *Store) DeleteGoal(ctx context.Context, id types.ID) error {
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM goal_checkpoints WHERE goal_id=?`, id)
 	_, err := s.db.ExecContext(ctx, `DELETE FROM goals WHERE id=?`, id)
 	return err
 }
@@ -601,12 +677,12 @@ func (s *Store) UpsertGoal(ctx context.Context, g types.Goal) error {
 	if g.LastVerdict != nil {
 		verdict = mustJSON(g.LastVerdict)
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO goals(id,title,description,contract,status,card_id,workspace_id,agent_id,iteration,last_verdict,created_at,updated_at)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO goals(id,title,description,contract,status,workspace_id,agent_id,session_id,iteration,last_verdict,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET title=excluded.title, description=excluded.description, contract=excluded.contract,
-		status=excluded.status, card_id=excluded.card_id, workspace_id=excluded.workspace_id, agent_id=excluded.agent_id,
-		iteration=excluded.iteration, last_verdict=excluded.last_verdict, updated_at=excluded.updated_at`,
-		g.ID, g.Title, g.Description, mustJSON(g.CompletionContract), g.Status, g.CardID, g.WorkspaceID, g.AgentID, g.Iteration, verdict, ts(g.CreatedAt), ts(g.UpdatedAt))
+		status=excluded.status, workspace_id=excluded.workspace_id, agent_id=excluded.agent_id,
+		session_id=excluded.session_id, iteration=excluded.iteration, last_verdict=excluded.last_verdict, updated_at=excluded.updated_at`,
+		g.ID, g.Title, g.Description, mustJSON(g.CompletionContract), g.Status, g.WorkspaceID, g.AgentID, g.SessionID, g.Iteration, verdict, ts(g.CreatedAt), ts(g.UpdatedAt))
 	return err
 }
 
@@ -614,8 +690,8 @@ func (s *Store) GetGoal(ctx context.Context, id types.ID) (types.Goal, error) {
 	var g types.Goal
 	var contract, created, updated string
 	var verdict sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT id,title,description,contract,status,card_id,workspace_id,agent_id,iteration,last_verdict,created_at,updated_at FROM goals WHERE id=?`, id).
-		Scan(&g.ID, &g.Title, &g.Description, &contract, &g.Status, &g.CardID, &g.WorkspaceID, &g.AgentID, &g.Iteration, &verdict, &created, &updated)
+	err := s.db.QueryRowContext(ctx, `SELECT id,title,description,contract,status,workspace_id,agent_id,session_id,iteration,last_verdict,created_at,updated_at FROM goals WHERE id=?`, id).
+		Scan(&g.ID, &g.Title, &g.Description, &contract, &g.Status, &g.WorkspaceID, &g.AgentID, &g.SessionID, &g.Iteration, &verdict, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return g, ErrNotFound
 	}
@@ -633,7 +709,7 @@ func (s *Store) GetGoal(ctx context.Context, id types.ID) (types.Goal, error) {
 }
 
 func (s *Store) ListGoals(ctx context.Context) ([]types.Goal, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,description,contract,status,card_id,workspace_id,agent_id,iteration,last_verdict,created_at,updated_at FROM goals ORDER BY created_at`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,description,contract,status,workspace_id,agent_id,session_id,iteration,last_verdict,created_at,updated_at FROM goals ORDER BY created_at, rowid`)
 	if err != nil {
 		return nil, err
 	}
@@ -643,7 +719,7 @@ func (s *Store) ListGoals(ctx context.Context) ([]types.Goal, error) {
 		var g types.Goal
 		var contract, created, updated string
 		var verdict sql.NullString
-		if err := rows.Scan(&g.ID, &g.Title, &g.Description, &contract, &g.Status, &g.CardID, &g.WorkspaceID, &g.AgentID, &g.Iteration, &verdict, &created, &updated); err != nil {
+		if err := rows.Scan(&g.ID, &g.Title, &g.Description, &contract, &g.Status, &g.WorkspaceID, &g.AgentID, &g.SessionID, &g.Iteration, &verdict, &created, &updated); err != nil {
 			return nil, err
 		}
 		unmarshal(contract, &g.CompletionContract)
@@ -943,72 +1019,6 @@ func (s *Store) DeleteSkill(ctx context.Context, name string) error {
 	return err
 }
 
-func (s *Store) AcquireLease(ctx context.Context, path, holder string, cardID types.ID, until time.Time) error {
-	now := time.Now().UTC()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	var existingHolder, existingExpiry string
-	err = tx.QueryRowContext(ctx, `SELECT holder, expires_at FROM file_leases WHERE path=?`, path).Scan(&existingHolder, &existingExpiry)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		_, err = tx.ExecContext(ctx, `INSERT INTO file_leases(path,holder,card_id,expires_at) VALUES(?,?,?,?)`, path, holder, cardID, ts(until))
-		if err != nil {
-			return err
-		}
-	case err != nil:
-		return err
-	default:
-		exp := parseTS(existingExpiry)
-		if existingHolder != holder && exp.After(now) {
-			return fmt.Errorf("%w: %s held by %s until %s", ErrConflict, path, existingHolder, existingExpiry)
-		}
-		_, err = tx.ExecContext(ctx, `UPDATE file_leases SET holder=?, card_id=?, expires_at=? WHERE path=?`, holder, cardID, ts(until), path)
-		if err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func (s *Store) ReleaseLease(ctx context.Context, path, holder string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM file_leases WHERE path=? AND holder=?`, path, holder)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (s *Store) ListLeases(ctx context.Context) ([]types.FileLease, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT path,holder,card_id,expires_at FROM file_leases`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []types.FileLease
-	for rows.Next() {
-		var l types.FileLease
-		var exp string
-		if err := rows.Scan(&l.Path, &l.Holder, &l.CardID, &exp); err != nil {
-			return nil, err
-		}
-		l.ExpiresAt = parseTS(exp)
-		out = append(out, l)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) SweepExpiredLeases(ctx context.Context, now time.Time) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM file_leases WHERE expires_at < ?`, ts(now))
-	return err
-}
-
 // ── Harness profile persistence ───────────────────────────────────────────────
 
 // SaveGoalHarness persists the harness_profile JSON for a goal.
@@ -1029,37 +1039,19 @@ func (s *Store) LoadGoalHarness(ctx context.Context, goalID types.ID) (string, e
 	return raw, err
 }
 
-// SaveCardHarness persists the harness_profile JSON for a card.
-func (s *Store) SaveCardHarness(ctx context.Context, cardID types.ID, profileJSON string) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE cards SET harness_profile=?, updated_at=? WHERE id=?`,
-		profileJSON, ts(time.Now().UTC()), string(cardID))
-	return err
-}
-
-// LoadCardHarness returns the raw harness_profile JSON for a card.
-func (s *Store) LoadCardHarness(ctx context.Context, cardID types.ID) (string, error) {
-	var raw string
-	err := s.db.QueryRowContext(ctx, `SELECT harness_profile FROM cards WHERE id=?`, string(cardID)).Scan(&raw)
-	if err == sql.ErrNoRows {
-		return "", ErrNotFound
-	}
-	return raw, err
-}
-
 // InsertHarnessMutation appends a harness mutation record.
 func (s *Store) InsertHarnessMutation(ctx context.Context, m HarnessMutationRow) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO harness_mutations(id,goal_id,card_id,iteration,reason,old_profile,new_profile,result,created_at)
-		 VALUES(?,?,?,?,?,?,?,?,?)`,
-		m.ID, m.GoalID, m.CardID, m.Iteration, m.Reason, m.OldProfile, m.NewProfile, m.Result, ts(m.CreatedAt))
+		`INSERT INTO harness_mutations(id,goal_id,iteration,reason,old_profile,new_profile,result,created_at)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		m.ID, m.GoalID, m.Iteration, m.Reason, m.OldProfile, m.NewProfile, m.Result, ts(m.CreatedAt))
 	return err
 }
 
 // ListHarnessMutations returns all mutations for a goal in order.
 func (s *Store) ListHarnessMutations(ctx context.Context, goalID types.ID) ([]HarnessMutationRow, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id,goal_id,card_id,iteration,reason,old_profile,new_profile,result,created_at
+		`SELECT id,goal_id,iteration,reason,old_profile,new_profile,result,created_at
 		 FROM harness_mutations WHERE goal_id=? ORDER BY created_at ASC`, string(goalID))
 	if err != nil {
 		return nil, err
@@ -1069,7 +1061,7 @@ func (s *Store) ListHarnessMutations(ctx context.Context, goalID types.ID) ([]Ha
 	for rows.Next() {
 		var m HarnessMutationRow
 		var createdAt string
-		if err := rows.Scan(&m.ID, &m.GoalID, &m.CardID, &m.Iteration, &m.Reason, &m.OldProfile, &m.NewProfile, &m.Result, &createdAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.GoalID, &m.Iteration, &m.Reason, &m.OldProfile, &m.NewProfile, &m.Result, &createdAt); err != nil {
 			return nil, err
 		}
 		m.CreatedAt = parseTS(createdAt)
@@ -1082,20 +1074,12 @@ func (s *Store) ListHarnessMutations(ctx context.Context, goalID types.ID) ([]Ha
 type HarnessMutationRow struct {
 	ID         string
 	GoalID     string
-	CardID     string
 	Iteration  int
 	Reason     string
 	OldProfile string // JSON
 	NewProfile string // JSON
 	Result     string
 	CreatedAt  time.Time
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func (s *Store) UpsertAutomation(ctx context.Context, j types.AutomationJob) error {
@@ -1187,16 +1171,27 @@ func (s *Store) DeleteWebhookRule(ctx context.Context, id types.ID) error {
 
 // ── Usage ledger ──────────────────────────────────────────────────────────────
 
-// UsageLedgerEntry is a single cost record.
+// UsageLedgerEntry is one model call. PromptTokens, CompletionTokens and
+// CachedTokens are what the provider reported (Reported says whether it
+// reported at all); the Sent and Recv fields are Rove's own count of the
+// text that actually went out and came back.
 type UsageLedgerEntry struct {
-	ID               string
-	SessionID        string
-	Provider         string
-	Model            string
-	PromptTokens     int
-	CompletionTokens int
-	CostUSD          float64
-	CreatedAt        time.Time
+	ID               string    `json:"id"`
+	SessionID        string    `json:"sessionId"`
+	Kind             string    `json:"kind"` // chat | ask | compact
+	Provider         string    `json:"provider"`
+	Model            string    `json:"model"`
+	PromptTokens     int       `json:"promptTokens"`
+	CompletionTokens int       `json:"completionTokens"`
+	CachedTokens     int       `json:"cachedTokens"`
+	Reported         bool      `json:"reported"`
+	SentChars        int       `json:"sentChars"`
+	SentTokens       int       `json:"sentTokens"`
+	RecvChars        int       `json:"recvChars"`
+	RecvTokens       int       `json:"recvTokens"`
+	DurationMS       int64     `json:"durationMs"`
+	CostUSD          float64   `json:"costUsd"`
+	CreatedAt        time.Time `json:"createdAt"`
 }
 
 // RecordUsage inserts a usage ledger entry.
@@ -1205,11 +1200,38 @@ func (s *Store) RecordUsage(ctx context.Context, e UsageLedgerEntry) error {
 		e.ID = fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO usage_ledger(id,session_id,provider,model,prompt_tokens,completion_tokens,cost_usd,created_at)
-		 VALUES(?,?,?,?,?,?,?,?)`,
-		e.ID, e.SessionID, e.Provider, e.Model,
-		e.PromptTokens, e.CompletionTokens, e.CostUSD, ts(e.CreatedAt))
+		`INSERT INTO usage_ledger(id,session_id,kind,provider,model,prompt_tokens,completion_tokens,cached_tokens,reported,
+		 sent_chars,sent_tokens,recv_chars,recv_tokens,duration_ms,cost_usd,created_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		e.ID, e.SessionID, e.Kind, e.Provider, e.Model, e.PromptTokens, e.CompletionTokens, e.CachedTokens, boolInt(e.Reported),
+		e.SentChars, e.SentTokens, e.RecvChars, e.RecvTokens, e.DurationMS, e.CostUSD, ts(e.CreatedAt))
 	return err
+}
+
+// ListUsageSince is every call recorded from since on, oldest first.
+func (s *Store) ListUsageSince(ctx context.Context, since time.Time) ([]UsageLedgerEntry, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id,session_id,kind,provider,model,prompt_tokens,completion_tokens,cached_tokens,reported,
+		 sent_chars,sent_tokens,recv_chars,recv_tokens,duration_ms,cost_usd,created_at
+		 FROM usage_ledger WHERE created_at >= ? ORDER BY created_at`, ts(since))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UsageLedgerEntry
+	for rows.Next() {
+		var e UsageLedgerEntry
+		var rep int
+		var created string
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.Kind, &e.Provider, &e.Model, &e.PromptTokens, &e.CompletionTokens, &e.CachedTokens, &rep,
+			&e.SentChars, &e.SentTokens, &e.RecvChars, &e.RecvTokens, &e.DurationMS, &e.CostUSD, &created); err != nil {
+			return nil, err
+		}
+		e.Reported = rep == 1
+		e.CreatedAt = parseTS(created)
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // SumUsage returns aggregate token counts and total cost.
@@ -1223,14 +1245,6 @@ func (s *Store) SumUsage(ctx context.Context, sessionID string) (promptTokens, c
 	}
 	err = s.db.QueryRowContext(ctx, q, args...).Scan(&promptTokens, &completionTokens, &costUSD)
 	return
-}
-
-func JoinIDs(ids []types.ID) string {
-	ss := make([]string, len(ids))
-	for i, id := range ids {
-		ss[i] = string(id)
-	}
-	return strings.Join(ss, ",")
 }
 
 // ── MCP server registry ───────────────────────────────────────────────────────
@@ -1276,43 +1290,59 @@ func (s *Store) UpsertAgentProfile(ctx context.Context, p types.AgentProfile) (t
 		p.CreatedAt = now
 	}
 	p.UpdatedAt = now
-	isDef, isLead := 0, 0
-	if p.IsDefault {
-		isDef = 1
-	}
-	if p.IsLeader {
-		isLead = 1
-	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO agent_profiles(id,name,role,system_prompt,model,provider,is_default,is_leader,color,created_at,updated_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?)
+		`INSERT INTO agent_profiles(id,name,role,system_prompt,model,provider,is_default,is_leader,color,character_id,features,mark,prompt_mode,title,integrations,created_at,updated_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(id) DO UPDATE SET name=excluded.name, role=excluded.role, system_prompt=excluded.system_prompt,
 		 model=excluded.model, provider=excluded.provider, is_default=excluded.is_default, is_leader=excluded.is_leader,
-		 color=excluded.color, updated_at=excluded.updated_at`,
-		p.ID, p.Name, string(p.Role), p.SystemPrompt, p.Model, p.Provider, isDef, isLead, p.Color, ts(p.CreatedAt), ts(p.UpdatedAt))
+		 color=excluded.color, character_id=excluded.character_id, features=excluded.features,
+		 mark=excluded.mark, prompt_mode=excluded.prompt_mode, title=excluded.title, integrations=excluded.integrations, updated_at=excluded.updated_at`,
+		p.ID, p.Name, string(p.Role), p.SystemPrompt, p.Model, p.Provider, boolInt(p.IsDefault), boolInt(p.IsLeader), p.Color,
+		p.CharacterID, encodeFeatures(p.Features), p.Mark, p.PromptMode, p.Title, encodeFeatures(p.Integrations), ts(p.CreatedAt), ts(p.UpdatedAt))
 	return p, err
 }
 
+const profileCols = `id,name,role,system_prompt,model,provider,is_default,is_leader,color,character_id,features,mark,prompt_mode,title,integrations,created_at,updated_at`
+
+func scanProfile(sc interface{ Scan(...any) error }) (types.AgentProfile, error) {
+	var p types.AgentProfile
+	var isDef, isLead int
+	var features, integrations, created, updated string
+	if err := sc.Scan(&p.ID, &p.Name, &p.Role, &p.SystemPrompt, &p.Model, &p.Provider, &isDef, &isLead, &p.Color,
+		&p.CharacterID, &features, &p.Mark, &p.PromptMode, &p.Title, &integrations, &created, &updated); err != nil {
+		return p, err
+	}
+	p.IsDefault = isDef == 1
+	p.IsLeader = isLead == 1
+	p.Features = decodeFeatures(features)
+	p.Integrations = decodeFeatures(integrations)
+	p.CreatedAt, p.UpdatedAt = parseTS(created), parseTS(updated)
+	return p, nil
+}
+
 func (s *Store) ListAgentProfiles(ctx context.Context) ([]types.AgentProfile, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,role,system_prompt,model,provider,is_default,is_leader,color,created_at,updated_at FROM agent_profiles ORDER BY created_at`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+profileCols+` FROM agent_profiles ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []types.AgentProfile
 	for rows.Next() {
-		var p types.AgentProfile
-		var isDef, isLead int
-		var created, updated string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Role, &p.SystemPrompt, &p.Model, &p.Provider, &isDef, &isLead, &p.Color, &created, &updated); err != nil {
+		p, err := scanProfile(rows)
+		if err != nil {
 			return nil, err
 		}
-		p.IsDefault = isDef == 1
-		p.IsLeader = isLead == 1
-		p.CreatedAt, p.UpdatedAt = parseTS(created), parseTS(updated)
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) GetAgentProfile(ctx context.Context, id types.ID) (types.AgentProfile, error) {
+	p, err := scanProfile(s.db.QueryRowContext(ctx, `SELECT `+profileCols+` FROM agent_profiles WHERE id=?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return p, ErrNotFound
+	}
+	return p, err
 }
 
 func (s *Store) DeleteAgentProfile(ctx context.Context, id types.ID) error {
@@ -1338,20 +1368,13 @@ func (s *Store) SetDefaultProfile(ctx context.Context, id types.ID) error {
 
 // GetDefaultProfile returns the profile with is_default=1, or nil if none is set.
 func (s *Store) GetDefaultProfile(ctx context.Context) (*types.AgentProfile, error) {
-	var p types.AgentProfile
-	var isDef, isLead int
-	var created, updated string
-	err := s.db.QueryRowContext(ctx, `SELECT id,name,role,system_prompt,model,provider,is_default,is_leader,color,created_at,updated_at FROM agent_profiles WHERE is_default=1 LIMIT 1`).
-		Scan(&p.ID, &p.Name, &p.Role, &p.SystemPrompt, &p.Model, &p.Provider, &isDef, &isLead, &p.Color, &created, &updated)
+	p, err := scanProfile(s.db.QueryRowContext(ctx, `SELECT `+profileCols+` FROM agent_profiles WHERE is_default=1 LIMIT 1`))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	p.IsDefault = isDef == 1
-	p.IsLeader = isLead == 1
-	p.CreatedAt, p.UpdatedAt = parseTS(created), parseTS(updated)
 	return &p, nil
 }
 
@@ -1364,32 +1387,32 @@ func (s *Store) CreateSessionLink(ctx context.Context, link types.SessionLink) (
 	if link.CreatedAt.IsZero() {
 		link.CreatedAt = time.Now().UTC()
 	}
+	if link.Direction == "" {
+		link.Direction = types.LinkBoth
+	}
+	if link.Mode == "" {
+		link.Mode = types.LinkSmart
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO session_links(id,session_a,session_b,label,created_at) VALUES(?,?,?,?,?)
-		 ON CONFLICT(session_a,session_b) DO UPDATE SET label=excluded.label`,
-		link.ID, link.SessionA, link.SessionB, link.Label, ts(link.CreatedAt))
-	return link, err
+		`INSERT INTO session_links(id,session_a,session_b,label,direction,auto,mode,color,created_at) VALUES(?,?,?,?,?,?,?,?,?)
+		 ON CONFLICT(session_a,session_b) DO UPDATE SET label=excluded.label, direction=excluded.direction, auto=excluded.auto, mode=excluded.mode, color=excluded.color`,
+		link.ID, link.SessionA, link.SessionB, link.Label, link.Direction, boolInt(link.Auto), link.Mode, link.Color, ts(link.CreatedAt))
+	if err != nil {
+		return link, err
+	}
+	// On conflict the existing row keeps its id; return what is stored.
+	_ = s.db.QueryRowContext(ctx, `SELECT id FROM session_links WHERE session_a=? AND session_b=?`, link.SessionA, link.SessionB).Scan(&link.ID)
+	return link, nil
 }
 
 func (s *Store) ListSessionLinks(ctx context.Context, sessionID types.ID) ([]types.SessionLink, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id,session_a,session_b,label,created_at FROM session_links WHERE session_a=? OR session_b=? ORDER BY created_at`,
+		`SELECT `+linkCols+` FROM session_links WHERE session_a=? OR session_b=? ORDER BY created_at`,
 		sessionID, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []types.SessionLink
-	for rows.Next() {
-		var l types.SessionLink
-		var created string
-		if err := rows.Scan(&l.ID, &l.SessionA, &l.SessionB, &l.Label, &created); err != nil {
-			return nil, err
-		}
-		l.CreatedAt = parseTS(created)
-		out = append(out, l)
-	}
-	return out, rows.Err()
+	return scanLinks(rows)
 }
 
 func (s *Store) DeleteSessionLink(ctx context.Context, linkID types.ID) error {

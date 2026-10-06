@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/Kayra-ML/rove/internal/config"
@@ -15,9 +16,22 @@ import (
 
 // App is a presentation-layer bridge. It never implements agent logic.
 type App struct {
-	ctx    context.Context
-	cfg    config.Config
-	client *client.Client
+	ctx      context.Context
+	cfg      config.Config
+	clientMu sync.Mutex
+	client   *client.Client // the daemon RPC goes to (a server's while connected)
+}
+
+func (a *App) getClient() *client.Client {
+	a.clientMu.Lock()
+	defer a.clientMu.Unlock()
+	return a.client
+}
+
+func (a *App) setClient(c *client.Client) {
+	a.clientMu.Lock()
+	a.client = c
+	a.clientMu.Unlock()
 }
 
 func NewApp(cfg config.Config) *App { return &App{cfg: cfg} }
@@ -25,21 +39,29 @@ func NewApp(cfg config.Config) *App { return &App{cfg: cfg} }
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	_ = a.cfg.EnsureDirs()
+	replaceStaleDaemon()
 	ensureDaemon()
 	cl, err := client.FromEnv()
 	if err == nil {
-		a.client = cl
+		a.setClient(cl)
 	}
 }
 
 func (a *App) Token() string {
-	if a.client == nil {
+	if _, tok, ok := remoteAddr(); ok {
+		return tok
+	}
+	cl := a.getClient()
+	if cl == nil {
 		return ""
 	}
-	return a.client.Token
+	return cl.Token
 }
 
 func (a *App) HTTPAddr() string {
+	if addr, _, ok := remoteAddr(); ok {
+		return addr
+	}
 	return a.cfg.ListenHTTP
 }
 
@@ -53,12 +75,13 @@ func (a *App) PickFolder() (string, error) {
 }
 
 func (a *App) RPC(method string, paramsJSON string) (string, error) {
-	if a.client == nil {
-		cl, err := client.FromEnv()
-		if err != nil {
+	cl := a.getClient()
+	if cl == nil {
+		var err error
+		if cl, err = client.FromEnv(); err != nil {
 			return "", err
 		}
-		a.client = cl
+		a.setClient(cl)
 	}
 	var params any
 	if paramsJSON != "" && paramsJSON != "null" {
@@ -66,7 +89,26 @@ func (a *App) RPC(method string, paramsJSON string) (string, error) {
 			return "", err
 		}
 	}
-	res, err := a.client.Call(method, params)
+	res, err := cl.Call(method, params)
+	if _, _, onServer := remoteAddr(); onServer {
+		// a server's daemon is kept up by the connection, not started here
+		if err != nil {
+			b, _ := json.Marshal(protocol.Response{OK: false, Error: err.Error()})
+			return string(b), nil
+		}
+		b, _ := json.Marshal(protocol.Response{OK: true, Result: res})
+		return string(b), nil
+	}
+	if err != nil && !client.IsRemote(err) && !pingDaemon() {
+		// The daemon is gone (crashed, killed by an update, never started):
+		// bring it back and try once more. Only when a ping fails too — a
+		// long request that merely timed out must not be sent twice.
+		ensureDaemon()
+		if fresh, cerr := client.FromEnv(); cerr == nil {
+			a.setClient(fresh)
+			res, err = fresh.Call(method, params)
+		}
+	}
 	if err != nil {
 		b, _ := json.Marshal(protocol.Response{OK: false, Error: err.Error()})
 		return string(b), nil
@@ -75,7 +117,14 @@ func (a *App) RPC(method string, paramsJSON string) (string, error) {
 	return string(b), nil
 }
 
+// daemonMu makes ensureDaemon one-at-a-time. The webview fires many RPCs at
+// once; without it each one that found the daemon down started its own.
+var daemonMu sync.Mutex
+
 func ensureDaemon() {
+	daemonMu.Lock()
+	defer daemonMu.Unlock()
+	// whoever held the lock may have brought it up already
 	if pingDaemon() {
 		return
 	}

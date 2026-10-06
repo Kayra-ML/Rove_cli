@@ -18,19 +18,16 @@ type DisplayMessage struct {
 	ToolName  string
 	ToolArgs  string
 	ToolExtra string
-	IsCard    bool
-	CardID    string
 	IsError   bool
 	At        time.Time
 }
 
 type MessagesPanel struct {
-	messages    []DisplayMessage
-	scrollOff   int
-	active      bool
-	width       int
-	height      int
-	pendingCard *DisplayMessage
+	messages  []DisplayMessage
+	scrollOff int
+	active    bool
+	width     int
+	height    int
 }
 
 func NewMessagesPanel() *MessagesPanel { return &MessagesPanel{} }
@@ -126,9 +123,6 @@ func (p *MessagesPanel) contentDimensions() (int, int) {
 		innerW = 12
 	}
 	contentH := p.height - 1
-	if p.pendingCard != nil {
-		contentH -= len(p.renderApprovalCardLines(innerW)) + 1
-	}
 	if contentH < 1 {
 		contentH = 1
 	}
@@ -159,18 +153,6 @@ func (p *MessagesPanel) ScrollDown() {
 	if p.scrollOff < maxOff {
 		p.scrollOff++
 	}
-}
-
-func (p *MessagesPanel) HasPendingCard() bool { return p.pendingCard != nil }
-
-func (p *MessagesPanel) SetPendingCard(card *DisplayMessage) {
-	p.pendingCard = card
-	p.scrollToBottom()
-}
-
-func (p *MessagesPanel) ClearPendingCard() {
-	p.pendingCard = nil
-	p.scrollToBottom()
 }
 
 func toolIcon(name string, isError bool) string {
@@ -331,12 +313,6 @@ func (p *MessagesPanel) Render() string {
 	for _, line := range visible {
 		rows = append(rows, "  "+line)
 	}
-	if p.pendingCard != nil {
-		rows = append(rows, "")
-		for _, line := range p.renderApprovalCardLines(innerW) {
-			rows = append(rows, "  "+line)
-		}
-	}
 	for len(rows) < h {
 		rows = append(rows, "")
 	}
@@ -386,31 +362,6 @@ func (p *MessagesPanel) emptyState(innerW, contentH int) []string {
 		rows[start+logoH+3] = centerVisible(hint, innerW)
 	}
 	return rows
-}
-
-func (p *MessagesPanel) renderApprovalCardLines(maxW int) []string {
-	if maxW < 12 {
-		maxW = 12
-	}
-	command := "waiting for approval"
-	if p.pendingCard != nil && strings.TrimSpace(p.pendingCard.Content) != "" {
-		command = strings.ReplaceAll(strings.TrimSpace(p.pendingCard.Content), "\n", " ")
-	}
-	accent := lipgloss.NewStyle().Foreground(colorYellow).Render("┃")
-	title := styleHighlight.Bold(true).Render("permission required")
-	body := lipgloss.NewStyle().Foreground(colorWhite).Render(truncate(command, maxW-3))
-	actions := styleSuccess.Bold(true).Render("a allow") + styleMeta.Render("   ") + styleError.Render("d deny")
-	return []string{
-		accent + " " + title,
-		accent + " " + body,
-		accent + " " + actions,
-	}
-}
-
-func overlayCard(bg, card string, h, w int) string {
-	_ = h
-	_ = w
-	return bg + "\n" + card
 }
 
 func wrapText(text string, width int) []string {

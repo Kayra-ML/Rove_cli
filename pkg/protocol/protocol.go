@@ -23,6 +23,11 @@ type EventFrame struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
+// APILevel is raised whenever the daemon gains methods the app relies on.
+// The app compares it with the daemon's (health) to tell an out-of-date
+// daemon — on this computer or on a server — apart from a broken one.
+const APILevel = 18
+
 const (
 	MethodPing            = "ping"
 	MethodShutdown        = "shutdown"
@@ -36,70 +41,70 @@ const (
 	MethodSessionDelete   = "session.delete"
 	MethodSessionTruncate = "session.truncate"
 	MethodSessionAppend   = "session.append"
-	MethodAgentCancel     = "agent.cancel"
 	MethodSkillSetEnabled = "skill.setEnabled"
 	MethodWorkspaceDelete = "workspace.delete"
 	MethodProviderDelete  = "provider.delete"
-	MethodCardList        = "card.list"
-	MethodCardCreate      = "card.create"
-	MethodCardMove        = "card.move"
-	MethodCardGet         = "card.get"
-	MethodCardReview      = "card.review"
-	MethodCardDispatch    = "card.dispatch"
-	MethodCardDelete      = "card.delete"
-	MethodCardAssign      = "card.assign"
 	MethodGoalCreate      = "goal.create"
 	MethodGoalDelete      = "goal.delete"
 	MethodGoalList        = "goal.list"
 	MethodGoalDrive       = "goal.drive"
-	MethodGoalGet         = "goal.get"
-	MethodWorkspaceOpen   = "workspace.open"
-	MethodWorkspaceList   = "workspace.list"
-	MethodTerminalSpawn   = "terminal.spawn"
-	MethodTerminalList    = "terminal.list"
-	MethodTerminalWrite   = "terminal.write"
-	MethodTerminalResize  = "terminal.resize"
-	MethodTerminalKill    = "terminal.kill"
-	MethodTerminalRestart = "terminal.restart"
-	MethodTerminalAttach  = "terminal.attach"
-	MethodTerminalDetach  = "terminal.detach"
-	MethodSSHOpen         = "ssh.open"
-	MethodGitStatus       = "git.status"
-	MethodGitDiff         = "git.diff"
-	MethodSkillList       = "skill.list"
-	MethodSkillInstall    = "skill.install"
-	MethodSkillUninstall  = "skill.uninstall"
-	MethodMarketList      = "market.list"
-	MethodMarketPublish   = "market.publish"
-	MethodMarketInstall   = "market.install"
-	MethodProviderList    = "provider.list"
-	MethodProviderUpsert  = "provider.upsert"
+
+	// Reviewing a turn's changes, compacting a chat, reasoning effort, and
+	// the project's rule files.
+	MethodEditsList        = "edits.list"
+	MethodEditsAccept      = "edits.accept"
+	MethodEditsRevert      = "edits.revert"
+	MethodSessionCompact   = "session.compact"
+	MethodSessionSetEffort = "session.setEffort"
+	MethodWorkspaceRules   = "workspace.rules"
+	MethodGoalGet          = "goal.get"
+	MethodWorkspaceOpen    = "workspace.open"
+	MethodWorkspaceList    = "workspace.list"
+	MethodTerminalSpawn    = "terminal.spawn"
+	MethodTerminalList     = "terminal.list"
+	MethodTerminalWrite    = "terminal.write"
+	MethodTerminalResize   = "terminal.resize"
+	MethodTerminalRestart  = "terminal.restart"
+	MethodTerminalAttach   = "terminal.attach"
+	MethodTerminalDetach   = "terminal.detach"
+	MethodSSHOpen          = "ssh.open"
+	// the SSH servers this machine already knows (~/.ssh/config, known_hosts)
+	MethodSSHDiscover = "ssh.discover"
+	// the folders of the daemon's machine, for picking a project on a server
+	MethodFileDirs = "fs.dirs"
+
+	// A session's terminals (terminal mode): list them, open one, hand one
+	// a message, and keep the deck's layout with the session.
+	MethodTerminalPanes     = "terminal.panes"
+	MethodTerminalNewPane   = "terminal.newPane"
+	MethodTerminalSendPane  = "terminal.sendPane"
+	MethodTerminalLayoutGet = "terminal.layout.get"
+	MethodTerminalLayoutSet = "terminal.layout.set"
+	MethodSkillList         = "skill.list"
+	MethodSkillInstall      = "skill.install"
+	MethodSkillUninstall    = "skill.uninstall"
+	MethodMarketList        = "market.list"
+	MethodProviderList      = "provider.list"
+	MethodProviderUpsert    = "provider.upsert"
+	// ask a saved provider for its models again
+	MethodProviderRefresh = "provider.refreshModels"
 	MethodSecretPut       = "secret.put"
 	MethodPermissionList  = "permission.list"
 	MethodPermissionPut   = "permission.put"
-	MethodMemoryPut       = "memory.put"
-	MethodMemoryList      = "memory.list"
-	MethodSubscribe       = "events.subscribe"
-	MethodFileTree        = "fs.tree"
-	MethodFileRead        = "fs.read"
-	MethodCardLogs        = "card.logs"
-	MethodCardAddArtifact = "card.addArtifact"
-	MethodAgentDelete     = "agent.delete"
-	MethodGitCommit       = "git.commit"
-	MethodGitLog          = "git.log"
-	MethodHealthStream    = "health.stream"
+	// Permission questions waiting for the user, and their answers.
+	MethodPermissionAsks   = "permission.asks"
+	MethodPermissionAnswer = "permission.answer"
+	MethodMemoryPut        = "memory.put"
+	MethodMemoryList       = "memory.list"
+	MethodFileTree         = "fs.tree"
+	MethodFileRead         = "fs.read"
+	MethodAgentDelete      = "agent.delete"
 
 	// Harness policy methods.
-	MethodHarnessGet       = "harness.get"
-	MethodHarnessSet       = "harness.set"
-	MethodHarnessCompose   = "harness.compose"
-	MethodHarnessMutations = "harness.mutations"
-	MethodHarnessPresets   = "harness.presets"
-	MethodUsageGet         = "usage.get"
-
-	// Cost / billing.
-	MethodCostGet        = "cost.get"
-	MethodCostPriceTable = "cost.pricetable"
+	MethodUsageGet = "usage.get"
+	// usage.report: tokens per day and per model over a range of days, by
+	// Rove's own count and by the providers' reports (see internal/usage)
+	MethodUsageReport = "usage.report"
 
 	// Automation.
 	MethodAutomationList      = "automation.list"
@@ -111,23 +116,16 @@ const (
 	MethodAutomationUninstall = "automation.uninstall"
 
 	// Git branch / push / PR.
-	MethodGitBranch = "git.branch"
-	MethodGitPush   = "git.push"
-	MethodGitPR     = "git.pr"
 
 	// Checkpoint / snapshot.
 	MethodCheckpointTake    = "checkpoint.take"
 	MethodCheckpointList    = "checkpoint.list"
 	MethodCheckpointRestore = "checkpoint.restore"
-	MethodCheckpointDrop    = "checkpoint.drop"
 
 	// Diff hunk accept/reject.
-	MethodGitApplyHunk  = "git.applyHunk"
-	MethodGitRejectHunk = "git.rejectHunk"
 
 	// Session export / import.
 	MethodSessionExport = "session.export"
-	MethodSessionImport = "session.import"
 
 	// MCP server registry.
 	MethodMCPList     = "mcp.list"
@@ -144,15 +142,11 @@ const (
 	MethodIndexBuild  = "index.build"
 	MethodIndexSearch = "index.search"
 
-	// Parallel orchestration.
-	MethodOrchParallel = "orch.parallel"
-
 	// Multi-profile role system.
 	MethodProfileList       = "profile.list"
 	MethodProfileUpsert     = "profile.upsert"
 	MethodProfileDelete     = "profile.delete"
 	MethodProfileSetDefault = "profile.setDefault"
-	MethodProfileGetDefault = "profile.getDefault"
 
 	// Session linking and relay.
 	MethodSessionLink   = "session.link"
@@ -160,7 +154,99 @@ const (
 	MethodSessionLinked = "session.linked"
 	MethodSessionRelay  = "session.relay"
 
+	// Project map (CodeMap port).
+	MethodMapStatus    = "codemap.status"
+	MethodMapBuild     = "codemap.build"
+	MethodMapGraph     = "codemap.graph"
+	MethodMapQuery     = "codemap.query"
+	MethodMapNeighbors = "codemap.neighbors"
+	MethodMapImpact    = "codemap.impact"
+	MethodMapShare     = "codemap.share"
+
+	// Context map: one canvas of sessions joined by cables.
+	MethodCtxGet        = "ctxmap.get"
+	MethodCtxPlace      = "ctxmap.place"
+	MethodCtxRemove     = "ctxmap.remove"
+	MethodCtxLink       = "ctxmap.link"
+	MethodCtxUpdateLink = "ctxmap.updateLink"
+	MethodCtxUnlink     = "ctxmap.unlink"
+	MethodCtxSend       = "ctxmap.send"
+	MethodCtxRelays     = "ctxmap.relays"
+	// MethodCtxAssistant returns the chat's context-map assistant, a hidden
+	// child session, making it on first use.
+	MethodCtxAssistant = "ctxmap.assistant"
+
+	// Connections: the systems a user can connect their own account to.
+	// catalog lists them with what is installed and signed in; terminal
+	// opens the system terminal for an install or a browser sign-in; add
+	// saves an agent system as a provider.
+	MethodConnectCatalog  = "connect.catalog"
+	MethodConnectTerminal = "connect.terminal"
+	MethodConnectAdd      = "connect.add"
+
+	// Session personas: expert characters, profiles and feature toggles.
+	MethodPersonaCatalog = "persona.catalog"
+	MethodPersonaGet     = "persona.get"
+	MethodPersonaSet     = "persona.set"
+	MethodPersonaClear   = "persona.clear"
+	MethodPersonaBadges  = "persona.badges"
+	MethodSessionCancel  = "session.cancel"
+
+	// Subagents: the work a chat handed out with team_delegate, and what the
+	// user can do to one while it runs or after (see internal/team).
+	MethodSubagentList    = "subagent.list"
+	MethodSubagentStop    = "subagent.stop"
+	MethodSubagentSteer   = "subagent.steer"
+	MethodSubagentApply   = "subagent.apply"
+	MethodSubagentDiscard = "subagent.discard"
+
+	// Teamwork: a planned, phased team effort in a chat (see internal/teamwork).
+	MethodWorkPlan        = "teamwork.plan"
+	MethodWorkGet         = "teamwork.get"
+	MethodWorkRemovePhase = "teamwork.removePhase"
+	MethodWorkRemoveAgent = "teamwork.removeAgent"
+	MethodWorkApprove     = "teamwork.approve"
+	MethodWorkCancel      = "teamwork.cancel"
+	MethodWorkDiscard     = "teamwork.discard"
+	MethodWorkRetry       = "teamwork.retry"
+
+	// Staff: the Agent space's team — who is working on what, tasks handed
+	// out with a report back, and each agent's notes (see internal/staff).
+	MethodStaffMembers    = "staff.members"
+	MethodStaffAssign     = "staff.assign"
+	MethodStaffTasks      = "staff.tasks"
+	MethodStaffSeen       = "staff.seen"
+	MethodStaffStop       = "staff.stop"
+	MethodStaffNoteAdd    = "staff.noteAdd"
+	MethodStaffNoteDelete = "staff.noteDelete"
+	// watches: an agent watching a chat on the Session Map
+	MethodStaffWatches     = "staff.watches"
+	MethodStaffWatchSave   = "staff.watchSave"
+	MethodStaffWatchDelete = "staff.watchDelete"
+	// schedules: an agent given a task on a timer
+	MethodStaffSchedules      = "staff.schedules"
+	MethodStaffScheduleSave   = "staff.scheduleSave"
+	MethodStaffScheduleDelete = "staff.scheduleDelete"
+	// a task's changes, kept in its own checkout: see, apply, throw away,
+	// or open as a pull request
+	MethodStaffDiff    = "staff.diff"
+	MethodStaffApply   = "staff.apply"
+	MethodStaffDiscard = "staff.discard"
+	MethodStaffPR      = "staff.pr"
+	// monitors: a command checked on a timer, a task when it shows something new
+	MethodStaffMonitors       = "staff.monitors"
+	MethodStaffMonitorSave    = "staff.monitorSave"
+	MethodStaffMonitorDelete  = "staff.monitorDelete"
+	MethodStaffMonitorPresets = "staff.monitorPresets"
+	// handoffs: one agent's finished work handed on to another
+	MethodStaffHandoffs      = "staff.handoffs"
+	MethodStaffHandoffSave   = "staff.handoffSave"
+	MethodStaffHandoffDelete = "staff.handoffDelete"
+
+	// Models: what every configured provider offers, and a chat's own pick.
+	MethodModelList       = "model.list"
+	MethodSessionModel    = "session.model"
+	MethodSessionSetModel = "session.setModel"
+
 	// Agent role management.
-	MethodAgentSetRole = "agent.setRole"
-	MethodAgentRoles   = "agent.roles"
 )

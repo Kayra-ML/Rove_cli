@@ -1,16 +1,13 @@
 package daemon
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Kayra-ML/rove/internal/config"
@@ -19,22 +16,40 @@ import (
 )
 
 type Daemon struct {
-	cfg    config.Config
-	app    *core.App
-	server *rpc.Server
-	wg     sync.WaitGroup
+	cfg     config.Config
+	app     *core.App
+	server  *rpc.Server
+	wg      sync.WaitGroup
+	release func()
 }
 
+// ErrAlreadyRunning means another daemon holds this data dir.
+var ErrAlreadyRunning = errors.New("a rovecode daemon is already running for this data dir")
+
 func Start(cfg config.Config) (*Daemon, error) {
-	app, err := core.Open(cfg)
+	release, err := lockDataDir(cfg.DataDir)
 	if err != nil {
 		return nil, err
 	}
-	d := &Daemon{cfg: cfg, app: app, server: rpc.New(app)}
+	// Bind the port before anything else: if it is taken, fail here. Serving
+	// on in the background would pass the readiness check below against
+	// whichever process does own the port.
+	ln, err := net.Listen("tcp", cfg.ListenHTTP)
+	if err != nil {
+		release()
+		return nil, fmt.Errorf("http %s: %w", cfg.ListenHTTP, err)
+	}
+	app, err := core.Open(cfg)
+	if err != nil {
+		ln.Close()
+		release()
+		return nil, err
+	}
+	d := &Daemon{cfg: cfg, app: app, server: rpc.New(app), release: release}
 	d.wg.Add(2)
 	go func() {
 		defer d.wg.Done()
-		if err := d.server.ServeHTTP(cfg.ListenHTTP); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := d.server.ServeHTTPOn(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fmt.Fprintf(os.Stderr, "http: %v\n", err)
 		}
 	}()
@@ -51,20 +66,14 @@ func Start(cfg config.Config) (*Daemon, error) {
 	return d, nil
 }
 
-func (d *Daemon) App() *core.App { return d.app }
-
 func (d *Daemon) Stop() error {
 	_ = d.server.Close()
 	err := d.app.Close()
 	d.wg.Wait()
+	if d.release != nil {
+		d.release()
+	}
 	return err
-}
-
-func (d *Daemon) Wait() {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	<-ch
-	_ = d.Stop()
 }
 
 func waitHTTP(addr string, d time.Duration) error {
@@ -101,24 +110,4 @@ func PIDPath(dataDir string) string {
 
 func WritePID(dataDir string) error {
 	return os.WriteFile(PIDPath(dataDir), []byte(fmt.Sprintf("%d", os.Getpid())), 0o600)
-}
-
-func RunForeground(ctx context.Context, cfg config.Config) error {
-	d, err := Start(cfg)
-	if err != nil {
-		return err
-	}
-	_ = WritePID(cfg.DataDir)
-	defer os.Remove(PIDPath(cfg.DataDir))
-	done := make(chan struct{})
-	go func() {
-		d.Wait()
-		close(done)
-	}()
-	select {
-	case <-ctx.Done():
-		return d.Stop()
-	case <-done:
-		return nil
-	}
 }

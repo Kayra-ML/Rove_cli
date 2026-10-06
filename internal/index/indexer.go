@@ -15,8 +15,8 @@ import (
 
 // Result is a single FTS5 search hit.
 type Result struct {
-	Path    string `json:"path"`
-	Snippet string `json:"snippet"`
+	Path    string  `json:"path"`
+	Snippet string  `json:"snippet"`
 	Rank    float64 `json:"rank"`
 }
 
@@ -54,13 +54,6 @@ func (idx *Indexer) Close() error {
 		return idx.db.Close()
 	}
 	return nil
-}
-
-// IsIndexed reports whether a full build has completed at least once.
-func (idx *Indexer) IsIndexed() bool {
-	idx.mu.RLock()
-	defer idx.mu.RUnlock()
-	return idx.indexed
 }
 
 // skipDir returns true for directories that should be excluded from indexing.

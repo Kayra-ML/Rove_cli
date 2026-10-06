@@ -34,9 +34,13 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 14, G: 16, B: 20, A: 255},
 		AssetServer:      &assetserver.Options{Assets: assets},
 		OnStartup:        app.startup,
+		OnShutdown:       app.shutdown,
 		Bind:             []interface{}{app},
 		Mac: &mac.Options{
-			TitleBar:   mac.TitleBarHiddenInset(),
+			// Hidden, not HiddenInset: the inset look comes from an invisible
+			// toolbar, and in full screen macOS reveals that toolbar with the
+			// title bar — a band twice as thick as a normal title bar.
+			TitleBar:   mac.TitleBarHidden(),
 			Appearance: mac.NSAppearanceNameDarkAqua,
 			About: &mac.AboutInfo{
 				Title:   "Rove Code",

@@ -1,80 +1,248 @@
-import { useCallback, useState, useEffect, useRef } from "react";
+import { lazy, Suspense, useCallback, useState, useEffect } from "react";
 import { rpc, hydrateConnection } from "~/lib/rpc";
-import type { Card, Session, TerminalSession, Workspace } from "~/lib/types";
+import type { Session, TerminalSession, Workspace } from "~/lib/types";
 import { Chat } from "./Chat";
-import { Kanban } from "./Kanban";
-import { Terminal } from "./Terminal";
-import { Settings } from "./Settings";
-import { WorkspacePanel, SessionPanel } from "./Workspace";
-import { FileTree } from "./FileTree";
-import { SessionRail } from "./SessionRail";
-import { CheckpointPanel } from "./CheckpointPanel";
-import { SkillMarket } from "./SkillMarket";
-import { CardDetail } from "./CardDetail";
 import { Icon } from "./Icons";
-import { Extensions } from "./Extensions";
-import { GeneralPanel } from "./GeneralPanel";
-import { UsageCard } from "./UsageCard";
-import { CreateAgentPopover, ConnectSSHPopover, loadSSHHosts } from "./Popovers";
+import { TerminalDeck } from "./TerminalDeck";
+import { SessionSidebar } from "./SessionSidebar";
+import { TeamBar } from "./TeamBar";
+import { StaffBoard } from "./StaffBoard";
+import { PanelGuard } from "./PanelGuard";
+import { SubagentDock } from "./SubagentDock";
+import { PermissionAsk } from "./PermissionAsk";
+import type { AutoTab } from "./AutomationPage";
+// pages opened now and then load when first opened: the maps, settings and
+// the skill market are most of the app's code, and a chat needs none of it
+const AutomationPage = lazy(() => import("./AutomationPage").then((m) => ({ default: m.AutomationPage })));
+const Settings = lazy(() => import("./Settings").then((m) => ({ default: m.Settings })));
+const SkillMarket = lazy(() => import("./SkillMarket").then((m) => ({ default: m.SkillMarket })));
+const TeamworkView = lazy(() => import("./TeamworkView").then((m) => ({ default: m.TeamworkView })));
 import { Toasts } from "./Toasts";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
-import { useAgents } from "~/hooks/useApi";
-import type { SSHTarget } from "~/lib/types";
+import { useWorkspaces } from "~/hooks/useApi";
+import { usePersonaBadges } from "~/hooks/usePersona";
 import { usePrefs } from "~/hooks/usePrefs";
+import { applyTheme, isLightTheme, type ThemeId } from "~/lib/themes";
 import { t } from "~/lib/i18n";
+import {
+  adopt, freshDraft, loadModes, loadTop, modeFor, saveModes, saveTop, spaceOf, TOPS, withMode,
+  type ChatMode, type Space, type Top,
+} from "~/lib/spaces";
 import brandMark from "~/assets/logo-256.png";
+import { watchFinishes } from "~/lib/notify";
+import { ConnectionBanner, ConnectionMenu } from "./ConnectionMenu";
+import { FolderBrowserHost } from "./FolderBrowser";
+import { ApiBanner } from "./ApiBanner";
+import type { OfficeIntent } from "./OfficePanel";
+import { UpdateBanner } from "./UpdateBanner";
+import { SIDE, columns, dragWidth, fitsSide, loadWidth, maxWidth } from "~/lib/layout";
+import { pollWhileVisible } from "~/lib/poll";
 
-type WinKind = "chat" | "board" | "terminal" | "market";
-type Win = { id: string; kind: WinKind; title: string; termId?: string };
+// The app is three spaces, one page each: Office (pick an agent, talk to
+// it), Chat (session work; each chat has a mode: orchestra, teamwork or
+// terminal) and Automation (Context Map and Session Map).
+// Market is a page reached from the sidebar.
+const TOP_KEYS: Record<Exclude<Top, "market">, string> = { office: "spaceOffice", chat: "spaceChat", automation: "spaceAutomation" };
+const AUTO_TAB_KEY = "aether.auto.tab";
+
+type SettingsSection = "appearance" | "workspace" | "providers" | "goals" | "agents" | "roster" | "permissions" | "automation" | "memory" | "profiles" | "servers" | "usage";
+
+// What a space has open: a chat, a draft (a chat that exists only once its
+// first message is sent; in Office, with the agent it will talk to), or
+// nothing.
+type Sel = { session: Session | null; draft: boolean; agent: string | null };
+const NOTHING: Sel = { session: null, draft: false, agent: null };
+
+function readFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v == null ? fallback : v === "1";
+  } catch {
+    return fallback;
+  }
+}
+
+function writeFlag(key: string, v: boolean) {
+  try { localStorage.setItem(key, v ? "1" : "0"); } catch { /* private */ }
+}
+
+function loadAutoTab(): AutoTab {
+  try {
+    const v = localStorage.getItem(AUTO_TAB_KEY);
+    return v === "sessions" || v === "code" ? v : "context";
+  } catch {
+    return "context";
+  }
+}
 
 export function App() {
   const [ready, setReady] = useState(false);
-  const [windows, setWindows] = useState<Win[]>(() => [
-    { id: "chat", kind: "chat", title: t("chat") },
-    { id: "board", kind: "board", title: t("board") },
-  ]);
-  const [activeWin, setActiveWin] = useState("chat");
+  const [top, setTopState] = useState<Top>(loadTop);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [termSessions, setTermSessions] = useState<TerminalSession[]>([]);
-  const [selectedCard, setSelectedCard] = useState<Card | null>(null);
-  const [activeSession, setActiveSession] = useState<Session | null>(null);
-  const [agentActivity, setAgentActivity] = useState<Record<string, string>>({});
+  const [sel, setSel] = useState<Record<Space, Sel>>({ office: NOTHING, chat: NOTHING });
+  // Orchestra: which channel of the Chat space's chat is open — null is the
+  // chat itself, otherwise a subagent's channel opened from the dock.
+  const [channel, setChannel] = useState<Session | null>(null);
+  // each Chat-space chat keeps the mode it was last used in
+  const [modes, setModesState] = useState<Record<string, ChatMode>>(loadModes);
+  const [autoTab, setAutoTabState] = useState<AutoTab>(loadAutoTab);
+  const { badgeFor } = usePersonaBadges();
+  // A shell opened from Settings → Servers, waiting to land in a
+  // TerminalDeck pane once the Chat space shows its terminal mode.
+  const [pendingShell, setPendingShell] = useState<TerminalSession | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<"appearance" | "workspace" | "providers" | "goals" | "agents" | "roster" | "permissions" | "automation" | "memory">("appearance");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
+  const [officeIntent, setOfficeIntent] = useState<OfficeIntent>({ mode: "list" });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const { lang, theme } = usePrefs();
-  const [createAgentOpen, setCreateAgentOpen] = useState(false);
-  const [connectOpen, setConnectOpen] = useState(false);
-  const [sshHosts, setSshHosts] = useState<SSHTarget[]>(() => loadSSHHosts());
-  const { agents, reload: reloadAgents } = useAgents();
-  const newChatRef = useRef<(() => Promise<Session | null>) | null>(null);
+  const { workspaces } = useWorkspaces();
   const [rpcOk, setRpcOk] = useState(true);
-  const [updateAvail, setUpdateAvail] = useState<string | null>(null);
-  const [auxOpen, setAuxOpen] = useState(() => localStorage.getItem("aether.auxOpen") !== "0");
-  const [sideOpen, setSideOpen] = useState(() => localStorage.getItem("aether.sideOpen") === "1");
+  const [sideOpen, setSideOpen] = useState(() => readFlag("aether.shell.side", true));
+  const [sideW, setSideW] = useState(() => loadWidth("aether.shell.sideW", SIDE.def, SIDE.min, SIDE.max));
+  const [dragging, setDragging] = useState(false);
+  const [winW, setWinW] = useState(() => window.innerWidth);
 
-  const toggleAux = useCallback(() => {
-    setAuxOpen((v) => {
-      const next = !v;
-      localStorage.setItem("aether.auxOpen", next ? "1" : "0");
+  // desktop notifications for work that finishes while the app is away
+  useEffect(() => watchFinishes(), []);
+
+  useEffect(() => {
+    const on = () => setWinW(window.innerWidth);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+
+  const space: Space | null = top === "office" || top === "chat" ? top : null;
+  const chat = sel.chat;
+  const chatMode = modeFor(modes, chat.session?.id);
+  // the sidebar belongs to Office and Chat; Automation and Market are full pages
+  const showSide = sideOpen && space !== null;
+  // too narrow for two columns: the list still opens, but over the page
+  const sideOver = showSide && !fitsSide(winW);
+  // Shrinking the window can push a saved width past its current ceiling
+  // (see lib/layout maxWidth); ease it back down instead of overflowing. A
+  // live drag already stays in bounds via dragWidth.
+  useEffect(() => {
+    setSideW((w) => Math.min(w, maxWidth("left", 0, winW)));
+  }, [winW, showSide]);
+
+  const setTop = useCallback((next: Top) => {
+    setTopState(next);
+    saveTop(next);
+  }, []);
+  const setModes = useCallback((next: Record<string, ChatMode>) => {
+    setModesState(next);
+    saveModes(next);
+  }, []);
+  const setChatMode = useCallback((m: ChatMode) => {
+    setModesState((cur) => {
+      const next = withMode(cur, sel.chat.session?.id, m);
+      saveModes(next);
       return next;
     });
+    if (m !== "orchestra") setChannel(null);
+  }, [sel.chat.session]);
+  const setAutoTab = useCallback((next: AutoTab) => {
+    setAutoTabState(next);
+    try { localStorage.setItem(AUTO_TAB_KEY, next); } catch { /* private */ }
   }, []);
 
-  const toggleSide = useCallback(() => {
-    setSideOpen((v) => {
-      const next = !v;
-      localStorage.setItem("aether.sideOpen", next ? "1" : "0");
-      return next;
+  // Selecting a chat also moves the workspace to the chat's own, so the
+  // file tree and new chats follow it.
+  const followWorkspace = useCallback((s: Session) => {
+    if (s.workspaceId && s.workspaceId !== workspace?.id) {
+      const ws = workspaces.find((w) => w.id === s.workspaceId);
+      if (ws) setWorkspace(ws);
+    }
+  }, [workspace, workspaces]);
+
+  const selectIn = useCallback((sp: Space, s: Session) => {
+    setSel((cur) => ({ ...cur, [sp]: { session: s, draft: false, agent: null } }));
+    if (sp === "chat") setChannel((c) => (c && c.parentId === s.id ? c : null));
+    followWorkspace(s);
+  }, [followWorkspace]);
+
+  // openSession opens a chat from anywhere (a map, a terminal pane) in the
+  // space it belongs to.
+  const openSession = useCallback((s: Session) => {
+    const sp = spaceOf(s, badgeFor(s.id));
+    selectIn(sp, s);
+    setTop(sp);
+  }, [badgeFor, selectIn, setTop]);
+
+  // openSessionById opens a chat known only by its id (a task's, from the
+  // Agent space's board).
+  const openSessionById = useCallback(async (id: string) => {
+    const list = (await rpc<Session[]>("session.list", { workspaceId: "" }).catch(() => [])) ?? [];
+    const s = list.find((x) => x.id === id);
+    if (s) openSession(s);
+  }, [openSession]);
+
+  // The Agent space's board: no chat open.
+  const showBoard = useCallback(() => {
+    setSel((cur) => ({ ...cur, office: NOTHING }));
+    setTop("office");
+  }, [setTop]);
+
+  // A new chat in a space: a draft (in Office, with the agent it will talk
+  // to; in Chat, in the mode picked for it, else the one used last). Office
+  // without an agent has nothing to open.
+  const newDraft = useCallback((sp: Space, agent: string | null = null, mode?: ChatMode) => {
+    const next: Sel = sp === "office" && !agent ? NOTHING : { session: null, draft: true, agent };
+    setSel((cur) => ({ ...cur, [sp]: next }));
+    if (sp === "chat") {
+      setChannel(null);
+      // a new chat starts in the mode picked for it, else the one used last
+      setModesState((cur) => {
+        const m = mode ? withMode(freshDraft(cur), null, mode) : freshDraft(cur);
+        saveModes(m);
+        return m;
+      });
+    }
+    setTop(sp);
+  }, [setTop]);
+
+  // The draft's first message creates the chat, in its space and (in
+  // Office) already talking to its agent, in one call. The daemon names it
+  // after that message.
+  const createFromDraft = useCallback(async (sp: Space): Promise<Session> => {
+    const agent = sel[sp].agent;
+    const s = await rpc<Session>("session.create", {
+      title: "",
+      workspaceId: workspace?.id ?? "",
+      space: sp,
+      // an office chat talks to one of the office's agents (a profile)
+      profileIds: sp === "office" && agent ? [agent] : [],
     });
-  }, []);
+    setSel((cur) => ({ ...cur, [sp]: { session: s, draft: false, agent: null } }));
+    if (sp === "chat") {
+      setChannel(null);
+      setModes(adopt(modes, s.id));
+    }
+    window.dispatchEvent(new Event("rove:sessions"));
+    window.dispatchEvent(new Event("rove:persona"));
+    return s;
+  }, [sel, workspace, modes, setModes]);
 
-
-  const openNewChat = useCallback(async () => {
-    const sess = await newChatRef.current?.();
-    if (sess) setActiveSession(sess);
-    setActiveWin("chat");
+  const toggleSide = useCallback(() => setSideOpen((v) => { writeFlag("aether.shell.side", !v); return !v; }), []);
+  const openSettings = useCallback((section: SettingsSection = "appearance") => {
+    setSettingsSection(section);
+    setOfficeIntent({ mode: "list" });
+    setSettingsOpen(true);
   }, []);
+  // the office is staffed in Settings → Office: a new agent, or one to edit
+  const openOffice = useCallback((intent: OfficeIntent) => {
+    setSettingsSection("profiles");
+    setOfficeIntent(intent);
+    setSettingsOpen(true);
+  }, []);
+  // Market has no tab of its own — remember what was showing before it so
+  // the back button can return there.
+  const [beforeMarket, setBeforeMarket] = useState<Exclude<Top, "market">>("office");
+  const openMarket = useCallback(() => {
+    if (top !== "market") setBeforeMarket(top);
+    setTop("market");
+  }, [top, setTop]);
+  const openMap = useCallback((tab: AutoTab) => { setAutoTab(tab); setTop("automation"); }, [setAutoTab, setTop]);
 
   useEffect(() => {
     hydrateConnection()
@@ -90,437 +258,275 @@ export function App() {
         setPaletteOpen((v) => !v);
         return;
       }
+      // ⌘1…⌘3 switch spaces
+      if (meta && /^[1-3]$/.test(e.key)) {
+        e.preventDefault();
+        setTop(TOPS[Number(e.key) - 1]);
+        return;
+      }
       if (e.key !== "Escape") return;
       if (paletteOpen) setPaletteOpen(false);
       else if (settingsOpen) setSettingsOpen(false);
-      else if (createAgentOpen) setCreateAgentOpen(false);
-      else if (connectOpen) setConnectOpen(false);
-      else if (selectedCard) setSelectedCard(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [settingsOpen, createAgentOpen, connectOpen, selectedCard, paletteOpen]);
-
-  useEffect(() => {
-    setWindows((w) =>
-      w.map((x) =>
-        x.id === "chat" ? { ...x, title: t("chat", lang) } :
-        x.id === "board" ? { ...x, title: t("board", lang) } :
-        x.id === "market" ? { ...x, title: t("marketplace", lang) } :
-        x,
-      ),
-    );
-  }, [lang]);
-
-  const spawnTerm = useCallback(async (focus = true) => {
-    try {
-      const sess = await rpc<TerminalSession>("terminal.spawn", {
-        kind: "user",
-        cwd: workspace?.path ?? "",
-      });
-      setTermSessions((s) => [...s, sess]);
-      const win: Win = {
-        id: `term-${sess.id}`,
-        kind: "terminal",
-        title: sess.title || "shell",
-        termId: sess.id,
-      };
-      setWindows((w) => (w.some((x) => x.id === win.id) ? w : [...w, win]));
-      if (focus) setActiveWin(win.id);
-      return sess;
-    } catch {
-      return null;
-    }
-  }, [workspace]);
-
-  const attachSSH = useCallback((sess: TerminalSession) => {
-    setTermSessions((s) => (s.some((t) => t.id === sess.id) ? s : [...s, sess]));
-    const win: Win = {
-      id: `term-${sess.id}`,
-      kind: "terminal",
-      title: sess.title || sess.ssh?.host || "ssh",
-      termId: sess.id,
-    };
-    setWindows((w) => (w.some((x) => x.id === win.id) ? w : [...w, win]));
-    setActiveWin(win.id);
-    setSshHosts(loadSSHHosts());
-  }, []);
-
-  const reopenSSH = useCallback(async (target: SSHTarget) => {
-    try {
-      const sess = await rpc<TerminalSession>("ssh.open", target);
-      attachSSH(sess);
-    } catch {
-      setConnectOpen(true);
-    }
-  }, [attachSSH]);
+  }, [settingsOpen, paletteOpen, setTop]);
 
   useEffect(() => {
     if (!ready) return;
-    const tick = () => {
-      rpc("ping").then(() => setRpcOk(true)).catch(() => setRpcOk(false));
-    };
-    tick();
-    const id = window.setInterval(tick, 8000);
-    return () => window.clearInterval(id);
+    return pollWhileVisible(() => { rpc("ping").then(() => setRpcOk(true)).catch(() => setRpcOk(false)); }, 8000);
   }, [ready]);
 
-  useEffect(() => {
-    if (!ready) return;
-    const CURRENT = "v0.1.0";
-    const check = async () => {
-      try {
-        const r = await fetch(
-          "https://api.github.com/repos/Kayra-ML/Rove_cli/releases/latest",
-          { headers: { Accept: "application/vnd.github+json" } }
-        );
-        if (!r.ok) return;
-        const j = (await r.json()) as { tag_name?: string };
-        const tag = j.tag_name ?? "";
-        if (tag && tag !== CURRENT) setUpdateAvail(tag);
-      } catch { /* offline */ }
-    };
-    void check();
-    const id = window.setInterval(check, 6 * 60 * 60 * 1000); // every 6h
-    return () => window.clearInterval(id);
-  }, [ready]);
-
-  const closeWin = useCallback((id: string) => {
-    const win = windows.find((x) => x.id === id);
-    if (win?.kind === "terminal" && win.termId) {
-      void rpc("terminal.kill", { id: win.termId }).catch(() => {});
-      setTermSessions((s) => s.filter((t) => t.id !== win.termId));
-    }
-    setWindows((w) => {
-      const next = w.filter((x) => x.id !== id);
-      setActiveWin((cur) => (cur === id ? (next[0]?.id ?? "chat") : cur));
-      return next;
-    });
-  }, [windows]);
-
-  const openMarket = useCallback(() => {
-    setWindows((w) => (w.some((x) => x.id === "market") ? w : [...w, { id: "market", kind: "market", title: t("marketplace", lang) }]));
-    setActiveWin("market");
-  }, [lang]);
+  const dark = !isLightTheme(theme as ThemeId);
+  const toggleTheme = useCallback(() => applyTheme(dark ? "daylight" : "graphite"), [dark]);
 
   if (!ready) {
-    return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>
-        Starting Rove Code…
-      </div>
-    );
+    return <div className="boot">Starting Rove Code…</div>;
   }
 
-  const current = windows.find((w) => w.id === activeWin) ?? windows[0];
+  // Drag the gutter to resize the sidebar; double-click resets it.
+  const startDrag = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const start = sideW;
+    let last = start;
+    setDragging(true);
+    const move = (ev: PointerEvent) => {
+      last = dragWidth("left", start, ev.clientX - startX, 0, window.innerWidth);
+      setSideW(last);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setDragging(false);
+      try { localStorage.setItem("aether.shell.sideW", String(last)); } catch { /* private */ }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const resetWidth = () => {
+    setSideW(SIDE.def);
+    try { localStorage.removeItem("aether.shell.sideW"); } catch { /* private */ }
+  };
 
-  function renderMain() {
-    if (!current) return null;
-    if (current.kind === "market") {
-      return (
-        <div className={`body body-market${sideOpen ? "" : " body-side-off"}`}>
-          <div className="sidebar" hidden={!sideOpen}>
-            <div className="aux-head">
-              <span>{t("sessions", lang)}</span>
-              <button type="button" className="icon-btn" title="‹" onClick={toggleSide}>‹</button>
-            </div>
-            <div className="sidebar-top">
-              <Extensions onOpenMarket={openMarket} marketActive />
-              <WorkspacePanel active={workspace} onSelect={setWorkspace} onNewChat={() => void openNewChat()} />
-              <SessionPanel
-                workspaceId={workspace?.id}
-                activeId={activeSession?.id ?? null}
-                onSelect={setActiveSession}
-                createRef={newChatRef}
+  // A conversation in a space. `session` may be a subagent's channel (Orchestra).
+  const conversation = (sp: Space, session: Session | null, team?: React.ReactNode) => (
+    <Chat
+      // the subagents belong to the chat, whichever of its channels is open
+      dock={<SubagentDock session={sp === "chat" ? chat.session : session} lang={lang} onOpen={(c) => { if (sp === "chat") setChannel(c); else selectIn(sp, c); }} />}
+      key={sp}
+      workspaceId={workspace?.id}
+      workspacePath={workspace?.path}
+      session={session}
+      draft={sel[sp].draft && !sel[sp].session}
+      onCreateSession={() => createFromDraft(sp)}
+      // /new keeps talking to the same agent
+      onNewDraft={() => newDraft(sp, sp === "office" ? (sel.office.session ? badgeFor(sel.office.session.id)?.profileId ?? null : sel.office.agent) : null)}
+      onSession={(s) => { selectIn(sp, s); window.dispatchEvent(new Event("rove:sessions")); }}
+      onOpenMap={() => openMap("context")}
+      onOpenContext={() => openMap("sessions")}
+      team={team}
+    />
+  );
+
+  function renderCenter() {
+    switch (top) {
+      case "office": {
+        const o = sel.office;
+        // nothing open: the team itself, who is working on what
+        if (!o.session && !o.draft) {
+          return (
+            <div className="panel center-panel">
+              <StaffBoard
+                workspace={workspace}
+                onOpenSession={(id) => void openSessionById(id)}
+                onTalk={(id) => newDraft("office", id)}
+                onEdit={(id) => openOffice({ mode: "edit", id })}
+                onAdd={() => openOffice({ mode: "new" })}
               />
             </div>
-            <UsageCard />
-            <GeneralPanel />
-          </div>
-          <div className="main catalog-main">
-            <SkillMarket />
-          </div>
-        </div>
-      );
-    }
-    if (current.kind === "terminal") {
-      return (
-        <Terminal
-          sessions={termSessions}
-          activeId={current.termId ?? null}
-          onSelect={(id) => setActiveWin(`term-${id}`)}
-          onSpawn={() => void spawnTerm(true)}
-          onRestart={(id) => {
-            void rpc<TerminalSession>("terminal.restart", { id }).then((sess) => {
-              setTermSessions((s) => s.map((t) => (t.id === id ? { ...t, ...sess, id } : t)));
-            }).catch(() => {});
-          }}
-          onDetach={(id) => {
-            void rpc("terminal.detach", { id }).catch(() => {});
-          }}
-          hideTabs
-          themeKey={theme}
-        />
-      );
-    }
-    return (
-      <div className={`body${auxOpen ? "" : " body-aux-off"}${sideOpen ? "" : " body-side-off"}`}>
-        <div className="sidebar" hidden={!sideOpen}>
-          <div className="aux-head">
-            <span>{t("sessions", lang)}</span>
-            <button type="button" className="icon-btn" title="‹" onClick={toggleSide}>‹</button>
-          </div>
-          <div className="sidebar-top">
-            <Extensions onOpenMarket={openMarket} marketActive={false} />
-            <WorkspacePanel active={workspace} onSelect={setWorkspace} onNewChat={() => void openNewChat()} />
-            <SessionPanel
-              workspaceId={workspace?.id}
-              activeId={activeSession?.id ?? null}
-              onSelect={setActiveSession}
-              createRef={newChatRef}
+          );
+        }
+        return <div className="panel center-panel">{conversation("office", o.session)}</div>;
+      }
+      case "automation":
+        return (
+          <Suspense fallback={<div className="panel center-panel" />}>
+            <AutomationPage
+              tab={autoTab}
+              onTab={setAutoTab}
+              workspace={workspace}
+              sessionId={chat.session?.id}
+              onOpenSession={openSession}
             />
+          </Suspense>
+        );
+      case "market":
+        return (
+          <div className="panel center-panel">
+            <div className="market-head">
+              <button type="button" className="market-back" onClick={() => setTop(beforeMarket)}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M15 5l-7 7 7 7" /></svg>
+                {t("back", lang)}
+              </button>
+            </div>
+            <Suspense fallback={null}><SkillMarket /></Suspense>
           </div>
-          <UsageCard />
-          <GeneralPanel />
-        </div>
-        <div className="main">
-          {current.kind === "board" ? (
-            <Kanban workspaceId={workspace?.id} sessionId={activeSession?.id} onSelectCard={setSelectedCard} />
-          ) : (
-            <Chat
-              workspaceId={workspace?.id}
-              session={activeSession}
-              onSession={setActiveSession}
-              onActivity={setAgentActivity}
-              onOpenBoard={() => setActiveWin("board")}
-              onSelectCard={setSelectedCard}
-            />
-          )}
-        </div>
-        {auxOpen ? (
-        <div className="aux">
-          <div className="aux-head">
-            <span>{t("plans", lang)}</span>
-            <button type="button" className="icon-btn" title="›" onClick={toggleAux}>›</button>
-          </div>
-          <SessionRail
-            session={activeSession}
-            workspaceId={workspace?.id}
-            workspacePath={workspace?.path}
-            activity={agentActivity}
-            onSelectCard={setSelectedCard}
-            onOpenRoster={() => { setSettingsSection("roster"); setSettingsOpen(true); }}
-          />
-          {workspace && (
-            <>
-              <div className="section-label">{t("workspaces", lang)}</div>
-              <div style={{ padding: "4px 12px 10px", color: "var(--muted)", fontSize: 12 }}>
-                <div style={{ fontWeight: 600, color: "var(--text)" }}>{workspace.name}</div>
-                <div style={{ fontSize: 10, marginTop: 2 }}>{workspace.path}</div>
-                <div style={{ fontSize: 10, marginTop: 2 }}>branch: {workspace.defaultBranch}</div>
+        );
+      default:
+        switch (chatMode) {
+          case "terminal":
+            return (
+              <TerminalDeck
+                activeSession={chat.session}
+                draft={chat.draft && !chat.session}
+                onCreateSession={() => createFromDraft("chat")}
+                workspaceId={workspace?.id}
+                // a chat focused in a pane is being used in the terminal
+                onFocusSession={(s) => { selectIn("chat", s); setModesState((cur) => { const next = withMode(cur, s.id, "terminal"); saveModes(next); return next; }); }}
+                onOpenMap={() => openMap("context")}
+                onOpenContext={() => openMap("sessions")}
+                onNewSession={() => newDraft("chat")}
+                incomingShell={pendingShell}
+                onConsumedShell={() => setPendingShell(null)}
+                themeKey={theme}
+              />
+            );
+          case "teamwork":
+            return (
+              <div className="panel center-panel flush">
+                <Suspense fallback={null}>
+                  <TeamworkView
+                    session={chat.session}
+                    draft={chat.draft && !chat.session}
+                    onCreateSession={() => createFromDraft("chat")}
+                    workspace={workspace}
+                  />
+                </Suspense>
               </div>
-              <FileTree root={workspace.path} />
-              <CheckpointPanel workspacePath={workspace.path} />
-            </>
-          )}
-          <div className="aux-bottom">
-            <div className="section-label section-label-row">
-              <span>{t("profiles", lang)}</span>
-              <button className="icon-btn" title={t("newProfile", lang)} onClick={() => setCreateAgentOpen(true)}>
-                <Icon name="plus" size={15} />
-              </button>
-            </div>
-            {agents.length === 0 ? (
-              <div style={{ padding: "4px 14px", color: "var(--faint)", fontSize: 12 }}>{t("noneYet", lang)}</div>
-            ) : (
-              agents.map((a) => (
-                <button
-                  key={a.id}
-                  className="nav-item"
-                  onClick={() => { setSettingsSection("roster"); setSettingsOpen(true); }}
-                  title={`${a.provider} / ${a.model}`}
-                >
-                  <span className={`pip${a.status === "running" ? " run" : " on"}`} style={{ marginRight: 8 }} />
-                  {a.name}
-                  <span style={{ display: "block", fontSize: 11, color: "var(--muted)", paddingLeft: 15 }}>
-                    {a.model}
-                  </span>
-                </button>
-              ))
-            )}
-            <div className="section-label section-label-row">
-              <span>{t("servers", lang)}</span>
-              <button className="icon-btn" title={t("connectServer", lang)} onClick={() => setConnectOpen(true)}>
-                <Icon name="plus" size={15} />
-              </button>
-            </div>
-            {sshHosts.length === 0 ? (
-              <div style={{ padding: "4px 14px", color: "var(--faint)", fontSize: 12 }}>{t("noneYet", lang)}</div>
-            ) : (
-              sshHosts.map((h) => {
-                const live = termSessions.find((s) => s.ssh?.host === h.host && s.status === "running");
-                const label = h.user ? `${h.user}@${h.host}` : h.host;
-                return (
-                  <button
-                    key={`${h.user ?? ""}@${h.host}:${h.port ?? 22}`}
-                    className="nav-item"
-                    onClick={() => {
-                      if (live) {
-                        setActiveWin(`term-${live.id}`);
-                        return;
-                      }
-                      void reopenSSH(h);
-                    }}
-                    title={`${h.host}:${h.port ?? 22}`}
-                  >
-                    <span className={`pip${live ? " on" : ""}`} style={{ marginRight: 8 }} />
-                    {label}
-                    <span style={{ display: "block", fontSize: 11, color: "var(--muted)", paddingLeft: 15 }}>
-                      :{h.port ?? 22} · {h.authMethod || "agent"}
-                    </span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-        ) : (
-          <button type="button" className="aux-show" onClick={toggleAux} title={t("plans", lang)}>‹</button>
-        )}
-      </div>
-    );
+            );
+          default: // orchestra: the conversation; a subagent's channel opens over it
+            return (
+              <div className="panel center-panel">
+                {conversation("chat", channel ?? chat.session, channel ? <TeamBar channel={channel} onClose={() => setChannel(null)} /> : undefined)}
+              </div>
+            );
+        }
+    }
   }
 
   return (
-    <div className="app">
-      <div className="topbar">
-        <span className="brand">
-          <img className="brand-mark" src={brandMark} alt="" />
-          Rove
-        </span>
-        <div className="win-tabs">
-          {windows.map((w) => (
+    <div className="shell">
+      <header className="titlebar2">
+        <div className="tb-left">
+          <span className="tb-brand">
+            <img src={brandMark} alt="" />
+            Rove
+          </span>
+          <button type="button" className={`tb-icon${showSide ? "" : " off"}`} title={t("toggleSide", lang)} onClick={toggleSide} disabled={space === null}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /></svg>
+          </button>
+        </div>
+        <nav className="tb-modes" role="tablist">
+          {TOPS.map((m) => (
             <button
-              key={w.id}
-              className={`win-tab${activeWin === w.id ? " active" : ""}`}
-              onClick={() => setActiveWin(w.id)}
-              onAuxClick={(e) => {
-                if (e.button === 1 && w.kind !== "chat" && w.kind !== "board") {
-                  e.preventDefault();
-                  closeWin(w.id);
-                }
-              }}
+              key={m}
+              type="button"
+              role="tab"
+              aria-selected={top === m}
+              className={top === m ? "on" : ""}
+              onClick={() => setTop(m)}
             >
-              {w.kind === "chat" && <Icon name="chat" size={12} />}
-              {w.kind === "board" && <Icon name="kanban" size={12} />}
-              {w.kind === "terminal" && <Icon name="terminal" size={12} />}
-              {w.kind === "market" && <Icon name="cart" size={12} />}
-              <span>{w.title}</span>
-              {w.kind !== "chat" && w.kind !== "board" && (
-                <span
-                  className="win-tab-x"
-                  onClick={(e) => { e.stopPropagation(); closeWin(w.id); }}
-                >
-                  ×
-                </span>
-              )}
+              {t(TOP_KEYS[m], lang)}
             </button>
           ))}
-          <button className="win-tab add" title="+" onClick={() => void spawnTerm(true)}>
-            +
-          </button>
+        </nav>
+        <div className="tb-right">
+          <button type="button" className="tb-icon" title="⌘K" onClick={() => setPaletteOpen(true)}><Icon name="search" size={15} /></button>
+          <span className={`tb-status${rpcOk ? " ok" : ""}`} title={rpcOk ? t("connected", lang) : "offline"} />
+          <ConnectionMenu lang={lang} onAddServer={() => openSettings("servers")} />
+          <button type="button" className="tb-icon" title={t("settings", lang)} onClick={() => openSettings("appearance")}><Icon name="sliders" size={15} /></button>
         </div>
-        <div className="spacer" />
-        <div className="icon-nav">
-          <button
-            type="button"
-            className={`icon-btn${!sideOpen ? " active" : ""}`}
-            title={t("sessions", lang)}
-            onClick={toggleSide}
-          >
-            {sideOpen ? "‹" : "›"}
-          </button>
-          <button
-            type="button"
-            className={`icon-btn${!auxOpen ? " active" : ""}`}
-            title={t("plans", lang)}
-            onClick={toggleAux}
-          >
-            {auxOpen ? "›" : "‹"}
-          </button>
-          <button
-            className={`icon-btn${settingsOpen ? " active" : ""}`}
-            title={t("settings", lang)}
-            onClick={() => { setSettingsSection("appearance"); setSettingsOpen(true); }}
-          >
-            <Icon name="sliders" size={18} />
-          </button>
-        </div>
+      </header>
+
+      <div
+        className={`shell-body${showSide ? "" : " no-side"}${sideOver ? " side-over" : ""}${dragging ? " resizing" : ""}`}
+        style={{ gridTemplateColumns: columns(showSide && !sideOver ? sideW : null, null) }}
+      >
+        {sideOver && (
+          <button type="button" className="side-scrim" aria-label={t("close", lang)} onClick={toggleSide} />
+        )}
+        {showSide && space && (
+          <SessionSidebar
+            key={space}
+            space={space}
+            workspace={workspace}
+            onSelectWorkspace={setWorkspace}
+            activeSessionId={sel[space].session?.id ?? null}
+            onSelectSession={(s) => selectIn(space, s)}
+            draft={sel[space].draft && !sel[space].session}
+            draftAgent={sel[space].agent}
+            onNewChat={(agent, mode) => newDraft(space, agent ?? null, mode)}
+            onBoard={showBoard}
+            rpcOk={rpcOk}
+            dark={dark}
+            onToggleTheme={toggleTheme}
+            onOpenMarket={openMarket}
+            onOpenSettings={() => openSettings("appearance")}
+            onOfficeAgent={openOffice}
+            chatMode={chatMode}
+            onChatMode={setChatMode}
+          />
+        )}
+        {showSide && !sideOver && (
+          <div
+            className={`gutter${dragging ? " active" : ""}`}
+            role="separator"
+            aria-orientation="vertical"
+            title={t("resizeHint", lang)}
+            onPointerDown={startDrag}
+            onDoubleClick={resetWidth}
+          />
+        )}
+        <main className="shell-main"><PanelGuard key={top}>{renderCenter()}</PanelGuard></main>
       </div>
 
-      {renderMain()}
-
-      {selectedCard && (
-        <CardDetail card={selectedCard} onClose={() => setSelectedCard(null)} />
-      )}
 
       {settingsOpen && (
-        <Settings
-          onClose={() => setSettingsOpen(false)}
-          onSelectWorkspace={setWorkspace}
-          initialSection={settingsSection}
-          workspace={workspace}
-          sessionId={activeSession?.id}
-        />
-      )}
-      {createAgentOpen && (
-        <CreateAgentPopover onClose={() => { setCreateAgentOpen(false); void reloadAgents(); }} />
-      )}
-      {connectOpen && (
-        <ConnectSSHPopover
-          onClose={() => setConnectOpen(false)}
-          onOpened={attachSSH}
-        />
+        <Suspense fallback={null}>
+          <Settings
+            onClose={() => setSettingsOpen(false)}
+            onSelectWorkspace={setWorkspace}
+            onOpenShell={(sess) => { setPendingShell(sess); setTop("chat"); setChatMode("terminal"); }}
+            initialSection={settingsSection}
+            officeIntent={officeIntent}
+            workspace={workspace}
+            sessionId={chat.session?.id}
+          />
+        </Suspense>
       )}
 
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
+        onOpenSession={openSession}
         actions={[
-          { id: "chat", label: t("chat", lang), run: () => setActiveWin("chat") },
-          { id: "board", label: t("board", lang), run: () => setActiveWin("board") },
-          { id: "market", label: t("marketplace", lang), run: () => openMarket() },
-          { id: "term", label: "Terminal", run: () => void spawnTerm() },
-          { id: "settings", label: t("settings", lang), run: () => { setSettingsSection("appearance"); setSettingsOpen(true); } },
-          { id: "memory", label: t("memory", lang), run: () => { setSettingsSection("memory"); setSettingsOpen(true); } },
-          { id: "new", label: t("slashNew", lang), run: () => void openNewChat() },
+          ...TOPS.map((m) => ({ id: m, label: t(TOP_KEYS[m], lang), run: () => setTop(m) })),
+          { id: "market", label: t("marketplace", lang), run: openMarket },
+          { id: "settings", label: t("settings", lang), run: () => openSettings("appearance") },
+          { id: "profiles", label: t("personaProfile", lang), run: () => openSettings("profiles") },
+          { id: "memory", label: t("memory", lang), run: () => openSettings("memory") },
+          { id: "new", label: t("slashNew", lang), run: () => newDraft("chat") },
         ] as PaletteAction[]}
       />
 
+      <PermissionAsk />
       <Toasts />
+      <ConnectionBanner lang={lang} />
+      <ApiBanner lang={lang} />
+      <FolderBrowserHost lang={lang} />
 
-      {updateAvail && (
-        <div className="update-banner">
-          <span>🎉 Güncelleme mevcut: <strong>{updateAvail}</strong></span>
-          <a
-            href={`https://github.com/Kayra-ML/Rove_cli/releases/tag/${updateAvail}`}
-            target="_blank" rel="noreferrer"
-            className="update-link"
-          >
-            İndir
-          </a>
-          <button className="update-dismiss" onClick={() => setUpdateAvail(null)} title="Kapat">×</button>
-        </div>
-      )}
-
-      <div className="status">
-        <span style={{ color: rpcOk ? "var(--ok)" : "var(--bad)" }}>● {rpcOk ? t("connected", lang) : "offline"}</span>
-        {workspace && (
-          <span style={{ marginLeft: 4 }}>
-            {workspace.name} / {workspace.defaultBranch}
-          </span>
-        )}
-        <span style={{ marginLeft: "auto", color: "var(--faint)" }}>Rove Code</span>
-      </div>
+      <UpdateBanner lang={lang} />
     </div>
   );
 }

@@ -205,24 +205,3 @@ func (p *CodePanel) renderDiffLines(innerW int) []string {
 	}
 	return out
 }
-
-// ParseUnifiedDiff converts a unified diff string into DiffLine slices.
-func ParseUnifiedDiff(raw string) []DiffLine {
-	var out []DiffLine
-	for _, line := range strings.Split(raw, "\n") {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			out = append(out, DiffLine{Kind: DiffAdd, Text: line[1:]})
-		} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-			out = append(out, DiffLine{Kind: DiffRemove, Text: line[1:]})
-		} else if strings.HasPrefix(line, "@@") {
-			out = append(out, DiffLine{Kind: DiffContext, Text: line})
-		} else {
-			text := line
-			if len(text) > 0 && text[0] == ' ' {
-				text = text[1:]
-			}
-			out = append(out, DiffLine{Kind: DiffContext, Text: text})
-		}
-	}
-	return out
-}

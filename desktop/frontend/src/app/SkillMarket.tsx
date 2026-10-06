@@ -5,6 +5,7 @@ import { useSkills } from "~/hooks/useApi";
 import { Icon } from "./Icons";
 import { usePrefs } from "~/hooks/usePrefs";
 import { t } from "~/lib/i18n";
+import { toast } from "~/lib/toast";
 
 type Kind = "plugins" | "skills" | "automations";
 
@@ -30,7 +31,7 @@ function humanSeconds(s: number) {
 }
 
 export function SkillMarket() {
-  const { skills } = useSkills();
+  const { skills, reload: reloadSkills } = useSkills();
   const { lang } = usePrefs();
   const [kind, setKind] = useState<Kind>("plugins");
   const [query, setQuery] = useState("");
@@ -92,6 +93,35 @@ export function SkillMarket() {
   }, [loadAutomations]);
 
   // --- Skill/plugin state ---
+  const [skillBusy, setSkillBusy] = useState<Record<string, boolean>>({});
+
+  // Putting a catalog entry on the machine, and taking it off again. The
+  // name is the identity on both sides, so the card can say which it is
+  // without holding anything of its own.
+  const installSkill = useCallback(async (name: string) => {
+    setSkillBusy((b) => ({ ...b, [name]: true }));
+    try {
+      await rpc("skill.install", { name });
+      await reloadSkills();
+    } catch (e) {
+      toast(String((e as Error)?.message ?? e));
+    } finally {
+      setSkillBusy((b) => ({ ...b, [name]: false }));
+    }
+  }, [reloadSkills]);
+
+  const removeSkill = useCallback(async (name: string) => {
+    setSkillBusy((b) => ({ ...b, [name]: true }));
+    try {
+      await rpc("skill.uninstall", { name });
+      await reloadSkills();
+    } catch (e) {
+      toast(String((e as Error)?.message ?? e));
+    } finally {
+      setSkillBusy((b) => ({ ...b, [name]: false }));
+    }
+  }, [reloadSkills]);
+
   const search = useCallback(async (q = query) => {
     setSearching(true);
     try {
@@ -136,6 +166,27 @@ export function SkillMarket() {
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [marketSkills]);
 
+  const installedNames = useMemo(
+    () => new Set(skills.map((s: InstalledSkill) => s.manifest.name)),
+    [skills],
+  );
+
+  // the one action a catalog card offers: put it on, or take it off
+  const cardAction = (name: string) => {
+    const on = installedNames.has(name);
+    const busy = skillBusy[name];
+    return (
+      <button
+        type="button"
+        className={`catalog-act${on ? " on" : ""}`}
+        disabled={busy}
+        onClick={() => void (on ? removeSkill(name) : installSkill(name))}
+      >
+        {busy ? t("installing", lang) : on ? t("remove", lang) : t("install", lang)}
+      </button>
+    );
+  };
+
   // Installed jobs lookup by name
   const jobByName = useMemo(() => {
     const m = new Map<string, AutomationJob>();
@@ -174,13 +225,13 @@ export function SkillMarket() {
         {kind === "plugins" && (
           <>
             <div className="catalog-meta">
-              RoveCode · {plugins.length}{searching ? " · searching" : ""}
-              {installedFiltered.length > 0 ? ` · installed ${installedFiltered.length}` : ""}
+              {t("catalogLabel", lang)} · {plugins.length}{searching ? ` · ${t("searching", lang)}` : ""}
+              {installedFiltered.length > 0 ? ` · ${t("installed", lang)} ${installedFiltered.length}` : ""}
             </div>
             {plugins.length === 0 && !searching ? (
               <div className="empty">
-                <strong>No plugins</strong>
-                <p>Catalog seeds from RoveCode_plugins on first boot.</p>
+                <strong>{t("noPlugins", lang)}</strong>
+                <p>{t("noPluginsHint", lang)}</p>
               </div>
             ) : (
               <div className="catalog-grid">
@@ -192,18 +243,19 @@ export function SkillMarket() {
                         {s.manifest.name}
                         <span>v{s.manifest.version}</span>
                       </h3>
-                      <p>{s.manifest.description || "No description"}</p>
+                      <p>{s.manifest.description || t("noDescription", lang)}</p>
                       <div className="chip-row" style={{ margin: "8px 0 0" }}>
                         <span className="chip">rovecode</span>
                         {s.manifest.author && <span className="chip">{s.manifest.author}</span>}
                       </div>
+                      <div className="catalog-card-foot">{cardAction(s.manifest.name)}</div>
                     </div>
                   </article>
                 ))}
               </div>
             )}
             {installedFiltered.length > 0 && (
-              <div className="catalog-meta" style={{ marginTop: 18 }}>Installed · {installedFiltered.length}</div>
+              <div className="catalog-meta" style={{ marginTop: 18 }}>{t("installed", lang)} · {installedFiltered.length}</div>
             )}
             {installedFiltered.length > 0 && (
               <div className="catalog-grid">
@@ -215,7 +267,7 @@ export function SkillMarket() {
                         {s.manifest.name}
                         <span>v{s.manifest.version}</span>
                       </h3>
-                      <p>{s.manifest.description || "No description"}</p>
+                      <p>{s.manifest.description || t("noDescription", lang)}</p>
                       {permBits(s.manifest.permissions).length > 0 && (
                         <div className="chip-row" style={{ margin: "8px 0 0" }}>
                           {permBits(s.manifest.permissions).map((b) => (
@@ -234,12 +286,12 @@ export function SkillMarket() {
         {kind === "skills" && (
           <>
             <div className="catalog-meta">
-              Marketplace · {marketSkills.length}{searching ? " · searching" : ""}
+              {t("marketplace", lang)} · {marketSkills.length}{searching ? ` · ${t("searching", lang)}` : ""}
             </div>
             {marketSkills.length === 0 && !searching ? (
               <div className="empty">
-                <strong>Browse the catalog</strong>
-                <p>Type a capability — rust, test, layout.</p>
+                <strong>{t("marketBrowse", lang)}</strong>
+                <p>{t("marketBrowseHint", lang)}</p>
               </div>
             ) : (
               skillGroups.map(([plugin, items]) => (
@@ -253,9 +305,10 @@ export function SkillMarket() {
                           <h3>
                             {s.manifest.name}
                             <span>v{s.manifest.version}</span>
-                            {s.signed && <span className="badge ok" style={{ marginLeft: 6 }}>signed</span>}
+                            {s.signed && <span className="badge ok" style={{ marginLeft: 6 }}>{t("signed", lang)}</span>}
                           </h3>
-                          <p>{s.manifest.description || "No description"}</p>
+                          <p>{s.manifest.description || t("noDescription", lang)}</p>
+                          <div className="catalog-card-foot">{cardAction(s.manifest.name)}</div>
                         </div>
                       </article>
                     ))}
@@ -270,12 +323,12 @@ export function SkillMarket() {
           <>
             {/* ── Catalog ── */}
             <div className="catalog-meta" style={{ marginBottom: 6 }}>
-              Katalog · {automCatalog.length}{automLoading ? " · yükleniyor" : ""}
+              {t("catalogLabel", lang)} · {automCatalog.length}{automLoading ? ` · ${t("loading", lang)}` : ""}
             </div>
             {automCatalog.length === 0 && !automLoading ? (
               <div className="empty">
                 <strong>Otomasyon bulunamadı</strong>
-                <p>Bundled otomasyonlar yükleniyor...</p>
+                <p>{t("loading", lang)}</p>
               </div>
             ) : (
               <div className="catalog-grid">

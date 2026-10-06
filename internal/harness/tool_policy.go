@@ -20,27 +20,41 @@ type ToolExecConfig struct {
 	Explanation string
 }
 
-// Coding tool names (subset of standard tools).
+// Coding tools: the built-ins that read and change a workspace. Names match
+// the registered tools (internal/tool).
 var codingToolNames = []string{
-	"fs.read", "fs.write", "fs.patch", "fs.tree", "fs.search",
-	"shell.run", "git.status", "git.commit", "git.log",
-	"terminal.spawn", "terminal.write",
+	"read_file", "write_file", "patch_file", "list_dir",
+	"shell", "git_status", "git_commit",
 }
 
-// Research tool names.
-var researchToolNames = []string{
-	"web.search", "web.fetch", "browser.open", "browser.screenshot",
-	"fs.read", "fs.search",
-}
+// Research tools: the read-only built-ins, plus any registered tool (MCP,
+// skills) whose name says it looks things up.
+var researchToolNames = []string{"read_file", "list_dir", "git_status"}
 
-// Resolve computes the ToolExecConfig from the profile.
+var researchHints = []string{"web", "search", "fetch", "browse", "http", "docs"}
+
+// Resolve computes the ToolExecConfig from the profile. AllowedTools is nil
+// when nothing is restricted (every tool the session allows).
 func (tp *ToolPolicy) Resolve() ToolExecConfig {
 	var allowed []string
 	var reasons []string
+	research := func() []string {
+		out := append([]string{}, researchToolNames...)
+		for _, n := range tp.AllAvailableTools {
+			l := strings.ToLower(n)
+			for _, h := range researchHints {
+				if strings.Contains(l, h) {
+					out = append(out, n)
+					break
+				}
+			}
+		}
+		return out
+	}
 
 	switch {
 	case tp.Profile.HasTool(RestrictedTools):
-		// Use explicitly configured set, fall back to coding tools.
+		// the profile's own list, else the coding tools
 		allowed = tp.Profile.AllowedTools
 		if len(allowed) == 0 {
 			allowed = codingToolNames
@@ -48,7 +62,7 @@ func (tp *ToolPolicy) Resolve() ToolExecConfig {
 		reasons = append(reasons, "restricted: "+itoa(len(allowed))+" tools allowed")
 
 	case tp.Profile.HasTool(CodingTools) && tp.Profile.HasTool(ResearchTools):
-		allowed = union(codingToolNames, researchToolNames)
+		allowed = union(codingToolNames, research())
 		reasons = append(reasons, "coding+research tools")
 
 	case tp.Profile.HasTool(CodingTools):
@@ -56,24 +70,27 @@ func (tp *ToolPolicy) Resolve() ToolExecConfig {
 		reasons = append(reasons, "coding tools")
 
 	case tp.Profile.HasTool(ResearchTools):
-		allowed = researchToolNames
-		reasons = append(reasons, "research tools")
+		allowed = research()
+		reasons = append(reasons, "research tools (read-only)")
 
 	default:
-		// No restriction — expose all available tools.
-		allowed = tp.AllAvailableTools
 		reasons = append(reasons, "all tools (no restriction)")
 	}
 
-	// Intersect with actually-registered tools.
-	if len(tp.AllAvailableTools) > 0 {
+	// only tools that exist; a policy that leaves nothing falls back to the
+	// read-only built-ins rather than a run with no tools at all
+	if allowed != nil && len(tp.AllAvailableTools) > 0 {
 		allowed = intersect(allowed, tp.AllAvailableTools)
+		if len(allowed) == 0 {
+			allowed = intersect(researchToolNames, tp.AllAvailableTools)
+		}
 	}
 
 	concurrency := tp.Profile.EffectiveToolConcurrency()
 	if tp.Profile.HasTool(ParallelTools) {
-		reasons = append(reasons, "parallel tool calls (max "+itoa(concurrency)+")")
+		reasons = append(reasons, "read-only tool calls in parallel (max "+itoa(concurrency)+")")
 	} else {
+		concurrency = 1
 		reasons = append(reasons, "sequential tool calls")
 	}
 
@@ -82,24 +99,6 @@ func (tp *ToolPolicy) Resolve() ToolExecConfig {
 		MaxConcurrency: concurrency,
 		Explanation:    strings.Join(reasons, "; "),
 	}
-}
-
-// FilterSpecs filters a tool spec list to only allowed names.
-func FilterSpecs[T interface{ GetName() string }](specs []T, cfg ToolExecConfig) []T {
-	if len(cfg.AllowedTools) == 0 {
-		return specs
-	}
-	allowed := map[string]bool{}
-	for _, name := range cfg.AllowedTools {
-		allowed[name] = true
-	}
-	out := make([]T, 0, len(specs))
-	for _, s := range specs {
-		if allowed[s.GetName()] {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 func union(a, b []string) []string {

@@ -88,7 +88,9 @@ type Denied struct {
 }
 
 func (d Denied) Error() string {
-	return "permission " + string(d.Decision) + " for " + string(d.Action) + " " + d.Target
+	return d.Target + " is not allowed in this chat (rule: " + string(d.Decision) +
+		"). Do not try it again: do the work another way, or ask the user to allow " +
+		string(d.Action) + " in Settings → Permissions."
 }
 
 func match(pattern, target string) bool {

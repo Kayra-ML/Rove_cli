@@ -68,9 +68,119 @@ jobs:
           path: rovecode-${{ matrix.goos }}-${{ matrix.goarch }}*
           if-no-files-found: error
 
+  macos-app:
+    name: Build macOS app
+    runs-on: macos-latest
+    env:
+      # signing is optional: without these secrets the app is signed ad hoc
+      HAS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
+      HAS_NOTARY: ${{ secrets.MACOS_NOTARY_APPLE_ID != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      - name: Import signing certificate
+        if: env.HAS_CERT == 'true'
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          KC="$RUNNER_TEMP/sign.keychain-db"
+          security create-keychain -p ci "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p ci "$KC"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KC"
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+      - name: Store notary credentials
+        if: env.HAS_NOTARY == 'true'
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          NOTARY_TEAM: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: xcrun notarytool store-credentials rovecode --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM"
+      - name: Build app with its daemon
+        env:
+          VERSION: ${{ github.ref_name }}
+          ROVECODE_SIGN_ID: ${{ secrets.MACOS_SIGN_ID }}
+          ROVECODE_NOTARY_PROFILE: ${{ env.HAS_NOTARY == 'true' && 'rovecode' || '' }}
+        run: |
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          (cd desktop/frontend && npm ci)
+          (cd desktop && wails build -platform darwin/universal -clean)
+          APP="desktop/build/bin/Rove Code.app"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION#v}" "$APP/Contents/Info.plist"
+          for arch in arm64 amd64; do
+            CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "rovecode-$arch" ./cmd/sextant
+          done
+          lipo -create -output "$APP/Contents/MacOS/rovecode" rovecode-arm64 rovecode-amd64
+          ./scripts/sign-mac.sh "$APP"
+          ditto -c -k --keepParent "$APP" RoveCode-macos-universal.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RoveCode-macos-universal
+          path: RoveCode-macos-universal.zip
+          if-no-files-found: error
+
+  windows-app:
+    name: Build Windows app
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      - name: Add Go bin to PATH
+        run: echo "$(go env GOPATH)\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - name: Build frontend
+        working-directory: desktop/frontend
+        run: npm ci
+      - name: Build Windows app
+        env:
+          VERSION: ${{ github.ref_name }}
+        working-directory: desktop
+        run: |
+          $ver = $env:VERSION
+          wails build -platform windows/amd64 -clean -ldflags "-s -w -X main.version=$ver"
+      - name: Build daemon (Windows)
+        env:
+          VERSION: ${{ github.ref_name }}
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          $ver = $env:VERSION
+          go build -trimpath -ldflags "-s -w -X main.version=$ver" `
+            -o desktop\build\bin\rovecode.exe .\cmd\sextant
+      - name: Package ZIP
+        run: |
+          $binDir = "desktop\build\bin"
+          $desktopExe = Get-ChildItem "$binDir\*.exe" | Where-Object { $_.Name -ne "rovecode.exe" } | Select-Object -First 1
+          $files = @($desktopExe.FullName, "$binDir\rovecode.exe", "README.md", "install-windows.ps1")
+          Compress-Archive -Path $files -DestinationPath RoveCode-windows-amd64.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RoveCode-windows-amd64
+          path: RoveCode-windows-amd64.zip
+          if-no-files-found: error
+
   release:
     name: Publish GitHub release
-    needs: [test, build]
+    needs: [test, build, macos-app, windows-app]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -83,7 +193,7 @@ jobs:
 
       - name: Generate checksums
         working-directory: dist
-        run: sha256sum rovecode-* > SHA256SUMS
+        run: sha256sum rovecode-* RoveCode-* > SHA256SUMS
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -92,10 +202,17 @@ jobs:
           name: "Rove Code ${{ github.ref_name }}"
           generate_release_notes: true
           body: |
-            ## Install on macOS or Linux
+            ## Install
 
+            **macOS / Linux:**
             ```bash
             curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install.sh | sh
+            ```
+
+            **Windows (PowerShell):**
+            ```powershell
+            Set-ExecutionPolicy -Scope Process Bypass
+            iwr https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install-windows.ps1 | iex
             ```
 
             ```bash
@@ -104,7 +221,7 @@ jobs:
             rovecode daemon       # shared daemon
             ```
 
-            The installer verifies the binary against `SHA256SUMS`. Desktop is a separate macOS app (`./build-mac.sh` → Applications → `rovecode desktop`).
+            The installer verifies binaries against `SHA256SUMS`. The macOS app (`RoveCode-macos-universal.zip`) carries its own daemon and updates itself from these releases. The Windows app (`RoveCode-windows-amd64.zip`) is a portable zip — extract and run.
 
             | Platform | Asset |
             |---|---|
@@ -112,7 +229,9 @@ jobs:
             | macOS Intel | `rovecode-darwin-amd64` |
             | Linux x64 | `rovecode-linux-amd64` |
             | Linux ARM64 | `rovecode-linux-arm64` |
-            | Windows x64 | `rovecode-windows-amd64.exe` |
+            | Windows x64 CLI | `rovecode-windows-amd64.exe` |
+            | macOS app (universal) | `RoveCode-macos-universal.zip` |
+            | Windows app (portable) | `RoveCode-windows-amd64.zip` |
           files: dist/*
           draft: false
           prerelease: false

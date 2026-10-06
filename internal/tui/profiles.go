@@ -52,14 +52,14 @@ func shortModel(model string) string {
 
 // ProfilePanel renders a profile list panel.
 type ProfilePanel struct {
-	profiles      []types.AgentProfile
-	active        string // current profile ID (active/default)
-	cursor        int
-	open          bool // modal open
-	width         int
-	height        int
-	newNameInput  string
-	enteringName  bool // inline new-profile prompt
+	profiles     []types.AgentProfile
+	active       string // current profile ID (active/default)
+	cursor       int
+	open         bool // modal open
+	width        int
+	height       int
+	newNameInput string
+	enteringName bool // inline new-profile prompt
 }
 
 func NewProfilePanel() *ProfilePanel {

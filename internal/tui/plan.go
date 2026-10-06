@@ -15,14 +15,13 @@ type TodoItem struct {
 }
 
 type PlanPanel struct {
-	todos         []TodoItem
-	stepN         int
-	stepM         int
-	active        bool
-	width         int
-	height        int
-	timerStr      string
-	needsApproval bool
+	todos    []TodoItem
+	stepN    int
+	stepM    int
+	active   bool
+	width    int
+	height   int
+	timerStr string
 
 	promptTokens     int64
 	completionTokens int64
@@ -42,7 +41,6 @@ func (p *PlanPanel) SetActive(active bool)     { p.active = active }
 func (p *PlanPanel) SetTodos(todos []TodoItem) { p.todos = todos }
 func (p *PlanPanel) SetStep(n, m int)          { p.stepN, p.stepM = n, m }
 func (p *PlanPanel) SetTimer(s string)         { p.timerStr = s }
-func (p *PlanPanel) SetNeedsApproval(v bool)   { p.needsApproval = v }
 
 func (p *PlanPanel) StartRun(label string) {
 	p.todos = []TodoItem{{Text: label, Current: true}}
@@ -120,13 +118,7 @@ func (p *PlanPanel) renderPlan(w, h int) []string {
 	}
 	rows := []string{ruledHeader("plan", w, meta, p.active)}
 
-	if p.needsApproval {
-		status := styleHighlight.Bold(true).Render("◆ needs you")
-		if p.timerStr != "" {
-			status += "  " + styleMeta.Render(p.timerStr)
-		}
-		rows = append(rows, "  "+truncateVisible(status, w-3), "")
-	} else if p.timerStr != "" {
+	if p.timerStr != "" {
 		rows = append(rows, "  "+styleSuccess.Render("● running")+"  "+styleMeta.Render(p.timerStr), "")
 	} else {
 		rows = append(rows, "")

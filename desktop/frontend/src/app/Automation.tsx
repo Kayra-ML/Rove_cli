@@ -5,16 +5,14 @@ import { toast } from "~/lib/toast";
 import { t } from "~/lib/i18n";
 import { usePrefs } from "~/hooks/usePrefs";
 
-const KINDS: { id: AutomationJob["kind"]; label: string }[] = [
-  { id: "sweep_ready", label: "Sweep ready → run" },
-  { id: "assign_idle", label: "Assign idle agents" },
-  { id: "drive_goals", label: "Drive pending goals" },
-];
+// what each job does, named for the person choosing it rather than for the
+// code behind it; the label comes from the dictionary like everything else
+const KINDS: AutomationJob["kind"][] = ["drive_goals"];
 
 export function Automation() {
   const { lang } = usePrefs();
   const [jobs, setJobs] = useState<AutomationJob[]>([]);
-  const [draft, setDraft] = useState({ name: "", kind: "sweep_ready" as string, everySeconds: 30 });
+  const [draft, setDraft] = useState({ name: "", kind: "drive_goals" as string, everySeconds: 30 });
 
   const load = useCallback(async () => {
     try {
@@ -55,7 +53,7 @@ export function Automation() {
               style={{ fontSize: 11 }}
               onClick={() => void save({ ...j, enabled: !j.enabled })}
             >
-              {j.enabled ? "on" : t("disabled", lang)}
+              {t(j.enabled ? "enabled" : "disabled", lang)}
             </button>
             <button
               className="ghost"
@@ -82,7 +80,7 @@ export function Automation() {
           style={{ flex: 1, minWidth: 120 }}
         />
         <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
-          {KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
+          {KINDS.map((k) => <option key={k} value={k}>{t(`autoKind_${k}`, lang)}</option>)}
         </select>
         <input
           type="number"

@@ -4,31 +4,16 @@ package terminal
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/eventbus"
 	"github.com/Kayra-ML/rove/internal/id"
-	"github.com/Kayra-ML/rove/internal/store"
 	"github.com/Kayra-ML/rove/internal/types"
 	"golang.org/x/sys/windows"
 )
-
-var ErrNotFound = errors.New("terminal: not found")
-
-type Engine struct {
-	store *store.Store
-	bus   *eventbus.Bus
-	mu    sync.Mutex
-	sess  map[types.ID]*live
-}
 
 type live struct {
 	meta   types.TerminalSession
@@ -38,10 +23,6 @@ type live struct {
 	cancel context.CancelFunc
 	mu     sync.Mutex
 	buf    []byte
-}
-
-func New(s *store.Store, bus *eventbus.Bus) *Engine {
-	return &Engine{store: s, bus: bus, sess: map[types.ID]*live{}}
 }
 
 func (e *Engine) Spawn(ctx context.Context, opts SpawnOpts) (types.TerminalSession, error) {
@@ -203,20 +184,6 @@ func (e *Engine) Restart(ctx context.Context, id types.ID) (types.TerminalSessio
 	return e.Spawn(ctx, opts)
 }
 
-func (e *Engine) Detach(id types.ID) error {
-	lv, err := e.get(id)
-	if err != nil {
-		return err
-	}
-	lv.mu.Lock()
-	lv.meta.Status = types.TermDetached
-	lv.mu.Unlock()
-	if e.store != nil {
-		return e.store.UpsertTerminal(context.Background(), lv.meta)
-	}
-	return nil
-}
-
 func (e *Engine) Attach(id types.ID) (types.TerminalSession, []byte, error) {
 	lv, err := e.get(id)
 	if err != nil {
@@ -243,54 +210,6 @@ func (e *Engine) Get(id types.ID) (types.TerminalSession, error) {
 	return lv.meta, nil
 }
 
-func (e *Engine) List() []types.TerminalSession {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	out := make([]types.TerminalSession, 0, len(e.sess))
-	for _, lv := range e.sess {
-		lv.mu.Lock()
-		out = append(out, lv.meta)
-		lv.mu.Unlock()
-	}
-	return out
-}
-
-func (e *Engine) get(id types.ID) (*live, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	lv, ok := e.sess[id]
-	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
-	}
-	return lv, nil
-}
-
 func defaultShell() (string, []string) { return "powershell.exe", nil }
-
-func sshCommand(t types.SSHTarget) (string, []string) {
-	port := t.Port
-	if port == 0 {
-		port = 22
-	}
-	args := []string{"-tt", "-p", fmt.Sprintf("%d", port)}
-	if t.KeyPath != "" {
-		key := t.KeyPath
-		if strings.HasPrefix(key, "~/") {
-			if home, err := os.UserHomeDir(); err == nil {
-				key = filepath.Join(home, key[2:])
-			}
-		}
-		args = append(args, "-i", key, "-o", "IdentitiesOnly=yes")
-	}
-	if t.AuthMethod == "agent" || t.AuthMethod == "key" {
-		args = append(args, "-o", "BatchMode=yes")
-	}
-	target := t.Host
-	if t.User != "" {
-		target = t.User + "@" + t.Host
-	}
-	args = append(args, target)
-	return "ssh", args
-}
 
 func CopyWriter(w io.Writer) io.Writer { return w }

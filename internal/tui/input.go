@@ -47,7 +47,6 @@ var defaultSlashCommands = []SlashCommand{
 
 	// ── Git / Version Control ──────────────────────────────────────────────
 	{Name: "/commit", Description: "Stage and commit all changes with a message", Prompt: "Stage all changes and write a conventional commit message that accurately describes what changed and why."},
-	{Name: "/pr", Description: "Draft a pull request description", Prompt: "Draft a pull request title and description for the current branch changes. Include summary, motivation, and testing steps."},
 	{Name: "/changelog", Description: "Generate a changelog entry", Prompt: "Generate a CHANGELOG.md entry for the current changes following Keep a Changelog format."},
 	{Name: "/branch", Description: "Suggest a branch name for the current task", Prompt: "Suggest a conventional git branch name for the current task (feat/, fix/, chore/, etc)."},
 	{Name: "/undo", Description: "Revert last agent change via checkpoint", Prompt: ""},

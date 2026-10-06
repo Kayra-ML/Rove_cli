@@ -11,6 +11,18 @@ export default defineConfig({
     alias: { "~": resolve(__dirname, "src") },
   },
   server: { port: 5173, strictPort: true },
-  build: { outDir: "dist", emptyOutDir: true },
-  test: { environment: "jsdom" },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // libraries change far less often than the app: their own files
+        manualChunks: {
+          react: ["react", "react-dom", "react-dom/client"],
+          markdown: ["react-markdown", "remark-gfm", "remark-breaks"],
+        },
+      },
+    },
+  },
+  test: { environment: "jsdom", setupFiles: ["src/test-setup.ts"] },
 });

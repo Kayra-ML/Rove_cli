@@ -116,10 +116,6 @@ type IndexEntry struct {
 
 func (c *Catalog) IndexPath() string { return filepath.Join(c.root, "index.json") }
 
-func (c *Catalog) PublishLocal(dir string) (types.MarketSkill, error) {
-	return c.publishDir(dir, "local-registry")
-}
-
 func (c *Catalog) publishDir(dir, source string) (types.MarketSkill, error) {
 	mp := firstManifest(dir)
 	if mp == "" {
@@ -179,14 +175,6 @@ func (c *Catalog) List() ([]IndexEntry, error) {
 	}
 	sort.Slice(idx, func(i, j int) bool { return idx[i].Manifest.Name < idx[j].Manifest.Name })
 	return idx, nil
-}
-
-func (c *Catalog) Install(name, version string) (types.InstalledSkill, error) {
-	src := filepath.Join(c.root, name, version)
-	if _, err := os.Stat(src); err != nil {
-		return types.InstalledSkill{}, fmt.Errorf("registry package not found: %s@%s", name, version)
-	}
-	return c.runtime.InstallFromDir(src)
 }
 
 // bundledEntries builds a catalog directly from the embedded FS without
@@ -380,4 +368,73 @@ func copyTree(src, dest string) error {
 		}
 		return os.WriteFile(target, b, info.Mode())
 	})
+}
+
+// Install puts a catalog entry on the machine so the agent can use it.
+// An entry may live in the disk registry or only in the bundled set that
+// ships with the binary, so both are tried in that order; either way what
+// reaches the skill folder is a plain directory with its manifest.
+func (c *Catalog) Install(name string) (types.InstalledSkill, error) {
+	if c.runtime == nil {
+		return types.InstalledSkill{}, fmt.Errorf("no skill runtime")
+	}
+	if name == "" {
+		return types.InstalledSkill{}, fmt.Errorf("install needs a name")
+	}
+	if dir := c.registryDir(name); dir != "" {
+		return c.runtime.Install(dir)
+	}
+	embedDir := bundledDir(name)
+	if embedDir == "" {
+		return types.InstalledSkill{}, fmt.Errorf("not in the catalog: %s", name)
+	}
+	tmp, err := materializeEmbedDir(embedDir)
+	if err != nil {
+		return types.InstalledSkill{}, err
+	}
+	defer os.RemoveAll(tmp)
+	return c.runtime.Install(tmp)
+}
+
+// registryDir is the published copy of a skill on disk, at its newest
+// version, or "" when the registry has never seen it.
+func (c *Catalog) registryDir(name string) string {
+	if c.root == "" {
+		return ""
+	}
+	idx, _ := c.List()
+	for _, e := range idx {
+		if e.Manifest.Name != name {
+			continue
+		}
+		versions := append([]string{}, e.Versions...)
+		if e.Manifest.Version != "" {
+			versions = append(versions, e.Manifest.Version)
+		}
+		sort.Strings(versions)
+		for i := len(versions) - 1; i >= 0; i-- {
+			dir := filepath.Join(c.root, name, versions[i])
+			if _, err := os.Stat(dir); err == nil {
+				return dir
+			}
+		}
+	}
+	return ""
+}
+
+// bundledDir finds the embedded directory a name was seeded from, matching
+// SeedBundled: a plugin or a skill is named after the folder holding its
+// manifest.
+func bundledDir(name string) string {
+	found := ""
+	_ = fs.WalkDir(bundled, "bundled", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || d.Name() != "skill.yaml" || found != "" {
+			return err
+		}
+		if filepath.Base(filepath.Dir(path)) == name {
+			found = filepath.Dir(path)
+		}
+		return nil
+	})
+	return found
 }

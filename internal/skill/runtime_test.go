@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestLoadManifestAndInstall(t *testing.T) {
+func TestLoadManifest(t *testing.T) {
 	src := t.TempDir()
 	man := `
 name: demo-skill
@@ -28,25 +28,22 @@ commands:
 	if err := os.WriteFile(filepath.Join(src, "skill.yaml"), []byte(man), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dest := filepath.Join(t.TempDir(), "skills")
-	rt := New(nil, dest)
-	sk, err := rt.InstallFromDir(src)
+	m, err := LoadManifest(filepath.Join(src, "skill.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sk.Manifest.Name != "demo-skill" {
-		t.Fatalf("%+v", sk)
+	if m.Name != "demo-skill" {
+		t.Fatalf("%+v", m)
 	}
-	if !sk.Manifest.Permissions.Filesystem {
+	if !m.Permissions.Filesystem {
 		t.Fatal("expected filesystem permission declared")
 	}
-	caps := sk.Manifest.Permissions.DangerousCapabilities()
+	caps := m.Permissions.DangerousCapabilities()
 	if len(caps) != 1 || caps[0] != "filesystem" {
 		t.Fatalf("caps %v", caps)
 	}
-	cmds := rt.SlashCommands()
-	if len(cmds) != 1 || cmds[0].Name != "/demo" {
-		t.Fatalf("%+v", cmds)
+	if len(m.Commands) != 1 || m.Commands[0].Name != "/demo" {
+		t.Fatalf("%+v", m.Commands)
 	}
 }
 
