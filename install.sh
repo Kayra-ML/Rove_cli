@@ -79,6 +79,10 @@ fi
 
 INSTALLED_VERSION="$("${INSTALL_DIR}/${BINARY}" --version)"
 printf '\nInstalled: %s\nPath: %s/%s\nRun: rovecode\n' "$INSTALLED_VERSION" "$INSTALL_DIR" "$BINARY"
+if [ "$GOOS" = "linux" ]; then
+  printf '\nOn Linux `rovecode` opens the terminal UI.\n'
+  printf 'On a server, run `rovecode daemon` and connect from the desktop app (Settings → Servers).\n'
+fi
 if [ "$GOOS" = "darwin" ]; then
   printf '\nDesktop app (one-time, from any folder):\n'
   printf '  curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install-desktop.sh | bash\n'

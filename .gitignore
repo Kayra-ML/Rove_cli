@@ -28,3 +28,7 @@ desktop/desktop
 desktop/remotebin/
 desktop/frontend/package.json.md5
 
+
+# local builds of cmd/sextant
+/sextant
+/sextant.exe

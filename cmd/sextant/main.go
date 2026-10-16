@@ -39,7 +39,9 @@ func main() {
 			return
 		case "desktop":
 			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
-			launchDesktop()
+			if !launchDesktop() {
+				desktopMissing()
+			}
 			return
 		case "tui":
 			runAsTUI = true
@@ -127,9 +129,16 @@ func main() {
 		return
 	}
 
+	// Plain `rovecode` opens the desktop app where there is one. Linux has
+	// no desktop app (and a server none at all), so there it opens the
+	// terminal UI instead of failing; on macOS it says how to get the app.
 	if !runAsTUI {
-		launchDesktop()
-		return
+		if launchDesktop() {
+			return
+		}
+		if runtime.GOOS == "darwin" {
+			desktopMissing()
+		}
 	}
 
 	runTUI()
@@ -225,7 +234,7 @@ func printUsage() {
 	fmt.Print(`Rove Code — local-first coding agent
 
 Usage:
-  rovecode                 Open the desktop app
+  rovecode                 Open the desktop app (the terminal UI where there is none, e.g. Linux)
   rovecode desktop         Open the desktop app
   rovecode tui             Open the terminal cockpit
   rovecode daemon          Run the shared daemon in the foreground
@@ -238,7 +247,9 @@ The desktop and daemon share the same sessions and workspace.
 `)
 }
 
-func launchDesktop() {
+// launchDesktop opens the desktop app beside this binary (or, on macOS, in
+// /Applications). It reports false when there is none.
+func launchDesktop() bool {
 	self, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rovecode: %v\n", err)
@@ -269,10 +280,19 @@ func launchDesktop() {
 				os.Exit(1)
 			}
 			fmt.Println("opened Rove Code desktop")
-			return
+			return true
 		}
 	}
+	return false
+}
+
+// desktopMissing says how to get the desktop app, and stops.
+func desktopMissing() {
 	fmt.Fprintln(os.Stderr, "rovecode: desktop app is not installed yet.")
+	if runtime.GOOS != "darwin" {
+		fmt.Fprintln(os.Stderr, "There is no desktop app for this system yet; run `rovecode tui` for the terminal UI.")
+		os.Exit(1)
+	}
 	fmt.Fprintln(os.Stderr, "On macOS, from any directory:")
 	fmt.Fprintln(os.Stderr, "  curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install-desktop.sh | bash")
 	os.Exit(1)
