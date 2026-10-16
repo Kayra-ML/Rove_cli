@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { rpc, subscribeEvents } from "~/lib/rpc";
+import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { onReconnect, rpc, subscribeEvents } from "~/lib/rpc";
 import type { Agent, Message, Session } from "~/lib/types";
 import { useAgents, useHistory, useProfiles, useSessions } from "~/hooks/useApi";
 import { usePrefs } from "~/hooks/usePrefs";
@@ -11,7 +11,7 @@ import { toast } from "~/lib/toast";
 import wordmarkLogo from "~/assets/logo-256.png";
 import { Thinking } from "./Thinking";
 import { useCharacterName, usePersona, usePersonaBadges } from "~/hooks/usePersona";
-import { spaceOf } from "~/lib/spaces";
+import { loadModes, sessionMode, spaceOf, type ChatMode } from "~/lib/spaces";
 import { ago } from "./SessionSidebar";
 import { filterFiles, imageToDataUrl, isImage, MAX_IMAGES, mentionAt, mentionedPaths, splitContext, withFiles, type ImageAttachment } from "~/lib/attachments";
 import { ChangesBar, ReviewSheet, useEdits } from "./Review";
@@ -99,12 +99,17 @@ interface Props {
   team?: ReactNode;
   // the chat's subagents at work, over everything else in the message box
   dock?: ReactNode;
+  // where this chat is: Agent ("office") chats talk to an agent with a role;
+  // Code ("chat") sessions have none
+  space?: "office" | "chat";
+  // a Code session's mode: /session offers only sessions of this mode
+  mode?: ChatMode;
 }
 
 const APP_VERSION = "0.2.10";
 
 
-export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, onOpenContext, variant = "agent", onFocusPane, workspacePath, draft, onCreateSession, onNewDraft, pane, team, dock }: Props) {
+export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, onOpenContext, variant = "agent", onFocusPane, workspacePath, draft, onCreateSession, onNewDraft, pane, team, dock, space: where, mode }: Props) {
   // commands that apply here: the terminal's, or the chat's
   const scope: SlashScope = pane ? "terminal" : "chat";
   const { lang } = usePrefs();
@@ -112,7 +117,7 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null);
   const { sessions, reload: reloadSessions } = useSessions(workspaceId);
   const [activeSession, setActiveSession] = useState<Session | null>(session ?? null);
-  const { messages, reload: reloadHistory } = useHistory(activeSession?.id ?? null);
+  const { messages, reload: reloadHistory, push: pushMessage } = useHistory(activeSession?.id ?? null);
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = activeSession?.id ?? null;
   const markBusy = useCallback((id: string, on: boolean) => {
@@ -148,9 +153,25 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
   const [busyIn, setBusyIn] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
   const sending = creating || (activeSession ? busyIn.has(activeSession.id) : false);
-  const [streaming, setStreaming] = useState("");
+  // The reply being written. A ref mirrors it, so event handlers read the
+  // current text without doing work inside a state updater (React may run
+  // updaters twice).
+  const [streaming, setStreamingState] = useState("");
+  const streamRef = useRef("");
+  const setStreaming = useCallback((s: string) => {
+    streamRef.current = s;
+    setStreamingState(s);
+  }, []);
+  // what is drawn may lag the text a little when it pours in, so typing and
+  // scrolling stay smooth while a long answer is parsed again
+  const shownStreaming = useDeferredValue(streaming);
   const [attachOpen, setAttachOpen] = useState(false);
   const [activity, setActivity] = useState<Record<string, string>>({}); // session id → what it is doing
+  // a new object only when something changed: the parent re-renders on
+  // every new one, and this is set for each streamed piece
+  const setActivityFor = useCallback((id: string, what: string) => {
+    setActivity((a) => ((a[id] ?? "") === what ? a : { ...a, [id]: what }));
+  }, []);
   const [sendErr, setSendErr] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [slashHi, setSlashHi] = useState(0);
@@ -269,10 +290,16 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
       const p = (ev.payload ?? {}) as Record<string, unknown>;
       if (ev.type === "message.delta") {
         const delta = String(p.delta ?? "");
-        setStreaming((s) => s + delta);
+        setStreaming(streamRef.current + delta);
         setStreamChars((n) => n + delta.length);
         setStartedAt((v) => v ?? Date.now());
-        setActivity((a) => ({ ...a, [sid]: t("writing", lang) }));
+        setActivityFor(sid, t("writing", lang));
+      }
+      // the reply broke off and is being asked for again: what it showed
+      // goes, so the new one is not written after it
+      if (ev.type === "message.reset") {
+        setStreaming("");
+        setStreamChars(0);
       }
       if (ev.type === "tool.start") {
         const name = String(p.name ?? "tool");
@@ -280,15 +307,14 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
         const id = `live-${seq++}`;
         setStartedAt((v) => v ?? Date.now());
         // text streamed before a tool call is its own reply line
-        setStreaming((s) => {
-          if (s.trim()) setLive((l) => [...l, { kind: "text", id: `${id}-t`, text: s }]);
-          return "";
-        });
+        const before = streamRef.current;
+        if (before.trim()) setLive((l) => [...l, { kind: "text", id: `${id}-t`, text: before }]);
+        setStreaming("");
         const tv = describeTool(id, name, args);
         setLive((l) => [...l, { kind: "tool", id, tool: { ...tv, pending: true } }]);
         // what it is doing, in words rather than the tool's own name; while
         // it waits on its subagents the roster below says the rest
-        setActivity((a) => ({ ...a, [sid]: name === "team_delegate" ? t("saAtWork", lang) : [tv.verb, tv.arg].filter(Boolean).join(" ") }));
+        setActivityFor(sid, name === "team_delegate" ? t("saAtWork", lang) : [tv.verb, tv.arg].filter(Boolean).join(" "));
       }
       if (ev.type === "tool.result") {
         const name = String(p.name ?? "");
@@ -311,15 +337,26 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
         setLive([]);
         setStartedAt(null);
         setStreamChars(0);
-        setActivity((a) => ({ ...a, [sid]: "" }));
-        reloadHistorySoon();
+        setActivityFor(sid, "");
+        // the daemon sends the message itself (not when it carries
+        // images): add it, rather than reading the whole chat back after
+        // every tool call of a run
+        const msg = p.message as Message | undefined;
+        if (msg && msg.id) pushMessage(msg);
+        else reloadHistorySoon();
       }
+      // one full read when a run ends puts the chat in the daemon's final
+      // order (a summary, a note it wrote)
+      if (ev.type === "run.done") reloadHistorySoon();
     });
+    // events lost while the stream was down: read the chat again
+    const offReconnect = onReconnect(reloadHistorySoon);
     return () => {
       unsub();
+      offReconnect();
       if (streamFor.current === sid) streamFor.current = null;
     };
-  }, [activeSession, reloadHistorySoon, activeAgent, lang]);
+  }, [activeSession, reloadHistorySoon, activeAgent, lang, setStreaming, setActivityFor, pushMessage]);
 
   useEffect(() => {
     onActivity?.(activity);
@@ -599,8 +636,11 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
   async function sessionsHere(): Promise<Session[]> {
     const all = (await rpc<Session[]>("session.list", { workspaceId: "" }).catch(() => [])) ?? [];
     const space = activeSession ? spaceOf(activeSession, badgeFor(activeSession.id)) : "chat";
+    const modes = mode ? loadModes() : {};
     return all
       .filter((s) => !s.parentId && spaceOf(s, badgeFor(s.id)) === space)
+      // sessions do not switch modes: only this mode's are offered
+      .filter((s) => !mode || sessionMode(s, modes) === mode)
       .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
   }
 
@@ -1063,7 +1103,7 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
       }
       if (!target) return;
       markBusy(target.id, true);
-      setActivity((a) => ({ ...a, [target!.id]: t("thinking", lang) }));
+      setActivityFor(target.id, t("thinking", lang));
       await rpc("session.send", {
         sessionId: target.id,
         agentId: activeAgent.id,
@@ -1086,7 +1126,7 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
       if (target) {
         const id = target.id;
         markBusy(id, false);
-        setActivity((a) => ({ ...a, [id]: "" }));
+        setActivityFor(id, "");
       }
     }
   }
@@ -1113,7 +1153,7 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
     await rpc("session.cancel", { sessionId: id }).catch(() => {});
     markBusy(id, false);
     setStreaming("");
-    setActivity((a) => ({ ...a, [id]: "" }));
+    setActivityFor(id, "");
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -1195,19 +1235,27 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
   // Tool results are shown as chips on the call that made them, not as
   // messages of their own; empty assistant turns that only called tools
   // still show their chips.
-  const toolResults = new Map<string, ToolOutcome>();
-  for (const m of messages) {
-    if (m.role === "tool" && m.toolResult?.toolCallId) toolResults.set(m.toolResult.toolCallId, { content: m.toolResult.content, isError: m.toolResult.isError, kind: m.toolResult.kind });
-  }
-  const shownMessages = messages.filter((m) => m.kind === "summary" || (m.role !== "tool" && m.role !== "system" && (m.content.trim() || (m.toolCalls?.length ?? 0) > 0)));
+  // derived from the history only, not on each streamed piece of a reply
+  const toolResults = useMemo(() => {
+    const out = new Map<string, ToolOutcome>();
+    for (const m of messages) {
+      if (m.role === "tool" && m.toolResult?.toolCallId) out.set(m.toolResult.toolCallId, { content: m.toolResult.content, isError: m.toolResult.isError, kind: m.toolResult.kind });
+    }
+    return out;
+  }, [messages]);
+  const shownMessages = useMemo(
+    () => messages.filter((m) => m.kind === "summary" || (m.role !== "tool" && m.role !== "system" && (m.content.trim() || (m.toolCalls?.length ?? 0) > 0))),
+    [messages],
+  );
+  const blocks = useMemo(() => toBlocks(messages), [messages]);
   // the echo stands in only until the real message comes back, so it never
   // shows twice and needs no clearing of its own
   const echoed = pendingAsk && !shownMessages.some((m) => m.role === "user" && m.content === pendingAsk.text)
     ? [{ id: "__ask__", sessionId: activeSession?.id ?? "", role: "user" as const, content: pendingAsk.text, images: pendingAsk.images, createdAt: "" }]
     : [];
   const withEcho = [...shownMessages, ...echoed];
-  const allMessages: (Message | StreamMsg)[] = streaming
-    ? [...withEcho, { id: "__stream__", role: "assistant", content: streaming, streaming: true }]
+  const allMessages: (Message | StreamMsg)[] = shownStreaming
+    ? [...withEcho, { id: "__stream__", role: "assistant", content: shownStreaming, streaming: true }]
     : withEcho;
 
   const live = activeSession ? activity[activeSession.id] ?? "" : "";
@@ -1459,9 +1507,9 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
   ) : null;
 
   // Which folder the agent is about to touch. It is the one thing you cannot
-  // afford to guess about, and the chat otherwise never says it — the folder
-  // only shows in the session list, beside chats you are not looking at.
-  const folderEl = workspacePath ? (
+  // afford to guess about. A Code session's bar above names it already, so
+  // there the message box stays one line; elsewhere it shows here.
+  const folderEl = workspacePath && where !== "chat" ? (
     <span className="persona-chip static folder-chip" title={workspacePath}>
       <Icon name="folder" size={11} /> {workspacePath.split("/").filter(Boolean).pop() || workspacePath}
     </span>
@@ -1527,9 +1575,9 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
               line1: shown ? `${shown.provider ? `${shown.provider} · ` : ""}${shown.model}` : t("termNoModel", lang),
               line2: (workspacePath || activeSession?.title || "").replace(/^\/(Users|home)\/[^/]+/, "~"),
             }}
-            blocks={toBlocks(messages)}
+            blocks={blocks}
             live={liveBlocks}
-            streaming={streaming}
+            streaming={shownStreaming}
             busy={busy}
             startedAt={startedAt}
             tokens={estimateTokens(streamChars)}
@@ -1692,11 +1740,12 @@ export function Chat({ workspaceId, session, onSession, onActivity, onOpenMap, o
         {activeSession && (
           <ChangesBar sessionId={activeSession.id} view={edits} setView={setEdits} onOpen={() => setReviewOpen(true)} lang={lang} />
         )}
-        {(team || folderEl || (activeSession && (persona || rules.length > 0))) && (
+        {(team || folderEl || (activeSession && ((persona && where !== "chat") || rules.length > 0))) && (
           <div className="persona-bar">
             {team}
-            {/* who this chat talks to; fixed for the chat, picked in the Agents tab */}
-            {!team && persona && (
+            {/* who this chat talks to; fixed for the chat, picked in the Agents
+                tab. Code sessions have no role, so nothing to name. */}
+            {!team && persona && where !== "chat" && (
               <span className="persona-chip static">
                 {agentBadge}
                 <span className="persona-chip-name">{agentName || t("agentGeneral", lang)}</span>

@@ -169,7 +169,12 @@ export function ContextMap({ onOpenSession, space, sideTop, onShowContext }: Pro
     const offMap = subscribeEvents("ctxmap.changed", () => { void loadMap(); void loadWatches(); });
     const offDelta = subscribeEvents("message.delta", (ev) => {
       const sid = (ev.payload as { sessionId?: string } | undefined)?.sessionId;
-      if (sid) setTyping((m) => ({ ...m, [sid]: Date.now() }));
+      // the dot only needs to know it is still typing (it fades after 2s):
+      // a fresh stamp per streamed piece re-drew the whole map each time
+      if (sid) setTyping((m) => {
+        const now = Date.now();
+        return m[sid] !== undefined && now - m[sid] < 500 ? m : { ...m, [sid]: now };
+      });
     });
     return () => { offRelay(); offMap(); offDelta(); };
   }, [loadMap, loadWatches]);

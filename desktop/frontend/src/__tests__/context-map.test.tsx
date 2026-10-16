@@ -29,6 +29,7 @@ vi.mock("../lib/rpc", () => ({
       default: return [];
     }
   }),
+  onReconnect: vi.fn(() => () => {}),
   subscribeEvents: vi.fn(() => () => {}),
 }));
 vi.mock("../hooks/usePrefs", () => ({ usePrefs: () => ({ lang: "tr", theme: "graphite" }) }));

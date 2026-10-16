@@ -71,6 +71,19 @@ export function modeFor(modes: Record<string, ChatMode>, sessionId: string | nul
   return modes[sessionId ?? DRAFT] ?? modes[LAST] ?? DEFAULT_MODE;
 }
 
+// isMode tells a stored mode from anything else.
+export function isMode(v: unknown): v is ChatMode {
+  return typeof v === "string" && CHAT_MODES.includes(v as ChatMode);
+}
+
+// sessionMode is the mode a session runs in: the one the daemon holds (fixed
+// when it started), else — for a session made before modes were stored —
+// the one this app last showed it in, else Orchestra.
+export function sessionMode(s: Session, modes: Record<string, ChatMode>): ChatMode {
+  if (isMode(s.mode)) return s.mode;
+  return modes[s.id] ?? modes[LAST] ?? DEFAULT_MODE;
+}
+
 // withMode records a chat's mode, and makes it the one new chats start in.
 export function withMode(modes: Record<string, ChatMode>, sessionId: string | null | undefined, mode: ChatMode): Record<string, ChatMode> {
   return { ...modes, [sessionId ?? DRAFT]: mode, [LAST]: mode };

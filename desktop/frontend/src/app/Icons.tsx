@@ -32,11 +32,44 @@ export function Icon({
     | "modes"
     | "teamwork"
     | "branch"
-    | "merge";
+    | "merge"
+    | "lock"
+    | "shield"
+    | "server"
+    | "plug"
+    | "database"
+    | "chart"
+    | "arrowLeft"
+    | "arrowRight"
+    | "users"
+    | "target"
+    | "orchestra";
   size?: number;
 }) {
   const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (name) {
+    case "lock":
+      return <svg {...p}><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>;
+    case "shield":
+      return <svg {...p}><path d="M12 3.5 5 6v5.5c0 4.3 2.9 7.7 7 9 4.1-1.3 7-4.7 7-9V6l-7-2.5z"/><path d="m9.3 12 1.9 1.9 3.6-3.8"/></svg>;
+    case "server":
+      return <svg {...p}><rect x="4" y="4.5" width="16" height="6" rx="1.6"/><rect x="4" y="13.5" width="16" height="6" rx="1.6"/><path d="M7.5 7.5h.01M7.5 16.5h.01"/></svg>;
+    case "plug":
+      return <svg {...p}><path d="M9 3.5v4M15 3.5v4M6.5 7.5h11v3a5.5 5.5 0 0 1-11 0v-3zM12 16v4.5"/></svg>;
+    case "database":
+      return <svg {...p}><ellipse cx="12" cy="6" rx="7" ry="2.6"/><path d="M5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6"/></svg>;
+    case "chart":
+      return <svg {...p}><path d="M4 20h16"/><path d="M7 16.5v-5M12 16.5V7M17 16.5v-8"/></svg>;
+    case "arrowLeft":
+      return <svg {...p}><path d="M19 12H5M11 6l-6 6 6 6"/></svg>;
+    case "arrowRight":
+      return <svg {...p}><path d="M5 12h14M13 6l6 6-6 6"/></svg>;
+    case "users":
+      return <svg {...p}><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19c.6-3 2.8-4.8 5.5-4.8s4.9 1.8 5.5 4.8"/><path d="M15.5 5.8a3 3 0 0 1 0 5.4M17.5 14.6c1.6.6 2.7 2.1 3 4.4"/></svg>;
+    case "target":
+      return <svg {...p}><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4.2"/><circle cx="12" cy="12" r=".9" fill="currentColor" stroke="none"/></svg>;
+    case "orchestra":
+      return <svg {...p}><circle cx="12" cy="12" r="2.6"/><circle cx="5" cy="6" r="1.8"/><circle cx="19" cy="6" r="1.8"/><circle cx="5" cy="18" r="1.8"/><circle cx="19" cy="18" r="1.8"/><path d="M6.5 7.2l3.4 3M17.5 7.2l-3.4 3M6.5 16.8l3.4-3M17.5 16.8l-3.4-3"/></svg>;
     case "modes":
       return <svg {...p}><rect x="4" y="4" width="7" height="7" rx="1.8"/><rect x="13" y="4" width="7" height="7" rx="1.8"/><rect x="4" y="13" width="7" height="7" rx="1.8"/><circle cx="16.5" cy="16.5" r="3.6"/></svg>;
     case "teamwork":

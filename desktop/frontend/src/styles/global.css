@@ -27,7 +27,7 @@
   --on-accent: #0b1020;
   --side-bg: #0e131d; --side-hover: #18202f; --side-border: #1f2838;
   --side-text: #e8eef8; --side-muted: #9eabc2; --side-faint: #6c7a93; --side-accent: #9dbbff;
-  --shadow: var(--shadow);
+  --shadow: rgba(0, 0, 0, 0.45);
   --fg: var(--text);
   --fg-muted: var(--muted);
 }
@@ -3074,3 +3074,271 @@ g.on .usage-hit { fill: color-mix(in srgb, var(--text) 5%, transparent); }
 .office-perm-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .office-check { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--muted); }
 .office-check strong { color: var(--text); font-weight: 600; }
+
+
+/* ══ Sessions and settings (v3) ═════════════════════════════════════════════
+   A Chat-space session starts on the mode picker and keeps its mode for
+   good; the session bar says which, with a lock. Each mode has its own hue
+   — Orchestra blue, Teamwork violet, Terminal the theme's green — on its
+   card, its chip and its row icon, so a mode is recognised before it is
+   read. The hues are mixed with the theme's text colour: lighter on dark
+   themes, deeper on light ones, readable on both (some themes' accents are
+   plain grey, which could not tell modes apart). */
+.mode-orchestra { --mc: color-mix(in srgb, #5b8def 74%, var(--text)); }
+.mode-teamwork { --mc: color-mix(in srgb, #a77bf3 74%, var(--text)); }
+.mode-terminal { --mc: color-mix(in srgb, var(--ok) 86%, var(--text)); }
+
+/* the mode picker */
+.mode-picker { flex: 1; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 48px 32px; }
+.mode-picker-inner { width: min(1000px, 100%); }
+.mode-picker-head { margin-bottom: 28px; }
+.mode-picker-head .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.mode-picker-head h1 { margin: 8px 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; }
+.mode-picker-head p { margin: 0; max-width: 60ch; color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+.mode-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 900px) { .mode-cards { grid-template-columns: minmax(0, 1fr); } }
+.mode-card {
+  display: flex; flex-direction: column; align-items: stretch; gap: 10px;
+  padding: 18px 18px 16px; text-align: left;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-raised); color: var(--text);
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.mode-card:hover, .mode-card:focus-visible {
+  border-color: color-mix(in srgb, var(--mc) 55%, var(--border));
+  background: color-mix(in srgb, var(--mc) 5%, var(--bg-raised));
+  box-shadow: 0 12px 32px var(--shadow);
+  transform: translateY(-1px);
+  outline: none;
+}
+.mode-card:active { transform: translateY(0); }
+.mode-card-top { display: flex; align-items: center; gap: 8px; }
+.mode-card-icon {
+  width: 38px; height: 38px; display: grid; place-items: center; border-radius: 8px;
+  color: var(--mc);
+  background: color-mix(in srgb, var(--mc) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--mc) 28%, transparent);
+}
+.mode-card-tag { padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 560; color: var(--mc); background: color-mix(in srgb, var(--mc) 12%, transparent); }
+.mode-card-key {
+  margin-left: auto; padding: 1px 6px;
+  font-family: var(--mono); font-size: 11px; color: var(--faint);
+  border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--bg-sunken);
+}
+.mode-card-title { margin-top: 4px; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+.mode-card-hint { min-height: 2.9em; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.mode-card-points { list-style: none; margin: 2px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 7px; }
+.mode-card-points li { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.4; }
+.mode-card-points svg { flex-shrink: 0; margin-top: 2px; color: var(--mc); }
+.mode-card-go { margin-top: auto; padding-top: 10px; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 560; color: var(--mc); }
+.mode-card-go svg { transition: transform 0.15s ease; }
+.mode-card:hover .mode-card-go svg { transform: translateX(3px); }
+.mode-picker-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 16px; margin-top: 18px; font-size: 12px; color: var(--faint); }
+.mode-picker-foot span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.mode-picker-ws { font-family: var(--mono); font-size: 11.5px; }
+
+/* the session bar: mode (locked), title, folder */
+.session-bar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px; min-width: 0;
+  height: 40px; padding: 0 14px;
+  border-bottom: 1px solid var(--border); background: var(--panel); font-size: 12.5px;
+}
+.mode-chip {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px;
+  border-radius: 5px; font-size: 12px; font-weight: 560; color: var(--mc);
+  background: color-mix(in srgb, var(--mc) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--mc) 26%, transparent);
+}
+.mode-chip-lock { display: inline-flex; margin-left: 1px; opacity: 0.75; }
+.session-bar-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 560; color: var(--text); }
+.session-bar-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
+.session-bar-spacer { flex: 1; }
+.session-bar-btn {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
+  font-size: 12px; color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 4px;
+}
+.session-bar-btn:hover { color: var(--text); background: var(--bg-hover); }
+.session-bar-ws { flex-shrink: 1; min-width: 0; max-width: 32%; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+
+/* a session row names its mode by icon */
+.sess-mode { flex-shrink: 0; display: inline-grid; place-items: center; width: 16px; height: 16px; color: color-mix(in srgb, var(--mc, var(--side-faint)) 70%, var(--side-bg)); }
+.sess-row.active .sess-mode, .sess-mode.on { color: var(--mc, var(--side-accent)); }
+.sess-mode.live { animation: sess-live 1.6s ease-in-out infinite; color: var(--mc, var(--ok)); }
+@keyframes sess-live { 50% { opacity: 0.45; } }
+
+/* settings: a grouped rail, the page beside it */
+.settings-sheet { position: relative; width: min(1160px, 94vw); height: min(800px, 90vh); }
+.settings-split { height: 100%; grid-template-columns: 236px minmax(0, 1fr); }
+.settings-rail { display: flex; flex-direction: column; min-height: 0; padding: 0 10px 12px; background: var(--side-bg); }
+.settings-rail-head { padding: 20px 10px 12px; }
+.settings-rail-head h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--side-text); }
+.settings-nav { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
+.settings-group { display: flex; flex-direction: column; gap: 1px; }
+.settings-group-label { padding: 2px 10px 6px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--side-faint); }
+.settings-rail .rail-item { color: var(--side-muted); }
+.settings-rail .rail-item:hover { color: var(--side-text); background: var(--side-hover); }
+.settings-rail .rail-item.active { color: var(--side-text); }
+.settings-rail .rail-item svg { flex-shrink: 0; opacity: 0.9; }
+.settings-body { padding: 40px 56px 64px; }
+.settings-body > h2, .settings-body .con-title-row h2 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+.settings-body > .split-lead { margin-bottom: 26px; }
+.settings-close { position: absolute; top: 12px; right: 12px; z-index: 2; width: 32px; height: 32px; color: var(--muted); border-radius: 6px; }
+.settings-close:hover { color: var(--text); }
+@media (max-width: 760px) {
+  .settings-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .settings-rail { padding-bottom: 8px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .settings-nav { flex-direction: row; overflow-x: auto; gap: 12px; }
+  .settings-body { padding: 24px 20px 40px; }
+}
+
+/* the side list's folder menu opens across the list's own width: anchored to
+   its small button it ran off the list's left edge and was cut */
+.shell-side .side-head { position: relative; }
+.shell-side .side-new { position: static; }
+.shell-side .side-menu { left: 0; right: 0; min-width: 0; top: 30px; }
+
+/* the + menu of the session list: a new session's mode is picked here */
+.shell-side .new-mode-menu { width: auto; padding: 6px; max-height: none; }
+.new-mode-menu .new-mode-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px;
+  white-space: normal; overflow: visible; border-radius: 5px;
+}
+.new-mode-menu .new-mode-item:hover, .new-mode-menu .new-mode-item:focus-visible {
+  background: color-mix(in srgb, var(--mc) 10%, var(--bg-raised)); outline: none;
+}
+.new-mode-icon {
+  flex-shrink: 0; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px;
+  color: var(--mc);
+  background: color-mix(in srgb, var(--mc) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--mc) 26%, transparent);
+}
+.new-mode-item .modes-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.new-mode-item .modes-text strong { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.new-mode-item .modes-text span { font-size: 11.5px; line-height: 1.35; color: var(--muted); }
+.new-mode-item kbd {
+  flex-shrink: 0; padding: 0 5px; font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+  border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--bg-sunken);
+}
+.new-mode-foot { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 8px 8px 4px; border-top: 1px solid var(--border); font-size: 11px; color: var(--faint); }
+
+/* a session's run, on its row: blue and breathing while it works, green
+   when it finished with something new to read, red when it failed */
+.sess-row .sess-job { --run: color-mix(in srgb, #4f8ff7 84%, var(--text)); position: relative; width: 8px; height: 8px; margin: 0 4px 0 6px; border-radius: 99px; box-shadow: none; animation: none; }
+.sess-row .sess-job.running { background: var(--run); color: var(--run); animation: job-breathe 1.3s ease-in-out infinite; }
+.sess-row .sess-job.running::after {
+  content: ""; position: absolute; inset: -4px; border-radius: 99px;
+  border: 1.5px solid currentColor; opacity: 0;
+  animation: job-ring 1.3s ease-out infinite;
+}
+.sess-row .sess-job.done { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent); }
+.sess-row .sess-job.error { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
+@keyframes job-breathe { 0%, 100% { transform: scale(0.8); opacity: 0.75; } 50% { transform: scale(1.12); opacity: 1; } }
+@keyframes job-ring { 0% { transform: scale(0.55); opacity: 0.7; } 100% { transform: scale(1.35); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .sess-row .sess-job.running, .sess-row .sess-job.running::after { animation: none; }
+}
+.sess-mode.live { animation: none; }
+
+/* Terminal panes size what they hold to the pane, not the window: with
+   eight panes a pane is a quarter of the screen, and buttons, hints and
+   menus sized for a full window ran out of it or cut their labels oddly.
+   Labels stay on one line and end in "…"; rows wrap; narrow panes drop
+   what is only a hint. */
+.pane { container-type: inline-size; container-name: pane; }
+.pane button { min-width: 0; }
+.pane .pane-head > button, .pane .pane-actions button, .pane .changes-bar button,
+.pane .queue-item button, .pane .term-model { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pane .changes-bar, .pane .queue-item { flex-wrap: wrap; row-gap: 4px; }
+.pane .changes-bar button { flex: 0 1 auto; max-width: 100%; }
+.pane .pane-menu, .pane .slash-menu { max-width: calc(100cqw - 12px); }
+.pane .pane-menu { min-width: min(250px, calc(100cqw - 12px)); }
+.pane .term-model { flex-shrink: 1; max-width: 50%; }
+.pane .term-mode { gap: 6px; }
+@container pane (max-width: 460px) {
+  .pane .term-mode-hint, .pane .term-rules, .pane .pane-head .pane-ws { display: none; }
+  .pane .term-scroll { padding: 10px 10px 6px; }
+  .pane .term-input { margin: 0 8px; }
+  .pane .term-mode { padding: 5px 10px 7px; }
+  .pane .changes-bar.compact { margin: 0 8px 6px; gap: 6px; font-size: 11.5px; }
+  .pane .changes-bar button { height: 24px; padding: 0 7px; font-size: 11px; }
+  .pane .queue-item button.ghost { padding: 0 6px; font-size: 10.5px; }
+  .pane .term-banner { gap: 10px; }
+  .pane .term-banner img { width: 32px; height: 32px; }
+}
+@container pane (max-width: 320px) {
+  .pane .term-banner img, .pane .changes-bar .diff-add, .pane .changes-bar .diff-del, .pane .queue-label { display: none; }
+  .pane .term { font-size: 12px; }
+}
+
+/* the permission question: its buttons wrap instead of squeezing their
+   labels on a small window */
+.perm-actions { flex-wrap: wrap; row-gap: 8px; }
+.perm-actions button { white-space: nowrap; }
+@media (max-width: 520px) {
+  .perm-actions .tw-spacer { display: none; }
+  .perm-actions button { flex: 1 1 auto; }
+}
+
+/* the session bar drops its note before the title runs short */
+@media (max-width: 1100px) { .session-bar-note { display: none; } }
+/* the + menu spans the list's width too, not just its button's */
+.shell-side .side-new-mode { position: static; }
+/* in a pane the hint in an empty prompt stays on one line, ending in "…" */
+.pane .term-input textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@container pane (max-width: 320px) {
+  .pane .term-banner-title, .pane .term-banner .term-dim { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* the per-model table scrolls sideways in a narrow settings page */
+.usage-table-scroll { overflow-x: auto; }
+.usage-table-scroll .usage-table th, .usage-table-scroll .usage-table td { white-space: nowrap; }
+
+/* the message box: one line of height for one line of text, nearer the
+   bottom edge, so it covers less of the conversation */
+.composer-dock { bottom: 12px; gap: 4px; padding: 5px 6px; }
+.composer-dock .composer-input { min-height: 30px; padding: 5px 4px; }
+.composer-dock .persona-bar { padding: 2px 4px 4px; }
+.composer-dock .icon-ghost { width: 30px; height: 30px; }
+.center-panel .thread-viewport { padding-bottom: 150px; }
+
+/* Subagents as a strip over the message box: the count, then a card each,
+   five in view and the rest a scroll away; a card opens its details below */
+.subagents.strip { display: flex; flex-direction: column; gap: 6px; padding: 2px 2px 4px; }
+.subagents.strip .sa-bar { display: flex; align-items: center; gap: 6px; }
+.subagents.strip .sa-head { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.sa-total {
+  flex: none; min-width: 20px; height: 18px; padding: 0 6px; display: inline-grid; place-items: center;
+  border-radius: 99px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+  color: var(--text); background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+.sa-pager { display: inline-flex; gap: 2px; flex: none; }
+.sa-pager .tree-icon { width: 24px; height: 24px; font-size: 16px; line-height: 1; }
+.sa-strip {
+  --gap: 6px;
+  display: flex; gap: var(--gap); overflow-x: auto; overflow-y: hidden;
+  /* no scroll snapping: with it, as cards change places (one finishes, one
+     starts) the browser follows the snapped card and the strip slides away
+     from where the user left it */
+  scroll-behavior: smooth; scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+.sa-card {
+  flex: 0 0 calc((100% - 4 * var(--gap)) / 5); min-width: 150px;
+  display: flex; flex-direction: column; gap: 3px; padding: 7px 9px; text-align: left;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg-raised); color: var(--text);
+  font-size: 12px; overflow: hidden;
+}
+.sa-card:hover { border-color: color-mix(in srgb, var(--text) 22%, var(--border)); background: var(--bg-hover); }
+.sa-card.on { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+.sa-card.wait { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.sa-card-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sa-card-top strong { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sa-card-top .sa-dot { margin-top: 0; }
+.sa-card-top .sa-time { margin-left: auto; }
+.sa-card-goal { color: var(--muted); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.7em; }
+.sa-card-line { font-family: var(--mono); font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sa-card-line.bad { color: var(--bad); }
+.st-running .sa-card-line { color: color-mix(in srgb, var(--accent) 70%, var(--muted)); }
+.sa-detail { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-sunken); font-size: 12px; }
+.sa-detail .sa-dot { margin-top: 0; }
+.sa-detail .sa-line { white-space: pre-wrap; max-height: 6.5em; overflow: auto; }

@@ -5,7 +5,7 @@ import { t, type Lang } from "~/lib/i18n";
 // the API level this app needs from its daemon (pkg/protocol.APILevel)
 // the daemon methods this build of the app calls; the tests read it too,
 // so raising it in one place keeps them honest
-export const REQUIRED_API = 18;
+export const REQUIRED_API = 19;
 
 // ApiBanner warns when the daemon is older than the app — its newer
 // features (fetching models, reviewing changes…) would quietly not work.

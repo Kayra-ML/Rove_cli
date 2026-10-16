@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { pickFolder, rpc, subscribeEvents } from "~/lib/rpc";
 import type { Session, Workspace } from "~/lib/types";
 import { useWorkspaces } from "~/hooks/useApi";
@@ -8,6 +7,7 @@ import { useProfiles } from "~/hooks/useApi";
 import { chatsByProfile } from "~/lib/agents";
 import { moveOffice } from "~/lib/office";
 import { CHAT_MODES, spaceOf, type ChatMode, type Space } from "~/lib/spaces";
+import { MODE_ICON } from "./ModePicker";
 import { usePrefs } from "~/hooks/usePrefs";
 import { t } from "~/lib/i18n";
 import { pollWhileVisible } from "~/lib/poll";
@@ -41,17 +41,17 @@ interface Props {
   onOpenSettings: () => void;
   // Office: agents are added and edited in Settings → Office
   onOfficeAgent?: (intent: OfficeIntent) => void;
-  // Chat only: the open chat's mode and how to change it
-  chatMode?: ChatMode;
-  onChatMode?: (m: ChatMode) => void;
+  // Chat only: the mode each session runs in (fixed when it started)
+  modeOf?: (s: Session) => ChatMode;
 }
 
-const MODE_ICON: Record<ChatMode, Parameters<typeof Icon>[0]["name"]> = {
-  orchestra: "agents", teamwork: "teamwork", terminal: "terminal",
-};
-
-
-const MODES_MENU_W = 300;
+// without is s minus id, the same set when id is not in it (no re-render).
+function without(s: Set<string>, id: string): Set<string> {
+  if (!s.has(id)) return s;
+  const next = new Set(s);
+  next.delete(id);
+  return next;
+}
 
 export function ago(iso: string | undefined, lang: string): string {
   if (!iso) return "";
@@ -66,37 +66,21 @@ export function ago(iso: string | undefined, lang: string): string {
 
 // SessionSidebar is the left rail of a space. In Office it lists agents
 // picked from the fixed catalog, each row being the conversation with that
-// agent; in Chat it lists sessions by topic, most recent first, and its
-// footer switches the open chat's mode (orchestra, teamwork, terminal).
+// agent; in Chat it lists sessions by topic, most recent first, each marked
+// with the mode it runs in.
 export function SessionSidebar({
   space, workspace, onSelectWorkspace, activeSessionId, onSelectSession, draft, draftAgent, onNewChat,
-  rpcOk, dark, onToggleTheme, onOpenMarket, onOpenSettings, onOfficeAgent, chatMode = "orchestra", onChatMode, onBoard,
+  rpcOk, dark, onToggleTheme, onOpenMarket, onOpenSettings, onOfficeAgent, modeOf, onBoard,
 }: Props) {
   const { lang } = usePrefs();
   const { workspaces, reload: reloadWs } = useWorkspaces();
   const { badgeFor } = usePersonaBadges();
   const { profiles } = useProfiles();
   const [allSessions, setSessions] = useState<Session[]>([]);
-  const [modesOpen, setModesOpen] = useState(false);
-  // the modes menu floats over the page (the sidebar clips its children),
-  // anchored above its button and kept on screen
-  const modesMenuRef = useRef<HTMLDivElement | null>(null);
-  const [modesAt, setModesAt] = useState<{ left: number; bottom: number } | null>(null);
-  const toggleModes = (btn: HTMLElement) => {
-    if (modesOpen) { setModesOpen(false); return; }
-    const r = btn.getBoundingClientRect();
-    const width = MODES_MENU_W;
-    setModesAt({
-      left: Math.max(8, Math.min(r.left - 8, window.innerWidth - width - 8)),
-      bottom: Math.max(8, window.innerHeight - r.top + 8),
-    });
-    setModesOpen(true);
-  };
-  const modesRef = useRef<HTMLDivElement | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [filter, setFilter] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
-  // Code: a new session asks which mode it is for
+  // Code: + opens a menu below it, and the new session's mode is picked there
   const [newOpen, setNewOpen] = useState(false);
   const newRef = useRef<HTMLDivElement | null>(null);
   const [editing, setEditing] = useState<{ id: string; title: string } | null>(null);
@@ -105,6 +89,8 @@ export function SessionSidebar({
   // user has not opened it since.
   const [running, setRunning] = useState<Set<string>>(new Set());
   const [doneUnseen, setDoneUnseen] = useState<Set<string>>(new Set());
+  // runs that ended in an error: red until the session runs again
+  const [failed, setFailed] = useState<Set<string>>(new Set());
   const [usage, setUsage] = useState<UsageSnapshot | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const activeIdRef = useRef(activeSessionId);
@@ -141,31 +127,28 @@ export function SessionSidebar({
   }, [space, reload]);
 
   // Job status for every session, wherever the run came from (this pane,
-  // another pane, or a context-map relay): running while it is active,
-  // done-unseen from the moment it finishes until the user opens it.
+  // another pane, or a context-map relay): blue and pulsing while it works,
+  // green once it finished with something to read (until opened), red when
+  // it ended in an error (until it runs again).
   useEffect(() => {
     const sessionOf = (ev: { payload?: unknown }) => (ev.payload as { sessionId?: string } | undefined)?.sessionId;
     const markRunning = (ev: { payload?: unknown }) => {
       const sid = sessionOf(ev);
       if (!sid) return;
       setRunning((s) => (s.has(sid) ? s : new Set(s).add(sid)));
-      setDoneUnseen((s) => {
-        if (!s.has(sid)) return s;
-        const next = new Set(s);
-        next.delete(sid);
-        return next;
-      });
+      setDoneUnseen((s) => without(s, sid));
+      setFailed((s) => without(s, sid));
     };
     const markDone = (ev: { payload?: unknown }) => {
       const sid = sessionOf(ev);
       if (!sid) return;
-      setRunning((s) => {
-        if (!s.has(sid)) return s;
-        const next = new Set(s);
-        next.delete(sid);
-        return next;
-      });
-      if (sid === activeIdRef.current) return; // already looking at it
+      setRunning((s) => without(s, sid));
+      const p = (ev.payload ?? {}) as { error?: string; cancelled?: boolean };
+      if (p.error) {
+        setFailed((s) => (s.has(sid) ? s : new Set(s).add(sid)));
+        return;
+      }
+      if (p.cancelled || sid === activeIdRef.current) return; // stopped, or already looking at it
       setDoneUnseen((s) => (s.has(sid) ? s : new Set(s).add(sid)));
     };
     const offs = [
@@ -193,13 +176,27 @@ export function SessionSidebar({
     const onDoc = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
       if (newRef.current && !newRef.current.contains(e.target as Node)) setNewOpen(false);
-      const target = e.target as Node;
-      if (modesRef.current?.contains(target) || modesMenuRef.current?.contains(target)) return;
-      setModesOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
+
+  // with the new-session menu open, 1/2/3 pick a mode and Escape closes it
+  useEffect(() => {
+    if (!newOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setNewOpen(false); return; }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const n = Number(e.key);
+      if (n >= 1 && n <= CHAT_MODES.length) {
+        e.preventDefault();
+        setNewOpen(false);
+        onNewChat(null, CHAT_MODES[n - 1]);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [newOpen, onNewChat]);
 
   const wsById = useMemo(() => new Map(workspaces.map((w) => [w.id, w])), [workspaces]);
 
@@ -210,7 +207,6 @@ export function SessionSidebar({
   useEffect(() => {
     if (space !== "chat" || !loaded || draft || activeSessionId) return;
     if (sessions.length > 0) onSelectSession(sessions[0]);
-    else if (space === "chat") onNewChat(null);
   }, [loaded, draft, sessions, activeSessionId, onSelectSession, onNewChat, space]);
 
   useEffect(() => {
@@ -278,25 +274,29 @@ export function SessionSidebar({
         <span className="side-title">{t(space === "office" ? "sideAgents" : "sessions", lang)}</span>
         {space === "chat" ? (
           <div className="side-new" ref={menuRef}>
-            <button type="button" className="tree-icon" title={t("openWorkspace", lang)} onClick={() => setMenuOpen((v) => !v)}>
+            <button type="button" className="tree-icon" title={t("openWorkspace", lang)} onClick={() => { setNewOpen(false); setMenuOpen((v) => !v); }}>
               <Icon name="folder" size={14} />
             </button>
+            {/* + opens a menu below it: a new session starts by picking its
+                mode, which it then keeps */}
             <div className="side-new-mode" ref={newRef}>
-              <button type="button" className={`tree-icon${newOpen ? " on" : ""}`} title={t("newSession", lang)} aria-haspopup="menu" aria-expanded={newOpen} onClick={() => setNewOpen((v) => !v)}>
+              <button type="button" className={`tree-icon${newOpen ? " on" : ""}`} title={t("newSession", lang)} aria-haspopup="menu" aria-expanded={newOpen} onClick={() => { setMenuOpen(false); setNewOpen((v) => !v); }}>
                 <Icon name="plus" size={14} />
               </button>
               {newOpen && (
-                <div className="pane-menu side-menu modes-menu new-mode-menu" role="menu" aria-label={t("newSessionMode", lang)}>
+                <div className="pane-menu side-menu new-mode-menu" role="menu" aria-label={t("newSessionMode", lang)}>
                   <div className="modes-head">{t("newSessionMode", lang)}</div>
-                  {CHAT_MODES.map((m) => (
-                    <button type="button" role="menuitem" key={m} onClick={() => { setNewOpen(false); onNewChat(null, m); }}>
-                      <Icon name={MODE_ICON[m]} size={14} />
+                  {CHAT_MODES.map((m, i) => (
+                    <button type="button" role="menuitem" key={m} className={`new-mode-item mode-${m}`} onClick={() => { setNewOpen(false); onNewChat(null, m); }}>
+                      <span className="new-mode-icon"><Icon name={MODE_ICON[m]} size={15} /></span>
                       <span className="modes-text">
                         <strong>{t(`mode_${m}`, lang)}</strong>
                         <span>{t(`modeHint_${m}`, lang)}</span>
                       </span>
+                      <kbd>{i + 1}</kbd>
                     </button>
                   ))}
+                  <div className="new-mode-foot"><Icon name="lock" size={11} /> {t("modeFixedNote", lang)}</div>
                 </div>
               )}
             </div>
@@ -328,7 +328,7 @@ export function SessionSidebar({
           <div className="tree">
             {list.map((s) => {
               const live = running.has(s.id);
-              const job = live ? "running" : doneUnseen.has(s.id) ? "done" : null;
+              const job = live ? "running" : failed.has(s.id) ? "error" : doneUnseen.has(s.id) ? "done" : null;
               const ws = wsById.get(s.workspaceId);
               const active = s.id === activeSessionId;
               return (
@@ -351,7 +351,13 @@ export function SessionSidebar({
                       title={s.title}
                     >
                       <span className="sess-line">
-                        <span className={`tree-dot${live ? " live" : active ? " on" : ""}`} />
+                        {modeOf ? (
+                          <span className={`sess-mode mode-${modeOf(s)}${active ? " on" : ""}`} title={t(`mode_${modeOf(s)}`, lang)}>
+                            <Icon name={MODE_ICON[modeOf(s)]} size={13} />
+                          </span>
+                        ) : (
+                          <span className={`tree-dot${live ? " live" : active ? " on" : ""}`} />
+                        )}
                         <span className="sess-title">{s.title || t("chat", lang)}</span>
                         <span className="sess-ago">{ago(s.updatedAt, lang)}</span>
                       </span>
@@ -359,7 +365,7 @@ export function SessionSidebar({
                       {ws?.name && ws.name !== "/" && <span className="sess-ws">{ws.name}</span>}
                     </button>
                   )}
-                  {job && <span className={`sess-job ${job}`} title={t(job === "running" ? "jobRunning" : "jobDone", lang)} />}
+                  {job && <span className={`sess-job ${job}`} role="status" title={t(job === "running" ? "jobRunning" : job === "error" ? "jobError" : "jobDone", lang)} />}
                   <button type="button" className="tree-icon tree-hover" title={t("delete", lang)} onClick={() => void remove(s)}>×</button>
                 </div>
               );
@@ -420,48 +426,6 @@ export function SessionSidebar({
           <div className="side-plan"><span className={`side-dot${rpcOk ? " ok" : ""}`} />{t(rpcOk ? "connected" : "offline", lang)}</div>
           <div className="side-usage">{usage ? `${compact(usage.totalTokens)} token · ${usage.calls} ${t("calls", lang)}` : "—"}</div>
         </div>
-        {space === "chat" && onChatMode && (
-          <div className="side-modes" ref={modesRef}>
-            <button
-              type="button"
-              className={`tree-icon moded${modesOpen ? " on" : ""}`}
-              title={`${t("modesMenu", lang)} · ${t(`mode_${chatMode}`, lang)}`}
-              aria-haspopup="menu"
-              aria-expanded={modesOpen}
-              onClick={(e) => toggleModes(e.currentTarget)}
-            >
-              <Icon name="modes" size={15} />
-            </button>
-            {modesOpen && createPortal(
-              <div
-                className="pane-menu modes-menu"
-                role="menu"
-                ref={modesMenuRef}
-                style={modesAt ? { left: modesAt.left, bottom: modesAt.bottom, width: MODES_MENU_W } : undefined}
-              >
-                <div className="modes-head">{t("modesMenu", lang)}</div>
-                {CHAT_MODES.map((m) => (
-                  <button
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={chatMode === m}
-                    key={m}
-                    className={chatMode === m ? "on" : ""}
-                    onClick={() => { setModesOpen(false); onChatMode(m); }}
-                  >
-                    <Icon name={MODE_ICON[m]} size={14} />
-                    <span className="modes-text">
-                      <strong>{t(`mode_${m}`, lang)}</strong>
-                      <span>{t(`modeHint_${m}`, lang)}</span>
-                    </span>
-                    {chatMode === m && <Icon name="check" size={12} />}
-                  </button>
-                ))}
-              </div>,
-              document.body,
-            )}
-          </div>
-        )}
         <button type="button" className="tree-icon" title={t(dark ? "themeLight" : "themeDark", lang)} onClick={onToggleTheme}><Icon name={dark ? "sun" : "moon"} size={15} /></button>
         <button type="button" className="tree-icon" title={t("settings", lang)} onClick={onOpenSettings}><Icon name="sliders" size={15} /></button>
       </div>

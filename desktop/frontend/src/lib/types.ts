@@ -21,6 +21,9 @@ export type Session = {
   // "office" or "chat"; empty on chats made before spaces existed. "worker"
   // is a one-off subagent's channel, opened from the subagent roster.
   space?: "office" | "chat" | "worker";
+  // how a Chat-space session works, picked when it starts and fixed after;
+  // empty on sessions made before modes were stored
+  mode?: "orchestra" | "teamwork" | "terminal" | "";
   createdAt?: string;
   updatedAt: string;
 };

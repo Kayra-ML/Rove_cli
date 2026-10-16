@@ -12,6 +12,7 @@ vi.mock("../lib/rpc", () => ({
     if (method === "permission.asks") return pending;
     return { ok: true };
   }),
+  onReconnect: vi.fn(() => () => {}),
   subscribeEvents: vi.fn((filter: string, cb: (ev: { payload?: unknown }) => void) => {
     subs.set(filter, cb);
     return () => subs.delete(filter);

@@ -26,13 +26,15 @@ vi.mock("../lib/rpc", () => {
     rpc: vi.fn().mockImplementation((method: string) =>
       Promise.resolve(responses[method] ?? null),
     ),
+    onReconnect: vi.fn(() => () => {}),
     subscribeEvents: vi.fn().mockReturnValue(() => {}),
     hydrateConnection: vi.fn().mockResolvedValue({ token: "test", http: "http://localhost" }),
   };
 });
 
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { useAgents, useHistory } from "../hooks/useApi";
+import { rpc } from "../lib/rpc";
 
 describe("useAgents", () => {
   it("loads agents", async () => {
@@ -47,6 +49,30 @@ describe("useHistory", () => {
     const { result } = renderHook(() => useHistory("s1"));
     await waitFor(() => expect(result.current.messages).toHaveLength(2));
     expect(result.current.messages[0].role).toBe("user");
+  });
+
+  it("adds announced messages once, and keeps them past a read that missed them", async () => {
+    const { result } = renderHook(() => useHistory("s1"));
+    await waitFor(() => expect(result.current.messages).toHaveLength(2));
+    const m3 = { id: "m3", sessionId: "s1", role: "tool" as const, content: "out", createdAt: "" };
+    act(() => {
+      result.current.push(m3);
+      result.current.push(m3); // the same message twice is shown once
+      result.current.push({ ...m3, id: "x", sessionId: "other" }); // another chat's
+    });
+    expect(result.current.messages.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+    // a read already on its way (answered before m4 was stored) must not drop it
+    let answer!: (v: unknown) => void;
+    vi.mocked(rpc).mockImplementationOnce(() => new Promise((r) => { answer = r; }));
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.reload(); });
+    const m4 = { ...m3, id: "m4" };
+    act(() => result.current.push(m4));
+    await act(async () => {
+      answer([{ id: "m1", sessionId: "s1", role: "user", content: "hello", createdAt: "" }]);
+      await pending;
+    });
+    expect(result.current.messages.map((m) => m.id)).toEqual(["m1", "m4"]);
   });
 
   it("returns empty for null session", async () => {

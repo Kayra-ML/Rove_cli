@@ -72,7 +72,7 @@ export function ConnectionMenu({ lang, onAddServer }: { lang: Lang; onAddServer:
         onClick={toggle}
       >
         <span className={`conn-dot ${st.status}`} />
-        <Icon name={remote ? "terminal" : "workspace"} size={13} />
+        <Icon name={remote ? "server" : "workspace"} size={13} />
         <span className="conn-label">{label}</span>
         <span className="profile-caret">⌄</span>
       </button>
@@ -89,7 +89,7 @@ export function ConnectionMenu({ lang, onAddServer }: { lang: Lang; onAddServer:
             const on = remote && (st.host === name || st.host === h.host);
             return (
               <button key={name} type="button" role="menuitemradio" aria-checked={on} className={on ? "on" : ""} disabled={busy !== null} onClick={() => { if (!on) void go(h); }}>
-                <Icon name="terminal" size={14} />
+                <Icon name="server" size={14} />
                 <span className="modes-text">
                   <strong>{name}</strong>
                   <span>{busy === h.host ? (step || t("connConnecting", lang)) : on ? (st.status === "reconnecting" ? t("connReconnecting", lang) : t("connOnServer", lang)) : (h.hostName ?? t("connRunHere", lang))}</span>

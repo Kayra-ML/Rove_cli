@@ -9,6 +9,7 @@ vi.mock("../lib/rpc", () => ({
     calls.push([method, params]);
     return method === "usage.report" ? report : null;
   }),
+  onReconnect: vi.fn(() => () => {}),
   subscribeEvents: vi.fn(() => () => {}),
 }));
 vi.mock("../hooks/usePrefs", () => ({ usePrefs: () => ({ lang: "tr", theme: "graphite" }) }));

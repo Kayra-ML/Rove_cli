@@ -14,6 +14,7 @@ vi.mock("../lib/rpc", () => ({
     if (method === "subagent.list") return listed;
     return { ok: true };
   }),
+  onReconnect: vi.fn(() => () => {}),
   subscribeEvents: vi.fn((filter: string, cb: (ev: { payload?: unknown }) => void) => {
     subs.set(filter, cb);
     return () => subs.delete(filter);
@@ -40,14 +41,20 @@ describe("SubagentDock", () => {
     expect(container.querySelector(".subagents")).toBeNull();
   });
 
-  it("lists each one with its state and what it is doing now", async () => {
+  // a card is picked by its name; its details and buttons open below the strip
+  const pick = async (name: string) => {
+    fireEvent.click((await screen.findByText(name)).closest(".sa-card")!);
+  };
+
+  it("shows how many there are, and a card each with its state and what it is doing now", async () => {
     render(<SubagentDock session={chat} lang="tr" onOpen={() => {}} />);
     await waitFor(() => expect(subs.has("subagent.updated")).toBe(true));
     fire("subagent.updated", { sessionId: "C", tasks: [
       task({}),
       task({ id: "t2", index: 2, sessionId: "S2", goal: "add POST /login", status: "completed", summary: "route added\nmore" }),
     ] });
-    expect(await screen.findByText("Alt ajanlar")).toBeTruthy();
+    expect(await screen.findByText("Agentlar")).toBeTruthy();
+    expect(document.querySelector(".sa-total")?.textContent).toBe("2");
     expect(screen.getByText("1 çalışıyor · 1 bitti")).toBeTruthy();
     // plain subagents, no characters: each is named by its place in the call
     expect(screen.getByText("Alt ajan 1")).toBeTruthy();
@@ -56,7 +63,7 @@ describe("SubagentDock", () => {
     expect(screen.getByText("route added")).toBeTruthy();
     // a running one shows its latest tool call
     fire("tool.start", { sessionId: "S1", name: "read_file", args: { path: "src/login.tsx" } });
-    await waitFor(() => expect(document.querySelector(".st-running .sa-line")?.textContent).toContain("login.tsx"));
+    await waitFor(() => expect(document.querySelector(".sa-card.st-running .sa-card-line")?.textContent).toContain("login.tsx"));
   });
 
   it("only listens to its own chat", async () => {
@@ -69,7 +76,8 @@ describe("SubagentDock", () => {
   it("stops and steers a running one", async () => {
     listed = [task({})];
     render(<SubagentDock session={chat} lang="tr" onOpen={() => {}} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Durdur" }));
+    await pick("Alt ajan 1");
+    fireEvent.click(screen.getByRole("button", { name: "Durdur" }));
     await waitFor(() => expect(calls.find(([m]) => m === "subagent.stop")?.[1]).toEqual({ id: "t1" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Yönlendir" }));
@@ -87,8 +95,11 @@ describe("SubagentDock", () => {
       files: ["shared.txt"], applied: false, pending: "clashes with other changes to the same lines: git apply --check", reason: "clash",
     } })];
     render(<SubagentDock session={chat} lang="tr" onOpen={() => {}} />);
+    // its card is marked as waiting on the user
+    expect((await screen.findByText("Alt ajan 1")).closest(".sa-card")?.className).toContain("wait");
+    await pick("Alt ajan 1");
     // the reason in the user's words; git's own message only in the tooltip
-    const why = await screen.findByText("bekliyor — başka bir değişiklikle aynı satırlara dokunuyor");
+    const why = screen.getByText("bekliyor — başka bir değişiklikle aynı satırlara dokunuyor");
     expect(why.getAttribute("title")).toContain("git apply --check");
     expect(document.querySelector(".sa-diff")?.textContent).toContain("+3 −1 · 1 dosya");
     fireEvent.click(screen.getByRole("button", { name: "Uygula" }));
@@ -103,7 +114,8 @@ describe("SubagentDock", () => {
       pending: "discarded", reason: "discarded",
     } })];
     render(<SubagentDock session={chat} lang="tr" onOpen={() => {}} />);
-    expect(await screen.findByText("atıldı")).toBeTruthy();
+    await pick("Alt ajan 1");
+    expect(screen.getByText("atıldı")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Uygula" })).toBeNull();
   });
 
@@ -112,7 +124,8 @@ describe("SubagentDock", () => {
       repo: "/r", path: "", branch: "", base: "abc", added: 2, removed: 0, files: ["a.go"], applied: true,
     } })];
     render(<SubagentDock session={chat} lang="tr" onOpen={() => {}} />);
-    expect(await screen.findByText("projeye uygulandı")).toBeTruthy();
+    await pick("Alt ajan 1");
+    expect(screen.getByText("projeye uygulandı")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Uygula" })).toBeNull();
   });
 
@@ -120,23 +133,34 @@ describe("SubagentDock", () => {
     listed = [task({ status: "completed" })];
     const onOpen = vi.fn();
     render(<SubagentDock session={chat} lang="tr" onOpen={onOpen} />);
-    fireEvent.click(await screen.findByRole("button", { name: /Alt ajan 1/ }));
+    await pick("Alt ajan 1");
+    fireEvent.click(screen.getByRole("button", { name: "Dökümü aç" }));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "S1", parentId: "C", space: "worker" }));
   });
 
-  // Older calls fold away; the latest one, anything still working and
-  // anything still waiting on the user stay.
-  it("keeps the latest call and whatever still needs attention", async () => {
+  // Every subagent of the chat is on the strip: those at work first, then
+  // those waiting on the user, then the finished ones; the count is them all.
+  it("keeps every subagent on the strip, at work first", async () => {
     listed = [
-      task({ id: "old", batch: "b0", goal: "old and done", status: "completed" }),
-      task({ id: "wait", batch: "b0", goal: "old but waiting", status: "completed", worktree: {
+      task({ id: "old", batch: "b0", goal: "old and done", status: "completed", endedAt: "2026-10-16T10:00:00Z" }),
+      task({ id: "wait", batch: "b0", index: 2, goal: "old but waiting", status: "completed", worktree: {
         repo: "/r", path: "/wt/w", branch: "b", base: "x", added: 1, removed: 0, files: ["f"], applied: false, pending: "clash",
       } }),
       task({ id: "new", batch: "b1", goal: "the latest", status: "running" }),
     ];
     render(<SubagentDock session={chat} lang="tr" onOpen={() => {}} />);
     expect(await screen.findByText("the latest")).toBeTruthy();
-    expect(screen.getByText("old but waiting")).toBeTruthy();
-    expect(screen.queryByText("old and done")).toBeNull();
+    const goals = [...document.querySelectorAll(".sa-card .sa-card-goal")].map((e) => e.textContent);
+    expect(goals).toEqual(["the latest", "old but waiting", "old and done"]);
+    expect(document.querySelector(".sa-total")?.textContent).toBe("3");
+  });
+
+  it("pages through more than five", async () => {
+    listed = Array.from({ length: 7 }, (_, i) => task({ id: `t${i}`, index: i + 1, sessionId: `S${i}`, goal: `part ${i + 1}` }));
+    render(<SubagentDock session={chat} lang="tr" onOpen={() => {}} />);
+    expect(await screen.findByText("part 7")).toBeTruthy();
+    expect(document.querySelector(".sa-total")?.textContent).toBe("7");
+    expect(screen.getByRole("button", { name: "Sonraki agentlar" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Önceki agentlar" })).toBeTruthy();
   });
 });

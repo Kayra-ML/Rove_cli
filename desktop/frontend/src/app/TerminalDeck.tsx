@@ -184,7 +184,11 @@ export function TerminalDeck({
     const on = (ev: { type: string; payload?: unknown }) => {
       const sid = (ev.payload as { sessionId?: string } | undefined)?.sessionId;
       if (!sid || !ids.has(sid)) return;
-      setInfos((list) => list.map((p) => (p.id === sid ? { ...p, running: ev.type !== "run.done" } : p)));
+      const running = ev.type !== "run.done";
+      // unchanged on every streamed piece but the first: keep the same list
+      setInfos((list) => (list.some((p) => p.id === sid && p.running !== running)
+        ? list.map((p) => (p.id === sid ? { ...p, running } : p))
+        : list));
       if (ev.type === "run.done") void refreshInfos();
     };
     const offs = [subscribeEvents("message.delta", on), subscribeEvents("tool.start", on), subscribeEvents("run.done", on)];
@@ -345,10 +349,7 @@ export function TerminalDeck({
 
   const bar = (
     <div className="deck-bar">
-      {group && (
-        // the daemon names a session after its first message: its list is fresher than ours
-        <span className="deck-title" title={infoById.get(group.id)?.title || group.title}>{infoById.get(group.id)?.title || group.title || t("termNewChat", lang)}</span>
-      )}
+      {/* the session's title and mode are in the session bar above */}
       <span className="pane-spacer" />
       <span className="deck-count">{panes.filter((p) => p.kind !== "draft").length}/{slots}</span>
       <div className="deck-split" role="radiogroup" aria-label={t("termSplitLabel", lang)}>
@@ -384,6 +385,8 @@ export function TerminalDeck({
           const label = p.kind === "main" ? "T1" : labelOf(sid);
           const chatProps = {
             variant: "terminal" as const,
+            // a terminal session's /session lists terminal sessions only
+            mode: "terminal" as const,
             onFocusPane: () => i !== focus && setFocus(i),
             onSession: (ns: Session) => onFocusSession(ns), // /session switches the whole deck
             onNewDraft: () => freshPane(p.key),

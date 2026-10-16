@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useState, useEffect } from "react";
-import { rpc, hydrateConnection } from "~/lib/rpc";
+import { rpc, hydrateConnection, subscribeEvents } from "~/lib/rpc";
 import type { Session, TerminalSession, Workspace } from "~/lib/types";
 import { Chat } from "./Chat";
 import { Icon } from "./Icons";
@@ -25,9 +25,12 @@ import { usePrefs } from "~/hooks/usePrefs";
 import { applyTheme, isLightTheme, type ThemeId } from "~/lib/themes";
 import { t } from "~/lib/i18n";
 import {
-  adopt, freshDraft, loadModes, loadTop, modeFor, saveModes, saveTop, spaceOf, TOPS, withMode,
+  isMode, LAST, loadModes, loadTop, saveModes, saveTop, sessionMode, spaceOf, TOPS, withMode,
   type ChatMode, type Space, type Top,
 } from "~/lib/spaces";
+import { ModePicker } from "./ModePicker";
+import { toast } from "~/lib/toast";
+import { SessionBar } from "./SessionBar";
 import brandMark from "~/assets/logo-256.png";
 import { watchFinishes } from "~/lib/notify";
 import { ConnectionBanner, ConnectionMenu } from "./ConnectionMenu";
@@ -83,8 +86,13 @@ export function App() {
   // Orchestra: which channel of the Chat space's chat is open — null is the
   // chat itself, otherwise a subagent's channel opened from the dock.
   const [channel, setChannel] = useState<Session | null>(null);
-  // each Chat-space chat keeps the mode it was last used in
+  // Modes the daemon does not hold: those of sessions made before it stored
+  // them (until they are adopted, below), and LAST, the one used most
+  // recently, which the picker marks.
   const [modes, setModesState] = useState<Record<string, ChatMode>>(loadModes);
+  // The mode a new Chat-space session will start in. null: not picked yet,
+  // so the picker shows. It can change only while nothing has been sent.
+  const [draftMode, setDraftMode] = useState<ChatMode | null>(null);
   const [autoTab, setAutoTabState] = useState<AutoTab>(loadAutoTab);
   const { badgeFor } = usePersonaBadges();
   // A shell opened from Settings → Servers, waiting to land in a
@@ -113,7 +121,10 @@ export function App() {
 
   const space: Space | null = top === "office" || top === "chat" ? top : null;
   const chat = sel.chat;
-  const chatMode = modeFor(modes, chat.session?.id);
+  // a session's mode is fixed; a draft's is the one picked for it, if any
+  const chatMode: ChatMode | null = chat.session
+    ? sessionMode(chat.session, modes)
+    : chat.draft ? draftMode : null;
   // the sidebar belongs to Office and Chat; Automation and Market are full pages
   const showSide = sideOpen && space !== null;
   // too narrow for two columns: the list still opens, but over the page
@@ -133,14 +144,6 @@ export function App() {
     setModesState(next);
     saveModes(next);
   }, []);
-  const setChatMode = useCallback((m: ChatMode) => {
-    setModesState((cur) => {
-      const next = withMode(cur, sel.chat.session?.id, m);
-      saveModes(next);
-      return next;
-    });
-    if (m !== "orchestra") setChannel(null);
-  }, [sel.chat.session]);
   const setAutoTab = useCallback((next: AutoTab) => {
     setAutoTabState(next);
     try { localStorage.setItem(AUTO_TAB_KEY, next); } catch { /* private */ }
@@ -160,6 +163,18 @@ export function App() {
     if (sp === "chat") setChannel((c) => (c && c.parentId === s.id ? c : null));
     followWorkspace(s);
   }, [followWorkspace]);
+
+  // Within a mode, going to another session stays in that mode: sessions do
+  // not switch modes, so one of another mode is not opened from here (the
+  // list on the left opens it). A session with no mode yet takes this one.
+  const openInMode = useCallback((s: Session, mode: ChatMode) => {
+    if (isMode(s.mode) && s.mode !== mode) {
+      toast(t("modeOtherSession", lang).replace("{mode}", t(`mode_${s.mode}`, lang)), "err");
+      return;
+    }
+    if (!isMode(s.mode)) setModes({ ...modes, [s.id]: mode });
+    selectIn("chat", s);
+  }, [lang, modes, setModes, selectIn]);
 
   // openSession opens a chat from anywhere (a map, a terminal pane) in the
   // space it belongs to.
@@ -184,19 +199,14 @@ export function App() {
   }, [setTop]);
 
   // A new chat in a space: a draft (in Office, with the agent it will talk
-  // to; in Chat, in the mode picked for it, else the one used last). Office
-  // without an agent has nothing to open.
+  // to; in Chat, in the mode picked for it — none yet shows the picker).
+  // Office without an agent has nothing to open.
   const newDraft = useCallback((sp: Space, agent: string | null = null, mode?: ChatMode) => {
     const next: Sel = sp === "office" && !agent ? NOTHING : { session: null, draft: true, agent };
     setSel((cur) => ({ ...cur, [sp]: next }));
     if (sp === "chat") {
       setChannel(null);
-      // a new chat starts in the mode picked for it, else the one used last
-      setModesState((cur) => {
-        const m = mode ? withMode(freshDraft(cur), null, mode) : freshDraft(cur);
-        saveModes(m);
-        return m;
-      });
+      setDraftMode(mode ?? null);
     }
     setTop(sp);
   }, [setTop]);
@@ -206,22 +216,59 @@ export function App() {
   // after that message.
   const createFromDraft = useCallback(async (sp: Space): Promise<Session> => {
     const agent = sel[sp].agent;
+    const mode = sp === "chat" ? draftMode ?? "orchestra" : undefined;
     const s = await rpc<Session>("session.create", {
       title: "",
       workspaceId: workspace?.id ?? "",
       space: sp,
+      // fixed from here on: the daemon keeps it with the session
+      ...(mode ? { mode } : {}),
       // an office chat talks to one of the office's agents (a profile)
       profileIds: sp === "office" && agent ? [agent] : [],
     });
     setSel((cur) => ({ ...cur, [sp]: { session: s, draft: false, agent: null } }));
-    if (sp === "chat") {
+    if (sp === "chat" && mode) {
       setChannel(null);
-      setModes(adopt(modes, s.id));
+      // an older daemon does not keep modes: remember it here as well
+      setModes(withMode(modes, s.id, mode));
     }
     window.dispatchEvent(new Event("rove:sessions"));
     window.dispatchEvent(new Event("rove:persona"));
     return s;
-  }, [sel, workspace, modes, setModes]);
+  }, [sel, workspace, modes, setModes, draftMode]);
+
+  // The open session as the daemon has it now: it names a chat after its
+  // first message, after the chat was opened here.
+  const chatId = chat.session?.id ?? null;
+  useEffect(() => {
+    if (!chatId) return;
+    return subscribeEvents(`session.${chatId}`, (ev) => {
+      if (ev.type !== "session.updated") return;
+      void rpc<Session[]>("session.list", { workspaceId: "" })
+        .then((list) => {
+          const ns = list?.find((x) => x.id === chatId);
+          if (ns) setSel((cur) => (cur.chat.session?.id === ns.id ? { ...cur, chat: { ...cur.chat, session: ns } } : cur));
+        })
+        .catch(() => {});
+    });
+  }, [chatId]);
+
+  // A session made before modes were stored gets the one it was shown in,
+  // once, the first time it is opened; from then on it is fixed like any.
+  const adoptId = chat.session && !isMode(chat.session.mode) && !chat.session.parentId ? chat.session.id : null;
+  useEffect(() => {
+    if (!adoptId) return;
+    const mode = sessionMode({ id: adoptId } as Session, modes);
+    let live = true;
+    rpc<Session>("session.setMode", { sessionId: adoptId, mode })
+      .then((ns) => {
+        if (!live || !ns) return;
+        setSel((cur) => (cur.chat.session?.id === ns.id ? { ...cur, chat: { ...cur.chat, session: ns } } : cur));
+        window.dispatchEvent(new Event("rove:sessions"));
+      })
+      .catch(() => { /* an older daemon: the mode stays on this computer */ });
+    return () => { live = false; };
+  }, [adoptId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSide = useCallback(() => setSideOpen((v) => { writeFlag("aether.shell.side", !v); return !v; }), []);
   const openSettings = useCallback((section: SettingsSection = "appearance") => {
@@ -321,8 +368,16 @@ export function App() {
       draft={sel[sp].draft && !sel[sp].session}
       onCreateSession={() => createFromDraft(sp)}
       // /new keeps talking to the same agent
-      onNewDraft={() => newDraft(sp, sp === "office" ? (sel.office.session ? badgeFor(sel.office.session.id)?.profileId ?? null : sel.office.agent) : null)}
-      onSession={(s) => { selectIn(sp, s); window.dispatchEvent(new Event("rove:sessions")); }}
+      onNewDraft={() => (sp === "office"
+        ? newDraft(sp, sel.office.session ? badgeFor(sel.office.session.id)?.profileId ?? null : sel.office.agent)
+        : newDraft(sp, null, "orchestra"))}
+      onSession={(s) => {
+        if (sp === "chat") openInMode(s, "orchestra");
+        else selectIn(sp, s);
+        window.dispatchEvent(new Event("rove:sessions"));
+      }}
+      space={sp}
+      mode={sp === "chat" ? "orchestra" : undefined}
       onOpenMap={() => openMap("context")}
       onOpenContext={() => openMap("sessions")}
       team={team}
@@ -373,45 +428,61 @@ export function App() {
             <Suspense fallback={null}><SkillMarket /></Suspense>
           </div>
         );
-      default:
-        switch (chatMode) {
-          case "terminal":
-            return (
-              <TerminalDeck
-                activeSession={chat.session}
+      default: {
+        // nothing picked yet: the session starts by choosing its mode
+        if (!chatMode) {
+          return (
+            <div className="panel center-panel">
+              <ModePicker lang={lang} workspace={workspace} last={modes[LAST]} onPick={(m) => newDraft("chat", null, m)} />
+            </div>
+          );
+        }
+        // the mode shows, locked; there is no way to another one from here
+        const bar = <SessionBar lang={lang} mode={chatMode} session={chat.session} workspace={workspace} />;
+        return <>{bar}{renderMode(chatMode)}</>;
+      }
+    }
+  }
+
+  function renderMode(mode: ChatMode) {
+    switch (mode) {
+      case "terminal":
+        return (
+          <TerminalDeck
+            activeSession={chat.session}
+            draft={chat.draft && !chat.session}
+            onCreateSession={() => createFromDraft("chat")}
+            workspaceId={workspace?.id}
+            // /session in a pane opens that session, in its own mode; one
+            // without a stored mode was being used here, in the terminal
+            onFocusSession={(s) => openInMode(s, "terminal")}
+            onOpenMap={() => openMap("context")}
+            onOpenContext={() => openMap("sessions")}
+            onNewSession={() => newDraft("chat", null, "terminal")}
+            incomingShell={pendingShell}
+            onConsumedShell={() => setPendingShell(null)}
+            themeKey={theme}
+          />
+        );
+      case "teamwork":
+        return (
+          <div className="panel center-panel flush">
+            <Suspense fallback={null}>
+              <TeamworkView
+                session={chat.session}
                 draft={chat.draft && !chat.session}
                 onCreateSession={() => createFromDraft("chat")}
-                workspaceId={workspace?.id}
-                // a chat focused in a pane is being used in the terminal
-                onFocusSession={(s) => { selectIn("chat", s); setModesState((cur) => { const next = withMode(cur, s.id, "terminal"); saveModes(next); return next; }); }}
-                onOpenMap={() => openMap("context")}
-                onOpenContext={() => openMap("sessions")}
-                onNewSession={() => newDraft("chat")}
-                incomingShell={pendingShell}
-                onConsumedShell={() => setPendingShell(null)}
-                themeKey={theme}
+                workspace={workspace}
               />
-            );
-          case "teamwork":
-            return (
-              <div className="panel center-panel flush">
-                <Suspense fallback={null}>
-                  <TeamworkView
-                    session={chat.session}
-                    draft={chat.draft && !chat.session}
-                    onCreateSession={() => createFromDraft("chat")}
-                    workspace={workspace}
-                  />
-                </Suspense>
-              </div>
-            );
-          default: // orchestra: the conversation; a subagent's channel opens over it
-            return (
-              <div className="panel center-panel">
-                {conversation("chat", channel ?? chat.session, channel ? <TeamBar channel={channel} onClose={() => setChannel(null)} /> : undefined)}
-              </div>
-            );
-        }
+            </Suspense>
+          </div>
+        );
+      default: // orchestra: the conversation; a subagent's channel opens over it
+        return (
+          <div className="panel center-panel">
+            {conversation("chat", channel ?? chat.session, channel ? <TeamBar channel={channel} onClose={() => setChannel(null)} /> : undefined)}
+          </div>
+        );
     }
   }
 
@@ -442,9 +513,9 @@ export function App() {
           ))}
         </nav>
         <div className="tb-right">
-          <button type="button" className="tb-icon" title="⌘K" onClick={() => setPaletteOpen(true)}><Icon name="search" size={15} /></button>
-          <span className={`tb-status${rpcOk ? " ok" : ""}`} title={rpcOk ? t("connected", lang) : "offline"} />
+          {/* where sessions run: this computer or an SSH server, picked here */}
           <ConnectionMenu lang={lang} onAddServer={() => openSettings("servers")} />
+          <span className={`tb-status${rpcOk ? " ok" : ""}`} title={rpcOk ? t("connected", lang) : "offline"} />
           <button type="button" className="tb-icon" title={t("settings", lang)} onClick={() => openSettings("appearance")}><Icon name="sliders" size={15} /></button>
         </div>
       </header>
@@ -474,8 +545,7 @@ export function App() {
             onOpenMarket={openMarket}
             onOpenSettings={() => openSettings("appearance")}
             onOfficeAgent={openOffice}
-            chatMode={chatMode}
-            onChatMode={setChatMode}
+            modeOf={(s) => sessionMode(s, modes)}
           />
         )}
         {showSide && !sideOver && (
@@ -497,7 +567,8 @@ export function App() {
           <Settings
             onClose={() => setSettingsOpen(false)}
             onSelectWorkspace={setWorkspace}
-            onOpenShell={(sess) => { setPendingShell(sess); setTop("chat"); setChatMode("terminal"); }}
+            // a shell opens in a new terminal session: no session changes mode
+            onOpenShell={(sess) => { setPendingShell(sess); newDraft("chat", null, "terminal"); }}
             initialSection={settingsSection}
             officeIntent={officeIntent}
             workspace={workspace}

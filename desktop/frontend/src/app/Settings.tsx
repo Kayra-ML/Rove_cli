@@ -20,6 +20,35 @@ import { useDialog } from "~/hooks/useDialog";
 
 export type Section = "appearance" | "workspace" | "providers" | "goals" | "agents" | "roster" | "permissions" | "automation" | "memory" | "mcp" | "webhook" | "profiles" | "servers" | "usage";
 
+// The settings rail, in groups: what the app looks like and costs, the
+// models and agents it works with, where and how it works, and who and what
+// may reach it. A count shows how many of a thing are set up.
+type Counts = Record<"providers" | "workspaces" | "goals" | "skills" | "sshHosts" | "mcpServers", readonly unknown[]>;
+type RailItem = { id: Section; icon: Parameters<typeof Icon>[0]["name"]; label: string; text?: string; count?: (c: Counts) => number };
+const RAIL: { label: string; items: RailItem[] }[] = [
+  { label: "setGroupGeneral", items: [
+    { id: "appearance", icon: "palette", label: "appearance" },
+    { id: "usage", icon: "chart", label: "usageTitle" },
+  ] },
+  { label: "setGroupAI", items: [
+    { id: "providers", icon: "key", label: "providers", count: (c) => c.providers.length },
+    { id: "profiles", icon: "users", label: "profiles" },
+    { id: "roster", icon: "agents", label: "roster" },
+    { id: "agents", icon: "skills", label: "skills", count: (c) => c.skills.length },
+    { id: "memory", icon: "database", label: "memory" },
+    { id: "mcp", icon: "plug", label: "mcp", text: "MCP", count: (c) => c.mcpServers.length },
+  ] },
+  { label: "setGroupWork", items: [
+    { id: "workspace", icon: "folder", label: "workspaces", count: (c) => c.workspaces.length },
+    { id: "goals", icon: "target", label: "goals", count: (c) => c.goals.length },
+    { id: "automation", icon: "lightning", label: "automation" },
+  ] },
+  { label: "setGroupAccess", items: [
+    { id: "permissions", icon: "shield", label: "permissions" },
+    { id: "servers", icon: "server", label: "servers", count: (c) => c.sshHosts.length },
+  ] },
+];
+
 interface Props {
   onClose: () => void;
   onSelectWorkspace?: (ws: Workspace) => void;
@@ -215,61 +244,40 @@ export function Settings({ onClose, onSelectWorkspace, onOpenShell, initialSecti
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-sheet" role="dialog" aria-modal="true" aria-label={t("settings", lang)} ref={sheet} onClick={(e) => e.stopPropagation()}>
-        <header className="modal-head">
-          <h1>{t("settings", lang)}</h1>
-          <button className="icon-btn" onClick={onClose} title={t("close", lang)}>✕</button>
-        </header>
-        <div className="split" style={{ height: "calc(100% - 52px)" }}>
-          <aside className="split-rail">
-            <button className={`rail-item${section === "appearance" ? " active" : ""}`} onClick={() => setSection("appearance")}>
-              <Icon name="palette" size={15} /> {t("appearance", lang)}
-            </button>
-            <button className={`rail-item${section === "profiles" ? " active" : ""}`} onClick={() => setSection("profiles")}>
-              <Icon name="agents" size={15} /> {t("profiles", lang)}
-            </button>
-            <button className={`rail-item${section === "usage" ? " active" : ""}`} onClick={() => setSection("usage")}>
-              <Icon name="pulse" size={15} /> {t("usageTitle", lang)}
-            </button>
-            <button className={`rail-item${section === "providers" ? " active" : ""}`} onClick={() => setSection("providers")}>
-              <Icon name="key" size={15} /> {t("providers", lang)}
-              {providers.length > 0 && <span className="count">{providers.length}</span>}
-            </button>
-            <button className={`rail-item${section === "workspace" ? " active" : ""}`} onClick={() => setSection("workspace")}>
-              <Icon name="workspace" size={15} /> {t("workspaces", lang)}
-              {workspaces.length > 0 && <span className="count">{workspaces.length}</span>}
-            </button>
-            <button className={`rail-item${section === "goals" ? " active" : ""}`} onClick={() => setSection("goals")}>
-              <Icon name="flag" size={15} /> {t("goals", lang)}
-              {goals.length > 0 && <span className="count">{goals.length}</span>}
-            </button>
-            <button className={`rail-item${section === "roster" ? " active" : ""}`} onClick={() => setSection("roster")}>
-              <Icon name="agents" size={15} /> {t("roster", lang)}
-            </button>
-            <button className={`rail-item${section === "agents" ? " active" : ""}`} onClick={() => setSection("agents")}>
-              <Icon name="box" size={15} /> {t("skills", lang)}
-              {skills.length > 0 && <span className="count">{skills.length}</span>}
-            </button>
-            <button className={`rail-item${section === "permissions" ? " active" : ""}`} onClick={() => setSection("permissions")}>
-              <Icon name="key" size={15} /> {t("permissions", lang)}
-            </button>
-            <button className={`rail-item${section === "automation" ? " active" : ""}`} onClick={() => setSection("automation")}>
-              <Icon name="pulse" size={15} /> {t("automation", lang)}
-            </button>
-            <button className={`rail-item${section === "servers" ? " active" : ""}`} onClick={() => setSection("servers")}>
-              <Icon name="terminal" size={15} /> {t("servers", lang)}
-              {sshHosts.length > 0 && <span className="count">{sshHosts.length}</span>}
-            </button>
-            <button className={`rail-item${section === "memory" ? " active" : ""}`} onClick={() => setSection("memory")}>
-              <Icon name="box" size={15} /> {t("memory", lang)}
-            </button>
-            <button className={`rail-item${section === "mcp" ? " active" : ""}`} onClick={() => setSection("mcp")}>
-              <Icon name="pulse" size={15} /> MCP
-              {mcpServers.length > 0 && <span className="count">{mcpServers.length}</span>}
-            </button>
+      <div className="modal-sheet settings-sheet" role="dialog" aria-modal="true" aria-label={t("settings", lang)} ref={sheet} onClick={(e) => e.stopPropagation()}>
+        <div className="split settings-split">
+          <aside className="split-rail settings-rail">
+            <div className="settings-rail-head">
+              <h1>{t("settings", lang)}</h1>
+            </div>
+            <nav className="settings-nav" aria-label={t("settings", lang)}>
+              {RAIL.map((g) => (
+                <div className="settings-group" key={g.label}>
+                  <div className="settings-group-label">{t(g.label, lang)}</div>
+                  {g.items.map((it) => {
+                    const n = it.count?.({ providers, workspaces, goals, skills, sshHosts, mcpServers }) ?? 0;
+                    return (
+                      <button
+                        key={it.id}
+                        type="button"
+                        className={`rail-item${section === it.id ? " active" : ""}`}
+                        aria-current={section === it.id ? "page" : undefined}
+                        onClick={() => setSection(it.id)}
+                      >
+                        <Icon name={it.icon} size={15} /> {it.text ?? t(it.label, lang)}
+                        {n > 0 && <span className="count">{n}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </nav>
           </aside>
 
-          <div className="split-body">
+          <div className="split-body settings-body">
+            <button type="button" className="settings-close icon-btn" onClick={onClose} title={t("close", lang)} aria-label={t("close", lang)}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
+            </button>
             {section === "appearance" && (
               <>
                 <h2>{t("appearance", lang)}</h2>

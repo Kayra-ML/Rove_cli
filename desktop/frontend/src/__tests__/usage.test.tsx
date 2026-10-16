@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("../lib/rpc", () => ({
   rpc: vi.fn(),
+  onReconnect: vi.fn(() => () => {}),
   subscribeEvents: vi.fn().mockReturnValue(() => {}),
   hydrateConnection: vi.fn(),
 }));

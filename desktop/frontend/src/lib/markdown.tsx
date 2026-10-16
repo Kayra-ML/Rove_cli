@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -90,14 +90,19 @@ const components: Components = {
   img: ({ alt, src }) => <code className="md-code">{alt || String(src ?? "")}</code>,
 };
 
-export function Markdown({ text: source }: { text: string }) {
+// breaks: in a chat a line the agent broke is a line the reader sees
+// broken, which plain CommonMark would join into one paragraph
+const plugins = [remarkGfm, remarkBreaks];
+
+// Markdown renders again only when its text changes. A chat re-renders on
+// every streamed piece of a reply; without this, every earlier message was
+// parsed again each time, so a long chat got slower the more it held.
+export const Markdown = memo(function Markdown({ text: source }: { text: string }) {
   return (
     <div className="md">
-      {/* breaks: in a chat a line the agent broke is a line the reader sees
-          broken, which plain CommonMark would join into one paragraph */}
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
+      <ReactMarkdown remarkPlugins={plugins} components={components}>
         {source}
       </ReactMarkdown>
     </div>
   );
-}
+});

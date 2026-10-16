@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { rpc } from "~/lib/rpc";
 import type {
   Agent, AgentProfile, Goal, InstalledSkill, Message,
@@ -32,12 +32,35 @@ export function useSessions(workspaceId?: string) {
 
 export function useHistory(sessionId: string | null) {
   const [messages, setMessages] = useState<Message[]>([]);
+  // Only the latest read may land: an older one (another chat's, or one
+  // overtaken by a newer read) answering late would put back a past state.
+  const gen = useRef(0);
+  // messages added from events while a read is on its way; the daemon may
+  // have answered it before they were stored
+  const added = useRef<Message[] | null>(null);
   const reload = useCallback(async () => {
+    const my = ++gen.current;
     if (!sessionId) { setMessages([]); return; }
-    try { setMessages((await rpc<Message[]>("session.history", { sessionId })) ?? []); } catch { /* keep */ }
+    const mine: Message[] = [];
+    added.current = mine;
+    try {
+      const got = (await rpc<Message[]>("session.history", { sessionId })) ?? [];
+      if (my !== gen.current) return;
+      const have = new Set(got.map((m) => m.id));
+      setMessages([...got, ...mine.filter((m) => !have.has(m.id))]);
+    } catch { /* keep */ } finally {
+      if (added.current === mine) added.current = null;
+    }
+  }, [sessionId]);
+  // push adds one message the daemon announced, so a running reply does not
+  // read the whole chat back after every tool call
+  const push = useCallback((m: Message) => {
+    if (!sessionId || m.sessionId !== sessionId) return;
+    added.current?.push(m);
+    setMessages((cur) => (cur.some((x) => x.id === m.id) ? cur : [...cur, m]));
   }, [sessionId]);
   useEffect(() => { void reload(); }, [reload]);
-  return { messages, reload };
+  return { messages, reload, push };
 }
 
 export function useGoals() {

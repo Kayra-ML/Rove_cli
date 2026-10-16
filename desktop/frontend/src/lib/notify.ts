@@ -57,11 +57,12 @@ export function watchFinishes(): () => void {
     subscribeEvents("message.delta", mark),
     subscribeEvents("tool.start", mark),
     subscribeEvents("run.done", (ev) => {
-      const p = (ev.payload ?? {}) as { sessionId?: string; error?: string };
+      const p = (ev.payload ?? {}) as { sessionId?: string; error?: string; cancelled?: boolean };
       if (!p.sessionId) return;
       const since = started.get(p.sessionId);
       started.delete(p.sessionId);
-      if (since === undefined || Date.now() - since < LONG_RUN_MS) return;
+      // the user stopped it: they know
+      if (p.cancelled || since === undefined || Date.now() - since < LONG_RUN_MS) return;
       void titleOf(p.sessionId).then((title) =>
         notify(p.error ? t("notifyRunFailed", getLang()) : t("notifyRunDone", getLang()), title || p.error || ""));
     }),

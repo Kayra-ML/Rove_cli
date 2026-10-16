@@ -16,7 +16,36 @@ export type Tally = {
   reportedOut: number;
   cached: number;
   oursOnReported: number;
+  // timing (see internal/usage Tally); absent from an older daemon
+  durationMs?: number;
+  timedCalls?: number;
+  firstTokenMs?: number;
+  genMs?: number;
+  genTokens?: number;
 };
+
+// firstToken is how long, on average, the model took to begin answering.
+function firstToken(m: Tally): string {
+  if (!m.timedCalls || !m.firstTokenMs) return "—";
+  return secs(m.firstTokenMs / m.timedCalls);
+}
+
+// speed is how fast it wrote once it had begun, in tokens a second.
+function speed(m: Tally): string {
+  if (!m.genMs || !m.genTokens || m.genMs < 50) return "—";
+  return `${Math.round((m.genTokens * 1000) / m.genMs)}`;
+}
+
+// cacheRate is the share of what went in that the provider served from its
+// prompt cache, over the calls it reported on.
+function cacheRate(m: Tally): string {
+  if (!m.reportedCalls || !m.reportedIn) return "—";
+  return `${Math.round((100 * m.cached) / m.reportedIn)}%`;
+}
+
+function secs(ms: number): string {
+  return ms < 10000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 1000)} s`;
+}
 export type UsageReport = {
   days: (Tally & { date: string })[];
   models: (Tally & { provider: string; model: string })[];
@@ -105,6 +134,7 @@ export function UsagePanel() {
           <section className="usage-models">
             <strong>{t("usageByModel", lang)}</strong>
             {r.models.length === 0 ? <p className="map-muted">{t("usageEmpty", lang)}</p> : (
+              <div className="usage-table-scroll">
               <table className="usage-table">
                 <thead>
                   <tr>
@@ -113,6 +143,9 @@ export function UsagePanel() {
                     <th className="num">{t("usageSent", lang)}</th>
                     <th className="num">{t("usageRecv", lang)}</th>
                     <th className="num">{t("usageTheirs", lang)}</th>
+                    <th className="num" title={t("usageFirstTokenHint", lang)}>{t("usageFirstToken", lang)}</th>
+                    <th className="num" title={t("usageSpeedHint", lang)}>{t("usageSpeed", lang)}</th>
+                    <th className="num" title={t("usageCacheHint", lang)}>{t("usageCache", lang)}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -125,10 +158,14 @@ export function UsagePanel() {
                       <td className="num" title={m.reportedCalls ? `${m.reportedCalls}/${m.calls} ${t("usageReportedCalls", lang)}` : undefined}>
                         {m.reportedCalls ? compact(m.reportedIn + m.reportedOut) : t("usageNotReported", lang)}
                       </td>
+                      <td className="num" title={m.timedCalls ? `${m.timedCalls}/${m.calls}` : undefined}>{firstToken(m)}</td>
+                      <td className="num">{speed(m)}</td>
+                      <td className="num">{cacheRate(m)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </section>
         </>

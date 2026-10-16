@@ -146,6 +146,17 @@ const subs = new Set<Sub>();
 let stream: EventSource | null = null;
 let retryMs = 800;
 let retryTimer: number | undefined;
+// Events sent while the stream was down are gone for good. Whoever shows
+// state built from them is told when it is back, to read that state again.
+const reconnected = new Set<() => void>();
+let dropped = false;
+
+export function onReconnect(fn: () => void): () => void {
+  reconnected.add(fn);
+  return () => {
+    reconnected.delete(fn);
+  };
+}
 
 // eventMatches mirrors the daemon's eventbus filter: empty matches all;
 // otherwise the event type, the topic, or a "prefix*" of the type.
@@ -161,6 +172,18 @@ function openStream() {
   const base = localStorage.getItem("aether.http") || HTTP_DEFAULT;
   const es = new EventSource(`${base}/events?token=${encodeURIComponent(token)}`);
   stream = es;
+  es.onopen = () => {
+    if (!dropped) return;
+    dropped = false;
+    recent.clear(); // answers held from before the gap may be stale
+    for (const fn of [...reconnected]) {
+      try {
+        fn();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
   es.onmessage = (m) => {
     retryMs = 800;
     let ev: DaemonEvent;
@@ -186,6 +209,7 @@ function openStream() {
   es.onerror = () => {
     es.close();
     if (stream === es) stream = null;
+    dropped = true;
     if (subs.size === 0) return;
     window.clearTimeout(retryTimer);
     retryTimer = window.setTimeout(openStream, retryMs);

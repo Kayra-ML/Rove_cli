@@ -17,6 +17,7 @@ vi.mock("../lib/rpc", () => ({
     if (method === "staff.diff") return { patch: "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-old\n+new" };
     return { ok: true };
   }),
+  onReconnect: vi.fn(() => () => {}),
   subscribeEvents: vi.fn(() => () => {}),
 }));
 vi.mock("../lib/toast", () => ({ toast: vi.fn() }));

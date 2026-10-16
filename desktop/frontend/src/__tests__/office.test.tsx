@@ -45,6 +45,7 @@ vi.mock("../lib/rpc", () => ({
       default: return null;
     }
   }),
+  onReconnect: vi.fn(() => () => {}),
   subscribeEvents: vi.fn(() => () => {}),
   hydrateConnection: vi.fn().mockResolvedValue({ token: "t", http: "http://x" }),
   pickFolder: vi.fn(),

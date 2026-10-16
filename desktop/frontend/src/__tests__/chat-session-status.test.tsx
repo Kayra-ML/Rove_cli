@@ -25,6 +25,7 @@ vi.mock("../lib/rpc", () => ({
         return null;
     }
   }),
+  onReconnect: vi.fn(() => () => {}),
   subscribeEvents: vi.fn((filter: string, h: Handler) => {
     if (!handlers.has(filter)) handlers.set(filter, new Set());
     handlers.get(filter)!.add(h);

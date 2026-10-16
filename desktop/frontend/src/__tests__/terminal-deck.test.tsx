@@ -28,6 +28,7 @@ vi.mock("../lib/rpc", () => ({
       default: return null;
     }
   }),
+  onReconnect: vi.fn(() => () => {}),
   subscribeEvents: vi.fn(() => () => {}),
 }));
 vi.mock("../hooks/useApi", () => ({
@@ -85,7 +86,6 @@ describe("terminal deck", () => {
     expect(t2.textContent).not.toContain("Frontend Expert");
     expect(t2.textContent).toContain("butonları yap");
     expect((document.querySelectorAll(".deck > .pane")[0] as HTMLElement).querySelector('button[title="Kapat"]')).toBeNull();
-    expect(document.querySelector(".deck-title")?.textContent).toBe("Giriş sayfası");
   });
 
   it("a new terminal's first message opens it under the session; the layout is kept", async () => {
