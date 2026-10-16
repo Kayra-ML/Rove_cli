@@ -364,6 +364,8 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			CharacterID string `json:"characterId"`
 			// Space is types.SpaceOffice or types.SpaceChat.
 			Space string `json:"space"`
+			// Mode (Chat space): orchestra, teamwork or terminal; fixed.
+			Mode string `json:"mode"`
 		}
 		_ = json.Unmarshal(req.Params, &p)
 		if p.AgentID == "" {
@@ -398,7 +400,10 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		default:
 			return nil, fmt.Errorf("unknown space %q", p.Space)
 		}
-		out, err := a.Sess.CreateIn(ctx, p.Space, p.Title, p.AgentID, p.WorkspaceID)
+		if p.Mode != "" && (!types.ValidMode(p.Mode) || p.Space == types.SpaceOffice) {
+			return nil, fmt.Errorf("unknown mode %q for space %q", p.Mode, p.Space)
+		}
+		out, err := a.Sess.CreateMode(ctx, p.Space, p.Mode, p.Title, p.AgentID, p.WorkspaceID)
 		if err == nil && p.CharacterID != "" {
 			err = a.Store.PutSessionPersona(ctx, types.SessionPersona{SessionID: out.ID, CharacterID: p.CharacterID, UpdatedAt: time.Now().UTC()})
 		}
@@ -409,6 +414,22 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 				return nil, perr
 			}
 		}
+		return core.MustJSON(out), err
+	case protocol.MethodSessionSetMode:
+		var p struct {
+			SessionID types.ID `json:"sessionId"`
+			Mode      string   `json:"mode"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		if !types.ValidMode(p.Mode) {
+			return nil, fmt.Errorf("unknown mode %q", p.Mode)
+		}
+		if err := a.Sess.SetMode(ctx, p.SessionID, p.Mode); err != nil {
+			return nil, err
+		}
+		out, err := a.Sess.Get(ctx, p.SessionID)
 		return core.MustJSON(out), err
 	case protocol.MethodSessionList:
 		var p struct {
@@ -493,6 +514,11 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 			UserMessage: p.Content,
 			Images:      p.Images,
 		})
+		// stopped by the user (session.cancel) while the caller still waits:
+		// that is how the reply ended, not a failure to report
+		if errors.Is(err, context.Canceled) && ctx.Err() == nil {
+			err = nil
+		}
 		return core.MustJSON(res), err
 	case protocol.MethodSessionRename:
 		var p struct {

@@ -265,11 +265,13 @@ func Open(cfg config.Config) (*App, error) {
 		// a channel — a subagent's, a terminal's — never does, so delegation
 		// stays one level deep.
 		brief := crew.Brief(ctx, sessionID)
-		// terminals of one session see what the others do
+		// terminals of one session see what the others do; it changes every
+		// turn, so it goes with the latest message, not the cached prompt
 		board := hub.Board(ctx, sessionID)
 		// an Agent-space agent knows who it is, its notes and its colleagues
 		self := crewOf.Brief(ctx, sessionID)
-		p.Context = strings.TrimSpace(strings.Join([]string{self, brief, board}, "\n\n"))
+		p.Context = strings.TrimSpace(strings.Join([]string{self, brief}, "\n\n"))
+		p.Live = board
 		p.Allow = func(name string) bool {
 			if name == team.DelegateName {
 				return brief != ""

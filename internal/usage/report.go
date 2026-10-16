@@ -27,6 +27,14 @@ type Tally struct {
 	// Rove's count over the same reported calls, so the two compare like
 	// with like.
 	OursOnReported int `json:"oursOnReported"`
+	// Timing. DurationMS is every call's whole time. Over the calls whose
+	// start was measured (TimedCalls): FirstTokenMS the waits for the model
+	// to begin, and GenMS/GenTokens the writing after it, for a speed.
+	DurationMS   int64 `json:"durationMs"`
+	TimedCalls   int   `json:"timedCalls"`
+	FirstTokenMS int64 `json:"firstTokenMs"`
+	GenMS        int64 `json:"genMs"`
+	GenTokens    int   `json:"genTokens"`
 }
 
 func (t *Tally) add(e store.UsageLedgerEntry) {
@@ -35,6 +43,17 @@ func (t *Tally) add(e store.UsageLedgerEntry) {
 	t.RecvTokens += e.RecvTokens
 	t.SentChars += e.SentChars
 	t.RecvChars += e.RecvChars
+	t.DurationMS += e.DurationMS
+	if e.FirstTokenMS > 0 {
+		t.TimedCalls++
+		t.FirstTokenMS += e.FirstTokenMS
+		t.GenMS += max(0, e.DurationMS-e.FirstTokenMS)
+		out := e.RecvTokens
+		if e.Reported && e.CompletionTokens > 0 {
+			out = e.CompletionTokens
+		}
+		t.GenTokens += out
+	}
 	if e.Reported {
 		t.ReportedCalls++
 		t.ReportedIn += e.PromptTokens

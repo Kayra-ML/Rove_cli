@@ -175,6 +175,7 @@ func (s *Store) migrate() error {
 		`ALTER TABLE usage_ledger ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE usage_ledger ADD COLUMN reported INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE usage_ledger ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_ledger ADD COLUMN first_token_ms INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE messages ADD COLUMN images TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS turn_edits (
@@ -288,6 +289,7 @@ func (s *Store) migrate() error {
 		`ALTER TABLE session_links ADD COLUMN color TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE sessions ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE sessions ADD COLUMN space TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS teamwork_plans (
 			id TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL,
@@ -510,20 +512,45 @@ func (s *Store) DeleteAgent(ctx context.Context, id types.ID) error {
 
 func (s *Store) UpsertSession(ctx context.Context, sess types.Session) error {
 	// parent_id and space are fixed at creation: a member channel never moves
-	// teams, a chat never moves between Office and Chat
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(id,title,agent_id,workspace_id,parent_id,space,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?)
+	// teams, a chat never moves between Office and Chat. mode is fixed once
+	// set (see SetSessionMode).
+	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(id,title,agent_id,workspace_id,parent_id,space,mode,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET title=excluded.title, agent_id=excluded.agent_id, workspace_id=excluded.workspace_id, updated_at=excluded.updated_at`,
-		sess.ID, sess.Title, sess.AgentID, sess.WorkspaceID, sess.ParentID, sess.Space, ts(sess.CreatedAt), ts(sess.UpdatedAt))
+		sess.ID, sess.Title, sess.AgentID, sess.WorkspaceID, sess.ParentID, sess.Space, sess.Mode, ts(sess.CreatedAt), ts(sess.UpdatedAt))
 	return err
 }
 
-const sessionCols = `id,title,agent_id,workspace_id,parent_id,space,created_at,updated_at`
+// ErrModeFixed: a session's mode is set once and never changed.
+var ErrModeFixed = errors.New("store: the session's mode is already set")
+
+// SetSessionMode gives a session that has no mode yet (one made before modes
+// were stored) its mode. Setting the mode it already has is a no-op; any
+// other change is ErrModeFixed.
+func (s *Store) SetSessionMode(ctx context.Context, id types.ID, mode string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE sessions SET mode=? WHERE id=? AND mode=''`, mode, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	sess, err := s.GetSession(ctx, id)
+	if err != nil {
+		return err
+	}
+	if sess.Mode != mode {
+		return ErrModeFixed
+	}
+	return nil
+}
+
+const sessionCols = `id,title,agent_id,workspace_id,parent_id,space,mode,created_at,updated_at`
 
 func scanSession(sc interface{ Scan(...any) error }) (types.Session, error) {
 	var sess types.Session
 	var created, updated string
-	err := sc.Scan(&sess.ID, &sess.Title, &sess.AgentID, &sess.WorkspaceID, &sess.ParentID, &sess.Space, &created, &updated)
+	err := sc.Scan(&sess.ID, &sess.Title, &sess.AgentID, &sess.WorkspaceID, &sess.ParentID, &sess.Space, &sess.Mode, &created, &updated)
 	sess.CreatedAt, sess.UpdatedAt = parseTS(created), parseTS(updated)
 	return sess, err
 }
@@ -627,19 +654,30 @@ func (s *Store) InsertMessage(ctx context.Context, m types.Message) error {
 }
 
 func (s *Store) ListMessages(ctx context.Context, sessionID types.ID) ([]types.Message, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,session_id,role,content,tool_calls,tool_result,images,kind,created_at FROM messages WHERE session_id=? ORDER BY created_at, rowid`, sessionID)
+	out, _, err := s.ListMessagesAfter(ctx, sessionID, 0)
+	return out, err
+}
+
+// ListMessagesAfter lists a session's messages stored after row (0 = all),
+// in chat order, and the last row it read (row itself when there are none).
+// A run reads its chat once and then only what was added since.
+func (s *Store) ListMessagesAfter(ctx context.Context, sessionID types.ID, row int64) ([]types.Message, int64, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT rowid,id,session_id,role,content,tool_calls,tool_result,images,kind,created_at FROM messages WHERE session_id=? AND rowid>? ORDER BY created_at, rowid`, sessionID, row)
 	if err != nil {
-		return nil, err
+		return nil, row, err
 	}
 	defer rows.Close()
+	last := row
 	var out []types.Message
 	for rows.Next() {
 		var m types.Message
+		var rowid int64
 		var calls, images, created string
 		var tr sql.NullString
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &calls, &tr, &images, &m.Kind, &created); err != nil {
-			return nil, err
+		if err := rows.Scan(&rowid, &m.ID, &m.SessionID, &m.Role, &m.Content, &calls, &tr, &images, &m.Kind, &created); err != nil {
+			return nil, row, err
 		}
+		last = max(last, rowid)
 		unmarshal(calls, &m.ToolCalls)
 		unmarshal(images, &m.Images)
 		if len(m.Images) == 0 {
@@ -653,7 +691,7 @@ func (s *Store) ListMessages(ctx context.Context, sessionID types.ID) ([]types.M
 		m.CreatedAt = parseTS(created)
 		out = append(out, m)
 	}
-	return out, rows.Err()
+	return out, last, rows.Err()
 }
 
 func (s *Store) TruncateMessages(ctx context.Context, sessionID types.ID, keep int) error {
@@ -1176,22 +1214,25 @@ func (s *Store) DeleteWebhookRule(ctx context.Context, id types.ID) error {
 // reported at all); the Sent and Recv fields are Rove's own count of the
 // text that actually went out and came back.
 type UsageLedgerEntry struct {
-	ID               string    `json:"id"`
-	SessionID        string    `json:"sessionId"`
-	Kind             string    `json:"kind"` // chat | ask | compact
-	Provider         string    `json:"provider"`
-	Model            string    `json:"model"`
-	PromptTokens     int       `json:"promptTokens"`
-	CompletionTokens int       `json:"completionTokens"`
-	CachedTokens     int       `json:"cachedTokens"`
-	Reported         bool      `json:"reported"`
-	SentChars        int       `json:"sentChars"`
-	SentTokens       int       `json:"sentTokens"`
-	RecvChars        int       `json:"recvChars"`
-	RecvTokens       int       `json:"recvTokens"`
-	DurationMS       int64     `json:"durationMs"`
-	CostUSD          float64   `json:"costUsd"`
-	CreatedAt        time.Time `json:"createdAt"`
+	ID               string `json:"id"`
+	SessionID        string `json:"sessionId"`
+	Kind             string `json:"kind"` // chat | ask | compact
+	Provider         string `json:"provider"`
+	Model            string `json:"model"`
+	PromptTokens     int    `json:"promptTokens"`
+	CompletionTokens int    `json:"completionTokens"`
+	CachedTokens     int    `json:"cachedTokens"`
+	Reported         bool   `json:"reported"`
+	SentChars        int    `json:"sentChars"`
+	SentTokens       int    `json:"sentTokens"`
+	RecvChars        int    `json:"recvChars"`
+	RecvTokens       int    `json:"recvTokens"`
+	DurationMS       int64  `json:"durationMs"`
+	// FirstTokenMS is how long the model took to begin answering (0: not
+	// measured, e.g. calls recorded before it was).
+	FirstTokenMS int64     `json:"firstTokenMs"`
+	CostUSD      float64   `json:"costUsd"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 // RecordUsage inserts a usage ledger entry.
@@ -1201,10 +1242,10 @@ func (s *Store) RecordUsage(ctx context.Context, e UsageLedgerEntry) error {
 	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO usage_ledger(id,session_id,kind,provider,model,prompt_tokens,completion_tokens,cached_tokens,reported,
-		 sent_chars,sent_tokens,recv_chars,recv_tokens,duration_ms,cost_usd,created_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 sent_chars,sent_tokens,recv_chars,recv_tokens,duration_ms,first_token_ms,cost_usd,created_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		e.ID, e.SessionID, e.Kind, e.Provider, e.Model, e.PromptTokens, e.CompletionTokens, e.CachedTokens, boolInt(e.Reported),
-		e.SentChars, e.SentTokens, e.RecvChars, e.RecvTokens, e.DurationMS, e.CostUSD, ts(e.CreatedAt))
+		e.SentChars, e.SentTokens, e.RecvChars, e.RecvTokens, e.DurationMS, e.FirstTokenMS, e.CostUSD, ts(e.CreatedAt))
 	return err
 }
 
@@ -1212,7 +1253,7 @@ func (s *Store) RecordUsage(ctx context.Context, e UsageLedgerEntry) error {
 func (s *Store) ListUsageSince(ctx context.Context, since time.Time) ([]UsageLedgerEntry, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id,session_id,kind,provider,model,prompt_tokens,completion_tokens,cached_tokens,reported,
-		 sent_chars,sent_tokens,recv_chars,recv_tokens,duration_ms,cost_usd,created_at
+		 sent_chars,sent_tokens,recv_chars,recv_tokens,duration_ms,first_token_ms,cost_usd,created_at
 		 FROM usage_ledger WHERE created_at >= ? ORDER BY created_at`, ts(since))
 	if err != nil {
 		return nil, err
@@ -1224,7 +1265,7 @@ func (s *Store) ListUsageSince(ctx context.Context, since time.Time) ([]UsageLed
 		var rep int
 		var created string
 		if err := rows.Scan(&e.ID, &e.SessionID, &e.Kind, &e.Provider, &e.Model, &e.PromptTokens, &e.CompletionTokens, &e.CachedTokens, &rep,
-			&e.SentChars, &e.SentTokens, &e.RecvChars, &e.RecvTokens, &e.DurationMS, &e.CostUSD, &created); err != nil {
+			&e.SentChars, &e.SentTokens, &e.RecvChars, &e.RecvTokens, &e.DurationMS, &e.FirstTokenMS, &e.CostUSD, &created); err != nil {
 			return nil, err
 		}
 		e.Reported = rep == 1

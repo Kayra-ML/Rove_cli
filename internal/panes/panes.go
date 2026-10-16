@@ -188,8 +188,9 @@ func (p Pane) name() string {
 	return p.Label
 }
 
-// Board is what one terminal is told about the others, at the end of its
-// system prompt: a line each. Empty when the session has one terminal.
+// Board is what one terminal is told about the others, with its latest
+// message (agent.Persona.Live): a line each. Empty when the session has one
+// terminal.
 func (h *Hub) Board(ctx context.Context, sessionID types.ID) string {
 	panes, err := h.Panes(ctx, sessionID)
 	if err != nil || len(panes) < 2 {

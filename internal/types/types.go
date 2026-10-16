@@ -140,9 +140,27 @@ type Session struct {
 	// Space is the part of the app a chat belongs to: SpaceOffice (talking
 	// to an agent) or SpaceChat (session work). Empty on chats made before
 	// spaces existed; clients place those themselves.
-	Space     string    `json:"space,omitempty"`
+	Space string `json:"space,omitempty"`
+	// Mode is how a Chat-space session works (ModeOrchestra, ModeTeamwork,
+	// ModeTerminal). It is picked when the session starts and then fixed:
+	// a conversation, a plan and a terminal deck keep different state, and
+	// switching between them mid-session lost or mixed it. Empty on
+	// sessions made before modes were stored; those may set it once.
+	Mode      string    `json:"mode,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// Session modes (Session.Mode).
+const (
+	ModeOrchestra = "orchestra"
+	ModeTeamwork  = "teamwork"
+	ModeTerminal  = "terminal"
+)
+
+// ValidMode reports whether m is a session mode.
+func ValidMode(m string) bool {
+	return m == ModeOrchestra || m == ModeTeamwork || m == ModeTerminal
 }
 
 const (

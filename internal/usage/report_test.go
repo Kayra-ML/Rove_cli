@@ -39,3 +39,22 @@ func TestBuildByDayAndModel(t *testing.T) {
 		t.Fatalf("models = %+v", r.Models)
 	}
 }
+
+func TestTimingIsSummedOverMeasuredCalls(t *testing.T) {
+	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	entries := []store.UsageLedgerEntry{
+		// measured: began after 800ms, wrote 400 tokens in 2s
+		{Provider: "p", Model: "m", DurationMS: 2800, FirstTokenMS: 800, RecvTokens: 350, Reported: true, CompletionTokens: 400, CreatedAt: now},
+		// recorded before timing existed: counts in the total time only
+		{Provider: "p", Model: "m", DurationMS: 5000, RecvTokens: 100, CreatedAt: now},
+	}
+	r := Build(entries, 1, now, time.UTC)
+	m := r.Models[0]
+	if m.DurationMS != 7800 || m.TimedCalls != 1 || m.FirstTokenMS != 800 {
+		t.Fatalf("%+v", m.Tally)
+	}
+	// the provider's count of what it wrote wins over Rove's estimate
+	if m.GenMS != 2000 || m.GenTokens != 400 {
+		t.Fatalf("gen %d tokens in %dms", m.GenTokens, m.GenMS)
+	}
+}

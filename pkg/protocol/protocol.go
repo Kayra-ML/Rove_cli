@@ -26,7 +26,7 @@ type EventFrame struct {
 // APILevel is raised whenever the daemon gains methods the app relies on.
 // The app compares it with the daemon's (health) to tell an out-of-date
 // daemon — on this computer or on a server — apart from a broken one.
-const APILevel = 18
+const APILevel = 19
 
 const (
 	MethodPing            = "ping"
@@ -56,18 +56,22 @@ const (
 	MethodEditsRevert      = "edits.revert"
 	MethodSessionCompact   = "session.compact"
 	MethodSessionSetEffort = "session.setEffort"
-	MethodWorkspaceRules   = "workspace.rules"
-	MethodGoalGet          = "goal.get"
-	MethodWorkspaceOpen    = "workspace.open"
-	MethodWorkspaceList    = "workspace.list"
-	MethodTerminalSpawn    = "terminal.spawn"
-	MethodTerminalList     = "terminal.list"
-	MethodTerminalWrite    = "terminal.write"
-	MethodTerminalResize   = "terminal.resize"
-	MethodTerminalRestart  = "terminal.restart"
-	MethodTerminalAttach   = "terminal.attach"
-	MethodTerminalDetach   = "terminal.detach"
-	MethodSSHOpen          = "ssh.open"
+	// MethodSessionSetMode gives a session without a mode (one made before
+	// modes were stored) its mode, once. A mode is otherwise picked in
+	// session.create and never changes.
+	MethodSessionSetMode  = "session.setMode"
+	MethodWorkspaceRules  = "workspace.rules"
+	MethodGoalGet         = "goal.get"
+	MethodWorkspaceOpen   = "workspace.open"
+	MethodWorkspaceList   = "workspace.list"
+	MethodTerminalSpawn   = "terminal.spawn"
+	MethodTerminalList    = "terminal.list"
+	MethodTerminalWrite   = "terminal.write"
+	MethodTerminalResize  = "terminal.resize"
+	MethodTerminalRestart = "terminal.restart"
+	MethodTerminalAttach  = "terminal.attach"
+	MethodTerminalDetach  = "terminal.detach"
+	MethodSSHOpen         = "ssh.open"
 	// the SSH servers this machine already knows (~/.ssh/config, known_hosts)
 	MethodSSHDiscover = "ssh.discover"
 	// the folders of the daemon's machine, for picking a project on a server

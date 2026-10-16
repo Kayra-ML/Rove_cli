@@ -250,11 +250,19 @@ func (rt *Runtime) maybeCompact(ctx context.Context, completer provider.Complete
 	}
 	call := rt.meter("compact", sessionID, completer, model, compactReq)
 	var out strings.Builder
+	var streamErr error
 	for d := range ch {
 		call.see(d)
 		out.WriteString(d.Content)
+		if d.Err != nil {
+			streamErr = d.Err
+		}
 	}
 	call.done()
+	// a summary cut short would stand in for what it lost
+	if streamErr != nil {
+		return false, streamErr
+	}
 	summary := strings.TrimSpace(out.String())
 	if summary == "" || ctx.Err() != nil {
 		return false, ctx.Err()
@@ -283,3 +291,40 @@ func clipText(s string, n int) string {
 // imageTurns: only the last few user turns send their images again; older
 // ones are named, not re-sent (images are the most expensive input).
 const imageTurns = 2
+
+// Old tool results are what fills a long run's context: compaction keeps the
+// last user turns whole, and one turn of work can read dozens of files. Past
+// a budget, older results are sent shortened (the stored chat keeps them).
+const (
+	// decayKeep: the latest tool results always go whole.
+	decayKeep = 6
+	// decayStep: results are shortened this many at a time, so the prefix
+	// sent (and the provider's prompt cache over it) changes once per step,
+	// not on every turn.
+	decayStep = 8
+	// decayClip: what is left of an older result (bytes).
+	decayClip = 1500
+)
+
+// decayedTools marks the tool results in hist to send shortened, once the
+// chat is past budget tokens (0 = never).
+func decayedTools(hist []types.Message, budget int) map[int]bool {
+	if budget <= 0 || estimateTokens(hist) <= budget {
+		return nil
+	}
+	var idx []int
+	for i, m := range hist {
+		if m.Role == types.RoleTool {
+			idx = append(idx, i)
+		}
+	}
+	n := (len(idx) - decayKeep) / decayStep * decayStep
+	if n <= 0 {
+		return nil
+	}
+	out := make(map[int]bool, n)
+	for _, i := range idx[:n] {
+		out[i] = true
+	}
+	return out
+}

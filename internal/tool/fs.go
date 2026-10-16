@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,6 +20,13 @@ func schema(props string) json.RawMessage {
 }
 
 type ReadFile struct{}
+
+// read_file refuses files past these sizes (bytes): the model gets told to
+// read a range or search instead of the daemon loading a huge log whole.
+const (
+	maxWholeRead  = 8 << 20
+	maxRangedRead = 64 << 20
+)
 
 func (ReadFile) Name() string        { return "read_file" }
 func (ReadFile) Description() string { return "Read a UTF-8 text file relative to the workspace." }
@@ -39,12 +47,30 @@ func (ReadFile) Call(_ context.Context, tc Context, args json.RawMessage) (Resul
 	if err != nil {
 		return Result{IsError: true, Content: err.Error()}, err
 	}
+	ranged := in.Offset > 0 || in.Limit > 0
+	if st, err := os.Stat(p); err == nil && !st.IsDir() {
+		limit := int64(maxWholeRead)
+		if ranged {
+			limit = maxRangedRead
+		}
+		if st.Size() > limit {
+			err := fmt.Errorf("%s is %.1f MB, too large to read whole; read a part with offset/limit, or search it with shell (grep -n, head, tail)", in.Path, float64(st.Size())/(1<<20))
+			if ranged {
+				err = fmt.Errorf("%s is %.1f MB, too large to read; search it with shell (grep -n, head, tail)", in.Path, float64(st.Size())/(1<<20))
+			}
+			return Result{IsError: true, Content: err.Error()}, err
+		}
+	}
 	b, err := os.ReadFile(p)
 	if err != nil {
 		return Result{IsError: true, Content: err.Error()}, err
 	}
+	// a binary file read as text is noise that costs tokens
+	if bytes.IndexByte(b[:min(len(b), 8000)], 0) >= 0 {
+		return Result{Content: fmt.Sprintf("%s is a binary file (%d bytes); not shown.", in.Path, len(b))}, nil
+	}
 	text := string(b)
-	if in.Offset > 0 || in.Limit > 0 {
+	if ranged {
 		lines := strings.Split(text, "\n")
 		start := in.Offset
 		if start < 1 {
@@ -201,9 +227,23 @@ func (s Shell) Call(ctx context.Context, tc Context, args json.RawMessage) (Resu
 	defer cancel()
 	cmd := exec.CommandContext(ctx, shellBin(), shellArg(), in.Command)
 	cmd.Dir = cwd
-	out, err := cmd.CombinedOutput()
-	res := Result{Content: string(out)}
-	if err != nil {
+	// the command and everything it starts go when it is stopped, and a
+	// child left running in the background ("npm run dev &") cannot keep
+	// the call waiting on its open output
+	killGroup(cmd)
+	cmd.WaitDelay = shellWaitDelay
+	out := newCapWriter(MaxOutput)
+	cmd.Stdout, cmd.Stderr = out, out
+	err := cmd.Run()
+	res := Result{Content: out.String()}
+	switch {
+	case ctx.Err() == context.DeadlineExceeded:
+		res.IsError = true
+		res.Content += fmt.Sprintf("\n[rove: the command was stopped after %s. Run servers and watchers in the background with their output sent to a file, e.g. `cmd > /tmp/out.log 2>&1 &`.]", timeout)
+	case errors.Is(err, exec.ErrWaitDelay):
+		// it finished; something it started keeps running in the background
+		res.Content += "\n[rove: a background process the command started is still running; its later output is not captured.]"
+	case err != nil:
 		res.IsError = true
 		res.Content += "\n" + err.Error()
 	}

@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Kayra-ML/rove/internal/types"
 )
@@ -320,6 +321,9 @@ func (a *AgentCLI) Complete(ctx context.Context, req ChatRequest) (<-chan ChatDe
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "PATH="+richPath(), "NO_COLOR=1")
 	cmd.Stdin = nil
+	killTree(cmd)
+	// stopped, it gets a moment to go before its output is closed on it
+	cmd.WaitDelay = 3 * time.Second
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err

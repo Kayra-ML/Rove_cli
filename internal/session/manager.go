@@ -25,11 +25,17 @@ func (m *Manager) Create(ctx context.Context, title string, agentID, ws types.ID
 
 // CreateIn creates a chat in a space (types.SpaceOffice or SpaceChat).
 func (m *Manager) CreateIn(ctx context.Context, space, title string, agentID, ws types.ID) (types.Session, error) {
+	return m.CreateMode(ctx, space, "", title, agentID, ws)
+}
+
+// CreateMode creates a chat in a space with its mode (types.ModeOrchestra…;
+// "" for none), fixed from then on.
+func (m *Manager) CreateMode(ctx context.Context, space, mode, title string, agentID, ws types.ID) (types.Session, error) {
 	now := time.Now().UTC()
 	if title == "" {
 		title = "New chat"
 	}
-	sess := types.Session{ID: id.NewID(), Title: title, AgentID: agentID, WorkspaceID: ws, Space: space, CreatedAt: now, UpdatedAt: now}
+	sess := types.Session{ID: id.NewID(), Title: title, AgentID: agentID, WorkspaceID: ws, Space: space, Mode: mode, CreatedAt: now, UpdatedAt: now}
 	if err := m.store.UpsertSession(ctx, sess); err != nil {
 		return sess, err
 	}
@@ -74,13 +80,20 @@ func (m *Manager) Append(ctx context.Context, msg types.Message) (types.Message,
 		return msg, err
 	}
 	if m.bus != nil {
+		payload := map[string]any{
+			"sessionId": string(msg.SessionID),
+			"role":      string(msg.Role),
+		}
+		// the message itself, so a open chat can add it instead of reading
+		// the whole history again after every tool call; images (large
+		// data: URLs) are left to a history read
+		if len(msg.Images) == 0 {
+			payload["message"] = msg
+		}
 		m.bus.Publish(types.Event{
-			Type:  types.EventMessageDone,
-			Topic: "session." + string(msg.SessionID),
-			Payload: map[string]any{
-				"sessionId": string(msg.SessionID),
-				"role":      string(msg.Role),
-			},
+			Type:    types.EventMessageDone,
+			Topic:   "session." + string(msg.SessionID),
+			Payload: payload,
 		})
 	}
 	return msg, nil
@@ -88,6 +101,12 @@ func (m *Manager) Append(ctx context.Context, msg types.Message) (types.Message,
 
 func (m *Manager) History(ctx context.Context, sessionID types.ID) ([]types.Message, error) {
 	return m.store.ListMessages(ctx, sessionID)
+}
+
+// HistoryAfter is what was added to a chat after row (see
+// store.ListMessagesAfter), and the last row read.
+func (m *Manager) HistoryAfter(ctx context.Context, sessionID types.ID, row int64) ([]types.Message, int64, error) {
+	return m.store.ListMessagesAfter(ctx, sessionID, row)
 }
 
 func (m *Manager) Rename(ctx context.Context, id types.ID, title string) error {
@@ -98,6 +117,16 @@ func (m *Manager) Rename(ctx context.Context, id types.ID, title string) error {
 	sess.Title = title
 	sess.UpdatedAt = time.Now().UTC()
 	if err := m.store.UpsertSession(ctx, sess); err != nil {
+		return err
+	}
+	m.Touched(id)
+	return nil
+}
+
+// SetMode gives a session made before modes were stored its mode, once; see
+// store.SetSessionMode.
+func (m *Manager) SetMode(ctx context.Context, id types.ID, mode string) error {
+	if err := m.store.SetSessionMode(ctx, id, mode); err != nil {
 		return err
 	}
 	m.Touched(id)

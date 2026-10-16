@@ -29,6 +29,7 @@ type metered struct {
 	usage    provider.Usage
 	reported bool
 	start    time.Time
+	first    time.Time // when the model began answering
 	text     strings.Builder
 	calls    []types.ToolCall
 }
@@ -51,6 +52,9 @@ func (x *metered) see(d provider.ChatDelta) {
 		x.usage.CachedTokens += d.Usage.CachedTokens
 		x.reported = x.reported || d.Usage.PromptTokens > 0 || d.Usage.CompletionTokens > 0
 	}
+	if x.first.IsZero() && (d.Began || d.Content != "" || len(d.ToolCalls) > 0) {
+		x.first = time.Now()
+	}
 	x.text.WriteString(d.Content)
 	x.calls = append(x.calls, d.ToolCalls...)
 }
@@ -67,6 +71,9 @@ func (x *metered) done() {
 		PromptTokens: x.usage.PromptTokens, CompletionTokens: x.usage.CompletionTokens, CachedTokens: x.usage.CachedTokens,
 		Reported: x.reported, SentChars: x.m.SentChars, SentTokens: x.m.SentTokens, RecvChars: x.m.RecvChars, RecvTokens: x.m.RecvTokens,
 		DurationMS: time.Since(x.start).Milliseconds(), CreatedAt: time.Now().UTC(),
+	}
+	if !x.first.IsZero() {
+		e.FirstTokenMS = max(1, x.first.Sub(x.start).Milliseconds())
 	}
 	if err := x.rt.store.RecordUsage(context.Background(), e); err != nil {
 		return

@@ -44,4 +44,5 @@ You can hand work to subagents with team_delegate. Each starts with a fresh cont
 Delegate when parts are independent (different files or modules) — several in one call run at the same time — or when a part would flood your context (a broad search, a long investigation).
 Do it yourself when it is one quick edit, when it needs the user, or when a step depends on another's result: then call once, read the reports, and call again.
 Two tasks must never change the same file; give that file to one of them.
-Reports are the subagents' own accounts: read the diff or run the tests before you tell the user it is done.`
+Reports are the subagents' own accounts: read the diff or run the tests before you tell the user it is done.
+When the user asks for subagents themselves — "open 3 subagents", "have one write the tests and another the docs", "do these in parallel" — do exactly that: call team_delegate with that many tasks, one per part they named, even when the work is small. Their asking outweighs the advice above. Split what they described into self-contained tasks; if they gave a number but not the parts, divide the job into that many independent pieces.`

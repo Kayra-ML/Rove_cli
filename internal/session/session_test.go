@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -56,5 +57,48 @@ func TestCreateAppendHistory(t *testing.T) {
 	hist, err = m.History(ctx, sess.ID)
 	if err != nil || len(hist) != 0 {
 		t.Fatalf("clear %d %v", len(hist), err)
+	}
+}
+
+func TestModeIsFixedOnceSet(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	m := New(s, nil)
+	ctx := context.Background()
+	sess, err := m.CreateMode(ctx, types.SpaceChat, types.ModeTeamwork, "", "a1", "w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := m.Get(ctx, sess.ID)
+	if got.Mode != types.ModeTeamwork {
+		t.Fatalf("mode %q", got.Mode)
+	}
+	// renaming (an upsert) keeps it
+	if err := m.Rename(ctx, sess.ID, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = m.Get(ctx, sess.ID); got.Mode != types.ModeTeamwork {
+		t.Fatalf("rename changed mode to %q", got.Mode)
+	}
+	// it cannot be changed, only repeated
+	if err := m.SetMode(ctx, sess.ID, types.ModeTerminal); !errors.Is(err, store.ErrModeFixed) {
+		t.Fatalf("change allowed: %v", err)
+	}
+	if err := m.SetMode(ctx, sess.ID, types.ModeTeamwork); err != nil {
+		t.Fatal(err)
+	}
+	// an old session without a mode gets one, once
+	old, _ := m.Create(ctx, "", "a1", "w1")
+	if err := m.SetMode(ctx, old.ID, types.ModeTerminal); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetMode(ctx, old.ID, types.ModeOrchestra); !errors.Is(err, store.ErrModeFixed) {
+		t.Fatalf("second set allowed: %v", err)
+	}
+	if got, _ = m.Get(ctx, old.ID); got.Mode != types.ModeTerminal {
+		t.Fatalf("mode %q", got.Mode)
 	}
 }

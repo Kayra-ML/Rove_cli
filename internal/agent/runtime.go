@@ -83,9 +83,14 @@ type Persona struct {
 	// Effort is the chat's reasoning effort ("low", "medium", "high");
 	// empty leaves it to the model.
 	Effort string
-	// Context is changing context (what other terminals are doing) added at
-	// the very end of the system prompt, after everything cacheable.
+	// Context is context about the chat's setting (who the agent is, how to
+	// delegate) added at the end of the system prompt. It seldom changes.
 	Context string
+	// Live is context that changes from turn to turn (what the other
+	// terminals are doing right now). It goes with the latest user message,
+	// not in the system prompt: providers cache a prompt by its prefix, and
+	// a change at the top would make the whole chat a cache miss each time.
+	Live string
 }
 
 // Claims keeps two runs from editing the same file at once. Claim asks to
@@ -192,6 +197,18 @@ type RunRequest struct {
 // change the workspace.
 var readOnlyTools = map[string]bool{"read_file": true, "list_dir": true, "git_status": true}
 
+// defaultMaxTurns bounds a run nobody gave a limit (a chat's own run). Reading,
+// editing and testing across a few files takes more than a dozen model calls.
+const defaultMaxTurns = 30
+
+// defaultToolConcurrency: a run that does not say runs up to this many of a
+// turn's read-only tool calls side by side.
+const defaultToolConcurrency = 4
+
+// deltaFlush: streamed text reaches listeners in pieces at most this often,
+// not as one event per token.
+const deltaFlush = 40 * time.Millisecond
+
 type RunResult struct {
 	// RunID names this run; the files it changed are kept under it for
 	// review (edits.list).
@@ -294,7 +311,10 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (res RunResult, err 
 		// another.
 		if rt.bus != nil && req.SessionID != "" {
 			payload := map[string]any{"sessionId": string(req.SessionID), "runId": string(runID), "edits": edited}
-			if err != nil {
+			switch {
+			case errors.Is(err, context.Canceled):
+				payload["cancelled"] = true
+			case err != nil:
 				payload["error"] = err.Error()
 			}
 			rt.bus.Publish(types.Event{Type: types.EventRunDone, Topic: "session." + string(req.SessionID), Payload: payload})
@@ -322,10 +342,15 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (res RunResult, err 
 	if err != nil {
 		return RunResult{}, err
 	}
-	agent.Status = types.AgentRunning
-	agent.UpdatedAt = time.Now().UTC()
-	_ = rt.store.UpsertAgent(ctx, agent)
-	rt.emitStatus(agent)
+	rt.setStatus(ctx, &agent, types.AgentRunning)
+	defer func() {
+		// written on every way out; the run's context may be cancelled by now
+		st := types.AgentIdle
+		if err != nil && !errors.Is(err, context.Canceled) {
+			st = types.AgentFailed
+		}
+		rt.setStatus(context.WithoutCancel(ctx), &agent, st)
+	}()
 
 	if req.UserMessage != "" && rt.sessions != nil && req.SessionID != "" {
 		_, _ = rt.sessions.Append(ctx, types.Message{SessionID: req.SessionID, Role: types.RoleUser, Content: req.UserMessage, Images: req.Images})
@@ -359,9 +384,6 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (res RunResult, err 
 	}
 	completer, model, err := rt.router.Resolve(agent.Profile, provName, modelName)
 	if err != nil {
-		agent.Status = types.AgentFailed
-		_ = rt.store.UpsertAgent(ctx, agent)
-		rt.emitStatus(agent)
 		return RunResult{}, err
 	}
 	// a long chat is summarized before it is sent again
@@ -371,13 +393,26 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (res RunResult, err 
 
 	maxTurns := req.MaxTurns
 	if maxTurns <= 0 {
-		maxTurns = 12
+		maxTurns = defaultMaxTurns
+	}
+	concurrency := req.ToolConcurrency
+	if concurrency == 0 {
+		concurrency = defaultToolConcurrency
+	}
+	var specs []provider.ToolSpec
+	if rt.tools != nil {
+		for _, spec := range rt.tools.Specs() {
+			if ps.allows(spec.Name) {
+				specs = append(specs, spec)
+			}
+		}
 	}
 
 	var last string
 	var allToolsCalled []string
 	failed := map[string]string{} // tool call → what it failed with, this run
 	var allFilesEdited []string
+	var chat chatLog
 	for turn := 0; turn < maxTurns; turn++ {
 		// words sent to this run while it worked go in before its next look
 		// at the chat, as the latest thing it was told
@@ -386,50 +421,27 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (res RunResult, err 
 				_, _ = rt.sessions.Append(ctx, types.Message{SessionID: req.SessionID, Role: types.RoleUser, Content: "[steer] " + s})
 			}
 		}
-		msgs, err := rt.buildMessages(ctx, agent, req, ps)
+		msgs, err := rt.build(ctx, agent, req, ps, &chat)
 		if err != nil {
 			return RunResult{}, err
 		}
-		chatReq := provider.ChatRequest{Model: model, Messages: msgs, Stream: true, ReasoningEffort: ps.Effort, CacheKey: string(req.SessionID), Workdir: req.Workspace}
-		if rt.tools != nil {
-			for _, spec := range rt.tools.Specs() {
-				if ps.allows(spec.Name) {
-					chatReq.Tools = append(chatReq.Tools, spec)
-				}
-			}
-		}
-		ch, err := completer.Complete(ctx, chatReq)
+		chatReq := provider.ChatRequest{Model: model, Messages: msgs, Tools: specs, Stream: true, ReasoningEffort: ps.Effort, CacheKey: string(req.SessionID), Workdir: req.Workspace}
+		text, toolCalls, streamErr, err := rt.turn(ctx, req.SessionID, completer, model, chatReq)
 		if err != nil {
-			agent.Status = types.AgentFailed
-			_ = rt.store.UpsertAgent(ctx, agent)
-			rt.emitStatus(agent)
 			return RunResult{}, err
 		}
-		var content strings.Builder
-		var toolCalls []types.ToolCall
-		call := rt.meter("chat", req.SessionID, completer, model, chatReq)
-		for d := range ch {
-			call.see(d)
-			if d.Content != "" {
-				content.WriteString(d.Content)
-				if rt.bus != nil {
-					rt.bus.Publish(types.Event{
-						Type:  types.EventMessageDelta,
-						Topic: "session." + string(req.SessionID),
-						Payload: map[string]any{
-							"sessionId": string(req.SessionID),
-							"delta":     d.Content,
-						},
-					})
-				}
-			}
-			if len(d.ToolCalls) > 0 {
-				toolCalls = append(toolCalls, d.ToolCalls...)
-			}
-		}
-		call.done()
-		text := content.String()
 		last = text
+		if streamErr == nil {
+			streamErr = ctx.Err()
+		}
+		if streamErr != nil {
+			// keep what was shown, so the chat matches what the user saw; a
+			// tool call cut off mid-stream is dropped
+			if text != "" && rt.sessions != nil && req.SessionID != "" {
+				_, _ = rt.sessions.Append(context.WithoutCancel(ctx), types.Message{SessionID: req.SessionID, Role: types.RoleAssistant, Content: text})
+			}
+			return RunResult{Assistant: last, Turns: turn + 1, ToolsCalled: allToolsCalled, FilesEdited: allFilesEdited}, streamErr
+		}
 		if rt.sessions != nil && req.SessionID != "" {
 			_, _ = rt.sessions.Append(ctx, types.Message{
 				SessionID: req.SessionID,
@@ -439,14 +451,12 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (res RunResult, err 
 			})
 		}
 		if len(toolCalls) == 0 {
-			agent.Status = types.AgentIdle
-			_ = rt.store.UpsertAgent(ctx, agent)
-			rt.emitStatus(agent)
 			return RunResult{Assistant: last, Turns: turn + 1, Done: true, ToolsCalled: allToolsCalled, FilesEdited: allFilesEdited}, nil
 		}
 		// read-only calls may run side by side; everything is still
 		// recorded below in call order
-		pre := rt.runReadOnly(ctx, req, ps, toolCalls)
+		pre := rt.runReadOnly(ctx, req, ps, toolCalls, concurrency)
+		checkpointed := false
 		for i, tc := range toolCalls {
 			allToolsCalled = append(allToolsCalled, tc.Name)
 			if rt.bus != nil {
@@ -465,9 +475,11 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (res RunResult, err 
 			if isFileEditTool(tc.Name) && ps.allows(tc.Name) && rt.captureEdit(ctx, runID, req, tc.ArgsJSON) {
 				edited++
 			}
-			// Auto-checkpoint before any tool call that mutates the workspace.
-			if req.Workspace != "" && rt.checkpt != nil && isMutatingTool(tc.Name) {
+			// One snapshot per turn, before its first change: a snapshot
+			// stages the whole workspace, which on a large repo costs seconds.
+			if !checkpointed && req.Workspace != "" && rt.checkpt != nil && isMutatingTool(tc.Name) {
 				_, _ = rt.checkpt.Take(req.Workspace, "auto:"+tc.Name)
+				checkpointed = true
 			}
 			var res tool.Result
 			var callErr error
@@ -496,6 +508,8 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (res RunResult, err 
 			if callErr != nil && out == "" {
 				out = callErr.Error()
 			}
+			// every result is sent again on each later turn: a huge one is cut
+			out = tool.Clip(out, tool.MaxOutput)
 			out = repeatNote(failed, tc.Name+"\x00"+tc.ArgsJSON, out, res.IsError || callErr != nil)
 			// Track file writes/edits from write/patch/create tool calls.
 			if isFileEditTool(tc.Name) && tc.ArgsJSON != "" {
@@ -524,11 +538,161 @@ func (rt *Runtime) Run(ctx context.Context, req RunRequest) (res RunResult, err 
 				})
 			}
 		}
+		if ctx.Err() != nil {
+			return RunResult{Assistant: last, Turns: turn + 1, ToolsCalled: allToolsCalled, FilesEdited: allFilesEdited}, ctx.Err()
+		}
 	}
-	agent.Status = types.AgentIdle
-	_ = rt.store.UpsertAgent(ctx, agent)
-	rt.emitStatus(agent)
+	// a chat's own run says why it stopped, so the user knows to go on
+	if req.MaxTurns <= 0 && rt.sessions != nil && req.SessionID != "" {
+		note := fmt.Sprintf("[rove] Tur sınırına ulaşıldı (%d model çağrısı) ve iş henüz bitmedi. Kaldığı yerden sürdürmek için \"devam\" yaz.", maxTurns)
+		_, _ = rt.sessions.Append(ctx, types.Message{SessionID: req.SessionID, Role: types.RoleAssistant, Content: note})
+	}
 	return RunResult{Assistant: last, Turns: maxTurns, Done: false, ToolsCalled: allToolsCalled, FilesEdited: allFilesEdited}, nil
+}
+
+// turnRetries: a reply whose stream broke or stalled is asked for again this
+// many times before the run fails. The provider already retries a request
+// the server turned away; this covers one that started and then died, which
+// otherwise failed a whole subagent task or Teamwork phase over one dropped
+// connection.
+const turnRetries = 2
+
+// turnRetryWait is the pause before asking again (doubled each time).
+var turnRetryWait = 2 * time.Second
+
+// EventMessageReset tells listeners to drop the text streamed so far for a
+// session: the reply is being asked for again and will stream anew.
+const EventMessageReset types.EventType = "message.reset"
+
+// turn asks the model for one reply and reads it as it streams. A stream that
+// breaks is asked for again (see turnRetries); what it had shown is taken
+// back first, so the reply is not written twice. err is a request the
+// provider refused; streamErr a reply that still did not come through.
+func (rt *Runtime) turn(ctx context.Context, sessionID types.ID, completer provider.Completer, model string, chatReq provider.ChatRequest) (text string, calls []types.ToolCall, streamErr, err error) {
+	for attempt := 0; ; attempt++ {
+		ch, err := completer.Complete(ctx, chatReq)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		call := rt.meter("chat", sessionID, completer, model, chatReq)
+		text, calls, streamErr = rt.receive(sessionID, ch, call)
+		call.done()
+		if streamErr == nil || ctx.Err() != nil || attempt >= turnRetries {
+			return text, calls, streamErr, nil
+		}
+		log.Printf("session %s: reply broke off (%v); asking again (%d/%d)", sessionID, streamErr, attempt+1, turnRetries)
+		if text != "" && rt.bus != nil && sessionID != "" {
+			rt.bus.Publish(types.Event{Type: EventMessageReset, Topic: "session." + string(sessionID), Payload: map[string]any{"sessionId": string(sessionID)}})
+		}
+		select {
+		case <-ctx.Done():
+			return text, calls, ctx.Err(), nil
+		case <-time.After(turnRetryWait << attempt):
+		}
+	}
+}
+
+// setStatus records and announces an agent's status.
+func (rt *Runtime) setStatus(ctx context.Context, a *types.Agent, st types.AgentStatus) {
+	a.Status = st
+	a.UpdatedAt = time.Now().UTC()
+	_ = rt.store.UpsertAgent(ctx, *a)
+	rt.emitStatus(*a)
+}
+
+// receive reads one streamed reply: its text, its tool calls, and the error
+// that cut it short, if any. Text goes out to listeners in pieces, at once
+// when the last piece went out more than deltaFlush ago and otherwise on the
+// next tick, so a fast model does not raise an event (and a UI repaint) per
+// token.
+func (rt *Runtime) receive(sessionID types.ID, ch <-chan provider.ChatDelta, call *metered) (string, []types.ToolCall, error) {
+	var content strings.Builder
+	var calls []types.ToolCall
+	var streamErr error
+	pending := 0 // bytes of content not yet published
+	var lastFlush time.Time
+	flush := func() {
+		if pending == 0 {
+			return
+		}
+		s := content.String()
+		rt.publishDelta(sessionID, s[len(s)-pending:])
+		pending, lastFlush = 0, time.Now()
+	}
+	tick := time.NewTicker(deltaFlush)
+	defer tick.Stop()
+	for {
+		select {
+		case d, ok := <-ch:
+			if !ok {
+				flush()
+				return content.String(), calls, streamErr
+			}
+			call.see(d)
+			if d.Content != "" {
+				content.WriteString(d.Content)
+				pending += len(d.Content)
+				if time.Since(lastFlush) >= deltaFlush {
+					flush()
+				}
+			}
+			calls = append(calls, d.ToolCalls...)
+			if d.Err != nil {
+				streamErr = d.Err
+			}
+		case <-tick.C:
+			flush()
+		}
+	}
+}
+
+func (rt *Runtime) publishDelta(sessionID types.ID, text string) {
+	if rt.bus == nil || text == "" {
+		return
+	}
+	rt.bus.Publish(types.Event{
+		Type:  types.EventMessageDelta,
+		Topic: "session." + string(sessionID),
+		Payload: map[string]any{
+			"sessionId": string(sessionID),
+			"delta":     text,
+		},
+	})
+}
+
+// chatLog is a run's copy of its chat: read whole once, then only what was
+// added since, so a long run does not re-read and re-decode every message
+// (images included) on each turn.
+type chatLog struct {
+	msgs   []types.Message
+	row    int64
+	loaded bool
+}
+
+func (rt *Runtime) history(ctx context.Context, sessionID types.ID, c *chatLog) ([]types.Message, error) {
+	if c == nil {
+		return rt.sessions.History(ctx, sessionID)
+	}
+	if !c.loaded {
+		msgs, row, err := rt.sessions.HistoryAfter(ctx, sessionID, 0)
+		if err != nil {
+			return nil, err
+		}
+		c.msgs, c.row, c.loaded = msgs, row, true
+		return c.msgs, nil
+	}
+	add, row, err := rt.sessions.HistoryAfter(ctx, sessionID, c.row)
+	if err != nil {
+		return nil, err
+	}
+	// something written into the past (a summary) changes the order: read
+	// it all again
+	if len(add) > 0 && len(c.msgs) > 0 && add[0].CreatedAt.Before(c.msgs[len(c.msgs)-1].CreatedAt) {
+		c.loaded = false
+		return rt.history(ctx, sessionID, c)
+	}
+	c.msgs, c.row = append(c.msgs, add...), row
+	return c.msgs, nil
 }
 
 type toolOutcome struct {
@@ -537,11 +701,11 @@ type toolOutcome struct {
 }
 
 // runReadOnly runs a turn's allowed read-only tool calls concurrently when
-// the request asks for it (ToolConcurrency > 1) and there is more than one;
+// concurrency > 1 and there is more than one;
 // the caller uses the returned outcomes (by call index) instead of calling
 // those tools again.
-func (rt *Runtime) runReadOnly(ctx context.Context, req RunRequest, ps Persona, calls []types.ToolCall) map[int]toolOutcome {
-	if req.ToolConcurrency <= 1 || rt.tools == nil {
+func (rt *Runtime) runReadOnly(ctx context.Context, req RunRequest, ps Persona, calls []types.ToolCall, concurrency int) map[int]toolOutcome {
+	if concurrency <= 1 || rt.tools == nil {
 		return nil
 	}
 	var idx []int
@@ -556,7 +720,7 @@ func (rt *Runtime) runReadOnly(ctx context.Context, req RunRequest, ps Persona, 
 	out := make(map[int]toolOutcome, len(idx))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, req.ToolConcurrency)
+	sem := make(chan struct{}, concurrency)
 	for _, i := range idx {
 		wg.Add(1)
 		go func(i int) {
@@ -614,11 +778,18 @@ func (rt *Runtime) AskModel(ctx context.Context, agentID types.ID, m types.Model
 	}
 	call := rt.meter("ask", "", completer, model, askReq)
 	var b strings.Builder
+	var streamErr error
 	for d := range ch {
 		call.see(d)
 		b.WriteString(d.Content)
+		if d.Err != nil {
+			streamErr = d.Err
+		}
 	}
 	call.done()
+	if streamErr != nil {
+		return b.String(), used, streamErr
+	}
 	return b.String(), used, ctx.Err()
 }
 
@@ -649,6 +820,12 @@ func paths(workspace string) string {
 const StyleRule = "\n\nHow you write: plain, short working notes, like a senior engineer's log. No emojis, no exclamation marks, no greetings, pleasantries or filler, and do not repeat the question back. Before each tool call, say in one short sentence what you are about to check or do and why; after it, state what you found in a sentence or two. Use lists and tables only when they make things clearer. Write a table as a Markdown pipe table with a header and a |---|---| rule line, never inside a fenced block: fences are for code and command output only, and the app renders them as code. End with the result or the one question you need answered."
 
 func (rt *Runtime) buildMessages(ctx context.Context, agent types.Agent, req RunRequest, ps Persona) ([]provider.ChatMessage, error) {
+	return rt.build(ctx, agent, req, ps, nil)
+}
+
+// build is buildMessages reading the chat through a run's log (nil reads it
+// whole).
+func (rt *Runtime) build(ctx context.Context, agent types.Agent, req RunRequest, ps Persona, chat *chatLog) ([]provider.ChatMessage, error) {
 	sys := agent.SystemPrompt
 	if sys == "" {
 		sys = basePrompt
@@ -676,7 +853,7 @@ func (rt *Runtime) buildMessages(ctx context.Context, agent types.Agent, req Run
 	}
 	out := []provider.ChatMessage{{Role: "system", Content: sys}}
 	if rt.sessions != nil && req.SessionID != "" {
-		hist, err := rt.sessions.History(ctx, req.SessionID)
+		hist, err := rt.history(ctx, req.SessionID, chat)
 		if err != nil {
 			return nil, err
 		}
@@ -687,6 +864,7 @@ func (rt *Runtime) buildMessages(ctx context.Context, agent types.Agent, req Run
 		}
 		hist = trimHistory(rest, req.HistoryLimit)
 		hist = lastTurns(hist, req.HistoryTurns)
+		shorten := decayedTools(hist, rt.CompactAt)
 		// images go again only with the last few user turns
 		withImages := map[int]bool{}
 		for i, n := len(hist)-1, 0; i >= 0 && n < imageTurns; i-- {
@@ -705,6 +883,9 @@ func (rt *Runtime) buildMessages(ctx context.Context, agent types.Agent, req Run
 			if i < len(hist)-1 && m.Role == types.RoleUser {
 				content = CompactNotice(content)
 			}
+			if shorten[i] {
+				content = tool.Clip(content, decayClip)
+			}
 			if len(m.Images) > 0 && !withImages[i] {
 				content += fmt.Sprintf("\n[%d image(s) attached earlier]", len(m.Images))
 			}
@@ -720,7 +901,24 @@ func (rt *Runtime) buildMessages(ctx context.Context, agent types.Agent, req Run
 	} else if req.UserMessage != "" {
 		out = append(out, provider.ChatMessage{Role: "user", Content: req.UserMessage, Images: req.Images})
 	}
+	withLive(out, ps.Live)
 	return out, nil
+}
+
+// withLive adds what changes turn to turn to the latest user message (only in
+// what is sent; the chat keeps the message as written), or to the system
+// prompt when there is no user message.
+func withLive(out []provider.ChatMessage, live string) {
+	if live = strings.TrimSpace(live); live == "" {
+		return
+	}
+	for i := len(out) - 1; i >= 0; i-- {
+		if out[i].Role == "user" {
+			out[i].Content += "\n\n<live-context>\n" + live + "\n</live-context>"
+			return
+		}
+	}
+	out[0].Content += "\n\n" + live
 }
 
 func (rt *Runtime) emitStatus(a types.Agent) {

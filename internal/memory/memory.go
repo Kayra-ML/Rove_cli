@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Kayra-ML/rove/internal/id"
@@ -28,34 +29,47 @@ func (sys *System) List(ctx context.Context, scope types.MemoryScope, scopeID ty
 	return sys.store.ListMemory(ctx, scope, scopeID)
 }
 
+// promptBudget caps what memory adds to every request (bytes). Entries go
+// in scope order, narrowest last, so the cut falls on the broadest ones.
+const promptBudget = 12000
+
 func (sys *System) PromptBlock(ctx context.Context, agentID, workspaceID, sessionID types.ID) string {
-	var out string
-	appendScope := func(title string, items []types.MemoryEntry) {
-		if len(items) == 0 {
-			return
-		}
-		out += "\n## " + title + "\n"
-		for _, it := range items {
-			out += "- " + it.Key + ": " + it.Content + "\n"
+	type scope struct {
+		title string
+		items []types.MemoryEntry
+	}
+	var scopes []scope
+	add := func(title string, kind types.MemoryScope, id types.ID) {
+		if items, err := sys.store.ListMemory(ctx, kind, id); err == nil && len(items) > 0 {
+			scopes = append(scopes, scope{title, items})
 		}
 	}
-	if g, err := sys.store.ListMemory(ctx, types.MemGlobal, ""); err == nil {
-		appendScope("Global memory", g)
-	}
+	add("Global memory", types.MemGlobal, "")
 	if workspaceID != "" {
-		if w, err := sys.store.ListMemory(ctx, types.MemWorkspace, workspaceID); err == nil {
-			appendScope("Workspace memory", w)
-		}
+		add("Workspace memory", types.MemWorkspace, workspaceID)
 	}
 	if agentID != "" {
-		if a, err := sys.store.ListMemory(ctx, types.MemAgent, agentID); err == nil {
-			appendScope("Agent memory", a)
-		}
+		add("Agent memory", types.MemAgent, agentID)
 	}
 	if sessionID != "" {
-		if s, err := sys.store.ListMemory(ctx, types.MemSession, sessionID); err == nil {
-			appendScope("Session memory", s)
-		}
+		add("Session memory", types.MemSession, sessionID)
 	}
-	return out
+	// fill from the narrowest scope back, then write in the usual order
+	parts := make([]string, len(scopes))
+	left := promptBudget
+	for i := len(scopes) - 1; i >= 0 && left > 0; i-- {
+		var b strings.Builder
+		b.WriteString("\n## " + scopes[i].title + "\n")
+		for _, it := range scopes[i].items {
+			line := "- " + it.Key + ": " + it.Content + "\n"
+			if b.Len()+len(line) > left {
+				b.WriteString("- …(more entries not shown)\n")
+				break
+			}
+			b.WriteString(line)
+		}
+		parts[i] = b.String()
+		left -= b.Len()
+	}
+	return strings.Join(parts, "")
 }

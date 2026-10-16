@@ -24,23 +24,29 @@ import (
 type paneModel struct {
 	mu      sync.Mutex
 	release chan struct{}
-	systems map[string]string // last user message → system prompt
+	systems map[string]string // last user message → what it was told
 	tools   map[string][]string
 }
 
 func (*paneModel) Kind() types.ProviderKind { return types.ProviderFake }
 func (*paneModel) Name() string             { return "panem" }
 func (m *paneModel) Complete(ctx context.Context, req provider.ChatRequest) (<-chan provider.ChatDelta, error) {
-	var user string
+	// the latest user message carries the live board after the user's own
+	// words (agent.Persona.Live); the words pick the play, and what the
+	// terminal was told is the system prompt and that board together
+	var user, live string
 	for i := len(req.Messages) - 1; i >= 0; i-- {
 		if req.Messages[i].Role == "user" {
 			user = req.Messages[i].Content
 			break
 		}
 	}
+	if j := strings.Index(user, "\n\n<live-context>"); j >= 0 {
+		user, live = user[:j], user[j:]
+	}
 	afterTool := req.Messages[len(req.Messages)-1].Role == "tool"
 	m.mu.Lock()
-	m.systems[user] = req.Messages[0].Content
+	m.systems[user] = req.Messages[0].Content + live
 	var names []string
 	for _, t := range req.Tools {
 		names = append(names, t.Name)
