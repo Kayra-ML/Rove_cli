@@ -1,6 +1,18 @@
 # Rove Code
 
-Local-first coding agent. The desktop app is the product. One daemon, shared sessions.
+A local-first coding agent built around a **Go daemon**, a **desktop interface** and **CLI workflows**. The desktop and terminal clients work with shared sessions through the same local process.
+
+### What this project demonstrates
+
+- **Application architecture:** Go backend/daemon with a Wails + React desktop interface
+- **Developer workflows:** terminal access, session management and automation
+- **Local-first design:** shared state and features coordinated by the daemon
+
+**Project focus:** building developer tools that connect the command line, desktop UI and automation workflows.
+
+> Review the install scripts before running any `curl | sh` command on your machine.
+
+---
 
 ## Install
 
