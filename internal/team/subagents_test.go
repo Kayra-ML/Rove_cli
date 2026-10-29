@@ -296,10 +296,14 @@ func TestAClashWaitsInsteadOfOverwriting(t *testing.T) {
 	var order int32
 	subs := &Subagents{Team: tm, Git: gitwt.New(), WorktreeRoot: root,
 		Run: func(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
-			// the second to finish is the one that clashes
+			// the second to finish is the one that clashes: it finishes
+			// once the first one's change is in the repo (a fixed sleep
+			// lost that race on a busy machine)
 			who := "first"
 			if strings.Contains(req.UserMessage, "slow") {
-				time.Sleep(150 * time.Millisecond)
+				for end := time.Now().Add(10 * time.Second); readFile(repo, "shared.txt") != "one\nfirst\nthree\n" && time.Now().Before(end); {
+					time.Sleep(10 * time.Millisecond)
+				}
 				who = "second"
 			}
 			writeFile(t, req.Workspace, "shared.txt", "one\n"+who+"\nthree\n")

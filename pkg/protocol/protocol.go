@@ -1,6 +1,15 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
+
+// MaxCallDuration is how long one call may take to be answered: a chat
+// turn, a plan or a check can run for many minutes. The daemon gives an
+// answer this long to be written, and clients wait as long for it — a
+// client that gave up sooner lost the answer of work that was still done.
+const MaxCallDuration = time.Hour
 
 type Request struct {
 	ID     string          `json:"id"`
@@ -26,7 +35,7 @@ type EventFrame struct {
 // APILevel is raised whenever the daemon gains methods the app relies on.
 // The app compares it with the daemon's (health) to tell an out-of-date
 // daemon — on this computer or on a server — apart from a broken one.
-const APILevel = 19
+const APILevel = 20
 
 const (
 	MethodPing            = "ping"
@@ -48,6 +57,21 @@ const (
 	MethodGoalDelete      = "goal.delete"
 	MethodGoalList        = "goal.list"
 	MethodGoalDrive       = "goal.drive"
+	// goal.cancel stops a running goal (it keeps its checkpoint and can be
+	// driven on); goal.verdicts is the reviewer's verdict on each iteration.
+	MethodGoalCancel   = "goal.cancel"
+	MethodGoalVerdicts = "goal.verdicts"
+
+	// Harness: a goal's execution policy (see internal/harness). catalog
+	// lists the tactics there are; get is a goal's profile, what it
+	// resolves to, its checkpoint and how it changed; set picks one by hand
+	// (manual mode), compose lets the composer pick again (auto mode);
+	// mutations is the trace of changes alone.
+	MethodHarnessCatalog   = "harness.catalog"
+	MethodHarnessGet       = "harness.get"
+	MethodHarnessSet       = "harness.set"
+	MethodHarnessCompose   = "harness.compose"
+	MethodHarnessMutations = "harness.mutations"
 
 	// Reviewing a turn's changes, compacting a chat, reasoning effort, and
 	// the project's rule files.
@@ -104,7 +128,7 @@ const (
 	MethodFileRead         = "fs.read"
 	MethodAgentDelete      = "agent.delete"
 
-	// Harness policy methods.
+	// The daemon's counters (the same as ping's health).
 	MethodUsageGet = "usage.get"
 	// usage.report: tokens per day and per model over a range of days, by
 	// Rove's own count and by the providers' reports (see internal/usage)

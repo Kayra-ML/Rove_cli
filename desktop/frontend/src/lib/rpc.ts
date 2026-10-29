@@ -146,10 +146,34 @@ const subs = new Set<Sub>();
 let stream: EventSource | null = null;
 let retryMs = 800;
 let retryTimer: number | undefined;
-// Events sent while the stream was down are gone for good. Whoever shows
-// state built from them is told when it is back, to read that state again.
+// The daemon numbers its events and keeps the latest (stream.go): a stream
+// that comes back sends the last id it saw and is handed what came after
+// it. Only when the daemon cannot (it restarted, or the gap is too old) are
+// the events of the gap gone for good — then whoever shows state built from
+// them is told, to read that state again.
 const reconnected = new Set<() => void>();
 let dropped = false;
+let lastId = "";
+// A daemon that says hello also pings; a stream from one that has been
+// silent past STALE_MS is taken for dead (a tunnel that hung without
+// closing) and opened again. An older daemon never pings, and is trusted.
+const STALE_MS = 45_000;
+let heard = 0;
+let pings = false;
+let watchdog: number | undefined;
+let helloWait: number | undefined;
+let failStream: (() => void) | null = null;
+
+function fireReconnected() {
+  recent.clear(); // answers held from before the gap may be stale
+  for (const fn of [...reconnected]) {
+    try {
+      fn();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+}
 
 export function onReconnect(fn: () => void): () => void {
   reconnected.add(fn);
@@ -170,22 +194,62 @@ function openStream() {
   if (stream || subs.size === 0) return;
   const token = localStorage.getItem("aether.token") || "";
   const base = localStorage.getItem("aether.http") || HTTP_DEFAULT;
-  const es = new EventSource(`${base}/events?token=${encodeURIComponent(token)}`);
+  const since = lastId ? `&since=${encodeURIComponent(lastId)}` : "";
+  const es = new EventSource(`${base}/events?token=${encodeURIComponent(token)}${since}`);
   stream = es;
+  heard = Date.now();
+  const fail = () => {
+    es.close();
+    if (stream === es) stream = null;
+    failStream = null;
+    dropped = true;
+    if (subs.size === 0) return;
+    window.clearTimeout(retryTimer);
+    retryTimer = window.setTimeout(openStream, retryMs);
+    retryMs = Math.min(retryMs * 2, 8000);
+  };
+  failStream = fail;
   es.onopen = () => {
+    heard = Date.now();
+    if (!dropped) return;
+    // a daemon that can resume says so in its hello, right after this; one
+    // that says nothing (an older one) has lost what fired in the gap
+    window.clearTimeout(helloWait);
+    helloWait = window.setTimeout(() => {
+      if (!dropped || stream !== es) return;
+      dropped = false;
+      fireReconnected();
+    }, 1500);
+  };
+  es.addEventListener?.("hello", (m) => {
+    heard = Date.now();
+    pings = true;
+    retryMs = 800;
+    if (watchdog === undefined) {
+      watchdog = window.setInterval(() => {
+        if (stream && pings && Date.now() - heard > STALE_MS) failStream?.();
+      }, 10_000);
+    }
+    window.clearTimeout(helloWait);
+    let h: { resumed?: boolean } = {};
+    try {
+      h = JSON.parse((m as MessageEvent<string>).data) as { resumed?: boolean };
+    } catch {
+      /* malformed: treat as not resumed */
+    }
     if (!dropped) return;
     dropped = false;
-    recent.clear(); // answers held from before the gap may be stale
-    for (const fn of [...reconnected]) {
-      try {
-        fn();
-      } catch (err) {
-        console.error(err);
-      }
-    }
-  };
+    // resumed: what was missed follows on this stream, nothing to re-read
+    if (h.resumed) recent.clear();
+    else fireReconnected();
+  });
+  es.addEventListener?.("ping", () => {
+    heard = Date.now();
+  });
   es.onmessage = (m) => {
     retryMs = 800;
+    heard = Date.now();
+    if (m.lastEventId) lastId = m.lastEventId;
     let ev: DaemonEvent;
     try {
       ev = JSON.parse(m.data) as DaemonEvent;
@@ -206,15 +270,18 @@ function openStream() {
       }
     }
   };
-  es.onerror = () => {
-    es.close();
-    if (stream === es) stream = null;
-    dropped = true;
-    if (subs.size === 0) return;
-    window.clearTimeout(retryTimer);
-    retryTimer = window.setTimeout(openStream, retryMs);
-    retryMs = Math.min(retryMs * 2, 8000);
-  };
+  es.onerror = fail;
+}
+
+function closeStream() {
+  if (stream) {
+    stream.close();
+    stream = null;
+  }
+  failStream = null;
+  window.clearTimeout(helloWait);
+  window.clearInterval(watchdog);
+  watchdog = undefined;
 }
 
 export function subscribeEvents(filter: string, onEvent: (ev: DaemonEvent) => void): () => void {
@@ -223,10 +290,7 @@ export function subscribeEvents(filter: string, onEvent: (ev: DaemonEvent) => vo
   void hydrateConnection().then(openStream, openStream);
   return () => {
     subs.delete(sub);
-    if (subs.size === 0 && stream) {
-      stream.close();
-      stream = null;
-    }
+    if (subs.size === 0) closeStream();
   };
 }
 
@@ -242,12 +306,12 @@ export async function discoverSSH(): Promise<DiscoveredSSH[]> {
 // (the app moved to another daemon, or its tunnel came back on a new port).
 export function resetConnection() {
   hydrateOnce = null;
-  // another server has its own answers; none of the old ones hold
+  // another server has its own answers and its own events; none of the
+  // old ones hold, and its stream starts afresh
   recent.clear();
-  if (stream) {
-    stream.close();
-    stream = null;
-  }
+  lastId = "";
+  pings = false;
+  closeStream();
   if (subs.size > 0) void hydrateConnection().then(openStream, openStream);
 }
 

@@ -45,7 +45,9 @@ func (e *Engine) Spawn(ctx context.Context, opts SpawnOpts) (types.TerminalSessi
 	} else if shell == "" {
 		shell, args = defaultShell()
 	}
-	cmd := exec.CommandContext(ctx, shell, args...)
+	// the shell outlives the call that opens it (see the unix engine)
+	lctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(lctx, shell, args...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -53,14 +55,17 @@ func (e *Engine) Spawn(ctx context.Context, opts SpawnOpts) (types.TerminalSessi
 	cmd.SysProcAttr = &windows.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		cancel()
 		return types.TerminalSession{}, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		cancel()
 		return types.TerminalSession{}, err
 	}
 	cmd.Stderr = cmd.Stdout
 	if err := cmd.Start(); err != nil {
+		cancel()
 		return types.TerminalSession{}, err
 	}
 	now := time.Now().UTC()
@@ -73,7 +78,6 @@ func (e *Engine) Spawn(ctx context.Context, opts SpawnOpts) (types.TerminalSessi
 	if meta.Title == "" {
 		meta.Title = shell
 	}
-	lctx, cancel := context.WithCancel(context.Background())
 	lv := &live{meta: meta, cmd: cmd, stdin: stdin, stdout: stdout, cancel: cancel}
 	e.mu.Lock()
 	e.sess[meta.ID] = lv

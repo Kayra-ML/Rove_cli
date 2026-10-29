@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Kayra-ML/rove/internal/config"
+	"github.com/Kayra-ML/rove/internal/core"
 	"github.com/Kayra-ML/rove/internal/daemon"
 	"github.com/Kayra-ML/rove/internal/sshtunnel"
 	"github.com/Kayra-ML/rove/internal/tui"
@@ -35,8 +36,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "daemon":
-			runBundledDaemon()
-			return
+			os.Exit(daemonCommand(os.Args[2:]))
 		case "desktop":
 			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
 			if !launchDesktop() {
@@ -238,6 +238,8 @@ Usage:
   rovecode desktop         Open the desktop app
   rovecode tui             Open the terminal cockpit
   rovecode daemon          Run the shared daemon in the foreground
+  rovecode daemon status   Whether the daemon runs, and what it is doing
+  rovecode daemon start|stop|restart|logs
   rovecode --version       Print the installed version
   rovecode tui --host alias
   rovecode --list-hosts    List saved SSH hosts
@@ -406,6 +408,9 @@ func ensureBundledDaemon(cfg config.Config) error {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Env = os.Environ()
+	// its own session: closing the terminal this was started from must not
+	// take the daemon (and the goals it drives) down with it
+	daemon.Detach(cmd)
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
 		return err
@@ -440,6 +445,7 @@ func runBundledDaemon() {
 		defer lf.Close()
 	}
 	pathFrom := daemon.FixPath()
+	core.Version = version
 	d, err := daemon.Start(cfg)
 	if err != nil {
 		log.Printf("daemon: %v", err)
@@ -450,11 +456,20 @@ func runBundledDaemon() {
 	_ = daemon.WritePID(cfg.DataDir)
 	defer os.Remove(daemon.PIDPath(cfg.DataDir))
 
-	// pkill and the desktop app's restart send SIGTERM; stop cleanly for it
-	// too, so the store is closed and the pid file goes
+	// pkill sends SIGTERM, and the app (or `rovecode daemon stop`) calls the
+	// shutdown method; either way stop cleanly, so goals are left to resume,
+	// MCP servers and shells end, the store is closed and the pid file goes
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	sig := <-stop
-	log.Printf("daemon stopping: %v", sig)
-	_ = d.Stop()
+	select {
+	case sig := <-stop:
+		log.Printf("daemon stopping: %v", sig)
+	case <-d.Done():
+		log.Printf("daemon stopping: asked to")
+	}
+	if err := d.Stop(); err != nil {
+		log.Printf("daemon stopped: %v", err)
+		return
+	}
+	log.Printf("daemon stopped")
 }

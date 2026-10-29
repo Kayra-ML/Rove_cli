@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -176,8 +177,20 @@ func TestOlderRovecodeIsReplaced(t *testing.T) {
 	level := int32(12)
 	srv := standIn(t, &level)
 	home := t.TempDir()
-	_ = os.MkdirAll(filepath.Join(home, ".local/bin"), 0o755)
-	_ = os.WriteFile(filepath.Join(home, ".local/bin/rovecode"), []byte(fakeRovecode(3)), 0o755)
+	bin := filepath.Join(home, ".local/bin/rovecode")
+	_ = os.MkdirAll(filepath.Dir(bin), 0o755)
+	// the old rovecode, with its daemon running
+	old := "#!/bin/sh\ncase \"$1\" in\n  api-level) echo 3 ;;\n  daemon) while :; do sleep 1; done ;;\nesac\n"
+	_ = os.WriteFile(bin, []byte(old), 0o755)
+	oldDaemon := exec.Command(bin, "daemon")
+	oldDaemon.Env = []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
+	if err := oldDaemon.Start(); err != nil {
+		t.Fatal(err)
+	}
+	stopped := make(chan struct{})
+	go func() { _ = oldDaemon.Wait(); close(stopped) }()
+	t.Cleanup(func() { _ = oldDaemon.Process.Kill() })
+
 	tr := &local{home: home, daemon: strings.TrimPrefix(srv.URL, "http://")}
 	c, err := Dial(context.Background(), Target{Host: "srv"}, tr, func(string, string) ([]byte, error) { return gz(fakeRovecode(12)), nil }, 12, Options{Search: onlyHome})
 	if err != nil {
@@ -187,16 +200,42 @@ func TestOlderRovecodeIsReplaced(t *testing.T) {
 	if !c.State().Installed {
 		t.Fatal("old rovecode kept")
 	}
-	b, _ := os.ReadFile(filepath.Join(home, ".local/bin/rovecode"))
+	b, _ := os.ReadFile(bin)
 	if !strings.Contains(string(b), "echo 12") {
 		t.Fatal("binary not replaced")
 	}
-	// the old daemon was asked to stop — by its own path only
+	// the old daemon was asked to stop — by its own path only, with a
+	// pattern that does not match the script's own shell
 	tr.mu.Lock()
 	install := tr.execs[1]
 	tr.mu.Unlock()
-	if !strings.Contains(install, "pkill -u \"$(id -u)\" -f '"+filepath.Join(home, ".local/bin/rovecode")+" daemon'") {
+	want := "pkill -u \"$(id -u)\" -f '" + regexp.QuoteMeta(filepath.Dir(bin)) + "/[r]ovecode daemon'"
+	if !strings.Contains(install, want) {
 		t.Fatalf("install script = %s", install)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the old daemon is still running")
+	}
+}
+
+func TestKillPatternSkipsItsOwnText(t *testing.T) {
+	for in, want := range map[string]string{
+		"/home/u/.local/bin/rovecode daemon": `/home/u/\.local/bin/[r]ovecode daemon`,
+		"/opt/x+y/rovecode daemon":           `/opt/x\+y/[r]ovecode daemon`,
+		"rovecode daemon":                    `[r]ovecode daemon`,
+	} {
+		if got := killPattern(in); got != want {
+			t.Errorf("killPattern(%q) = %q, want %q", in, got, want)
+		}
+		re := regexp.MustCompile(killPattern(in))
+		if !re.MatchString(in) {
+			t.Errorf("%q does not match its own command line", killPattern(in))
+		}
+		if re.MatchString("sh -c pkill -f " + killPattern(in)) {
+			t.Errorf("%q matches the shell that runs it", killPattern(in))
+		}
 	}
 }
 

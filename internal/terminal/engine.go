@@ -44,13 +44,18 @@ func (e *Engine) Spawn(ctx context.Context, opts SpawnOpts) (types.TerminalSessi
 	if opts.SSH != nil {
 		shell, args = sshCommand(*opts.SSH)
 	}
-	cmd := exec.CommandContext(ctx, shell, args...)
+	// The shell lives until it exits or is killed, not as long as the call
+	// that opened it: over HTTP that call's context ends with its answer,
+	// and a shell bound to it was killed the moment it was handed back.
+	lctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(lctx, shell, args...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = os.Environ()
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(opts.Cols), Rows: uint16(opts.Rows)})
 	if err != nil {
+		cancel()
 		return types.TerminalSession{}, err
 	}
 	now := time.Now().UTC()
@@ -74,7 +79,6 @@ func (e *Engine) Spawn(ctx context.Context, opts SpawnOpts) (types.TerminalSessi
 	if meta.Title == "" {
 		meta.Title = shell
 	}
-	lctx, cancel := context.WithCancel(context.Background())
 	lv := &live{meta: meta, cmd: cmd, pty: ptmx, cancel: cancel}
 	e.mu.Lock()
 	e.sess[meta.ID] = lv

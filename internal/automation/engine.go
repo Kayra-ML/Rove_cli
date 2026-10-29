@@ -141,6 +141,9 @@ func (e *Engine) run(ctx context.Context, j types.AutomationJob) (string, error)
 	return "noop", nil
 }
 
+// driveGoals starts the pending goals in the background, each in its own
+// drive. Driving them here, one after another, held the tick — and every
+// other job, and an automation.tick call — for as long as a goal ran.
 func (e *Engine) driveGoals(ctx context.Context) (string, error) {
 	if e.goals == nil {
 		return "noop", nil
@@ -154,9 +157,9 @@ func (e *Engine) driveGoals(ctx context.Context) (string, error) {
 		if g.Status != types.GoalPending {
 			continue
 		}
-		if _, err := e.goals.Drive(ctx, g.ID, "", ""); err == nil {
+		if err := e.goals.Start(g.ID, "", ""); err == nil {
 			n++
 		}
 	}
-	return fmt.Sprintf("drove %d", n), nil
+	return fmt.Sprintf("started %d", n), nil
 }

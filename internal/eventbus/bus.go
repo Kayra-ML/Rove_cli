@@ -103,10 +103,16 @@ func (b *Bus) Publish(ev types.Event) {
 		return
 	}
 	for _, s := range b.subs {
-		if s.filter == "" || s.filter == string(ev.Type) || s.filter == ev.Topic || matchPrefix(s.filter, ev) {
+		if Matches(s.filter, ev) {
 			s.box.push(ev)
 		}
 	}
+}
+
+// Matches is the bus's filter rule: empty matches everything; otherwise
+// the event's type, its topic, or "prefix*" of its type.
+func Matches(filter string, ev types.Event) bool {
+	return filter == "" || filter == string(ev.Type) || filter == ev.Topic || matchPrefix(filter, ev)
 }
 
 func matchPrefix(filter string, ev types.Event) bool {

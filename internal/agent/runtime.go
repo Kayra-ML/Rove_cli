@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Kayra-ML/rove/internal/checkpoint"
@@ -47,6 +48,29 @@ type Runtime struct {
 	// steers are words for a run already under way, waiting for its next
 	// turn; see Steer.
 	steers map[types.ID][]string
+	// active counts runs in flight; closed refuses new ones (Shutdown).
+	active atomic.Int64
+	closed atomic.Bool
+}
+
+// ErrShuttingDown is returned by Run once Shutdown has begun.
+var ErrShuttingDown = errors.New("the daemon is shutting down")
+
+// Shutdown stops every run in flight, refuses new ones, and waits up to
+// wait for the runs to wind down — they write how they ended, and must do
+// so before the store closes.
+func (rt *Runtime) Shutdown(wait time.Duration) {
+	rt.closed.Store(true)
+	rt.mu.Lock()
+	for k, h := range rt.cancels {
+		h.cancel()
+		delete(rt.cancels, k)
+	}
+	rt.mu.Unlock()
+	deadline := time.Now().Add(wait)
+	for rt.active.Load() > 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // runHandle is one in-flight run. Runs are keyed by session, so two sessions
@@ -285,6 +309,11 @@ func runKey(req RunRequest) string {
 }
 
 func (rt *Runtime) Run(ctx context.Context, req RunRequest) (res RunResult, err error) {
+	if rt.closed.Load() {
+		return RunResult{}, ErrShuttingDown
+	}
+	rt.active.Add(1)
+	defer rt.active.Add(-1)
 	ctx, cancel := context.WithCancel(ctx)
 	runID := id.NewID()
 	edited := 0 // files whose earlier content this run kept for review

@@ -42,6 +42,7 @@ headless daemon share the same core.
 
 Both use the same `rpc.Server.Dispatch` handler. The daemon writes a `rovecode.sock`
 file (legacy `aether.sock` is still accepted); the CLI prefers IPC, falls back to HTTP.
+How it starts, stops and is looked after is in section 23.
 
 ### 2. No Logic in Desktop / CLI
 The desktop `App` struct in Wails is a thin bridge. Its only method is `RPC(method,
@@ -116,9 +117,10 @@ the catalog backend without changing the skill runtime or the frontend Skill Mar
 ### 9. Event Bus
 `eventbus.Bus` is a pub/sub bus with string-prefix topic filtering. Subscribers receive
 `types.Event` values, each subscriber in publish order from a mailbox of its own (a
-goroutine per event shuffled streamed text). The SSE endpoint in the HTTP server subscribes and streams
-`data: <json>\n\n` frames. The React frontend uses `EventSource` for live updates
-(streaming agent output, terminal data, goal and subagent changes).
+goroutine per event shuffled streamed text). The SSE endpoint (`/events`) numbers every
+event and can resume a client where it was (section 23). The React frontend uses one
+`EventSource` for all its live updates (streaming agent output, terminal data, goal and
+subagent changes).
 
 The maps page's Context Map reads a chat's history as its context (requests, the files
 and commands each drew on, how full the window is). Its assistant talks in a hidden
@@ -231,7 +233,7 @@ New RPC methods added to server and protocol:
 - `agent.delete` — removes an agent from the store
 - `git.commit` — stage-all + commit in a workspace path
 - `git.log` — returns N most recent commits with hash/author/date/message
-- `shutdown` — graceful daemon stop (100ms delay, os.Exit)
+- `shutdown` — graceful daemon stop: the same path as SIGTERM (section 23)
 
 ### 13. Git CommitAll + Log
 
@@ -250,7 +252,7 @@ New RPC methods added to server and protocol:
 | `SkillMarket.tsx` | Installed skills list; local path install; marketplace search + install; permission badges |
 | `Settings.tsx` | Provider upsert, goal create, secret management |
 | `Workspace.tsx` | File browser + workspace selector |
-| `HarnessPanel.tsx` | Harness profile viewer/editor: mode badge, tactic chips, mutation timeline, 5s live poll, Manual/Auto toggle |
+| `GoalsPanel.tsx` | Settings → Goals: goals live (run, stop, resume), each goal's harness — tactic chips by category (a click picks the profile by hand), "let it pick again" (auto), what the profile resolves to, the checkpoint, the mutation trace and the verdict on every iteration |
 
 ### 14. Execution Policy Matrix — Harness System
 
@@ -283,7 +285,7 @@ Multiple tactics per category are active simultaneously (bitwise OR). No giant s
 
 #### Harness Modes
 
-- **Manual** — user selects tactic flags directly via `HarnessPanel`
+- **Manual** — user selects tactic flags directly in Settings → Goals (`GoalsPanel`, `harness.set`)
 - **Auto** — `HarnessComposer` scores `TaskAnalysis` inputs (task type, complexity, risk, repo size, autonomy, model capabilities, cost budget, historical eval score) and emits a `GoalExecProfile`
 
 #### Stuck Detection & Mutation
@@ -301,10 +303,13 @@ Multiple tactics per category are active simultaneously (bitwise OR). No giant s
 
 | Method | Description |
 |---|---|
-| `harness.get` | Load profile by goalId |
-| `harness.set` | Persist manual profile |
-| `harness.mutations` | List mutation history for a goal |
-| `harness.compose` | Auto-compose profile from TaskAnalysis JSON |
+| `harness.catalog` | The tactics there are, by category, with their bits (`harness.Catalog`) — the app knows no bit itself |
+| `harness.get` | A goal's profile (composed and kept if it has none), what it resolves to (`harness.Resolve`: turns, context budget, allowed tools, recovery order), whether it runs, its checkpoint and its mutations |
+| `harness.set` | A profile picked by hand (manual mode): unknown flags refused, retired ones dropped (`GoalExecProfile.Clean`), kept in the trace as "set by hand"; refused while the goal runs |
+| `harness.compose` | The composer picks the profile again from the goal as it is now (auto mode); refused while the goal runs |
+| `harness.mutations` | The trace alone: iteration, reason, old and new profile |
+| `goal.cancel` | Stop a running goal; it keeps its checkpoint and can be driven on |
+| `goal.verdicts` | The reviewer's verdict on every iteration, with the gates' results |
 
 #### Integration Points
 
@@ -383,3 +388,17 @@ vitest run        ✓  (5 tests, 2 suites)
 - **Monitors** (`monitor.go`): a shell command checked every N minutes (≥5) in the project's folder; output lines not seen before (hashes remembered) give the agent a task, nothing new costs no tokens, the first check only learns. Presets: GitHub CI failures and new bugs (`gh`), Sentry (`sentry-cli`). Also set up from a chat with `automation_monitor`, which asks like the shell does.
 - **Handoffs** (`handoff.go`, `staff.handoffs` / `staff.handoffSave` / `staff.handoffDelete`, the `automation_handoff` tool, an agent-to-agent cable on the Session Map): when an agent finishes a task (done, not a colleague's request), each enabled handoff from it gives the next agent a task with the instruction, the report and the changed files. The next task's checkout starts from a snapshot of the previous one's and keeps its base, so its review holds both pieces of work; the previous task is marked `carried`. Chains stop at three agents and never return to one already in the chain; daily caps and one running task per handoff as with watches.
 - Map cables join cards **corner to corner** (the closest pair of corners); the side ports show only on hover.
+
+### 23. The daemon looked after, events that resume, the harness in the app
+
+- **One way to stop.** SIGTERM and the `shutdown` method take the same path (`Daemon.Done`, `Daemon.Stop`, safe to call twice): stop serving (event streams end too), then `core.App.Close` in an order where nothing writes to what is closed — automation, goals (drives stopped and waited for), the agents' tasks, chat turns still running (`agent.Runtime.Shutdown`: cancelled, refused from then on, waited for), MCP servers, terminals (`terminal.Engine.Close`), the bus, the store. `shutdown` used to `os.Exit`: the store was not closed and MCP servers were orphaned.
+- **The data dir lock names its holder** (pid, then HTTP address). A daemon started while another holds it fails at once if that one answers — and waits (`lockWait`) if it does not, since that one is stopping: an app restarts the daemon as soon as the old one stops answering, while it still closes its store.
+- **Goals outlive the daemon.** A drive stopped because the daemon stops (not the user) leaves its goal marked running. On the next start `goal.Engine.Recover` makes every such goal pending, and one whose harness has `CheckpointResume` is driven on from its checkpoint — at most `maxResumes` (3) times in a row without finishing an iteration, after which it is blocked for the user (a goal that brings the daemon down must not do it on every start).
+- **Detached.** A daemon started in the background (`rovecode daemon start`, `rovecode tui`, the desktop app) gets a session of its own (`daemon.Detach`: setsid; on Windows no console and its own process group), so closing the terminal it came from does not end it.
+- **`rovecode daemon`** runs it in the foreground; `start`, `stop` (waits until the process is gone; SIGTERM if the call fails), `restart`, `status [--json]` (exit 3 when not running; pid, version, API level, uptime, agents, goals, terminals, event streams) and `logs [-n N] [-f]` (follows across rotation) look after the background one. Health (`/health`, `ping`) carries `pid`, `version`, `goalsRunning`, `terminals`, `streams`, `eventSeq`.
+- **Events that resume** (`internal/rpc/stream.go`). One hub subscription numbers every event (`id: <epoch>.<seq>`) and keeps the latest (4096 events, 8 MB). A stream starts with a `hello` (`{"epoch","seq","resumed"}`) and pings every 15 s while idle. A client that comes back with `?since=<id>` (or `Last-Event-ID`) gets exactly what it missed, then the live events; `resumed:false` (another epoch — the daemon restarted — or a gap older than the ring) tells it to read its state again. A client a whole buffer behind is cut off rather than silently skipped, and resumes from the ring. The app (`lib/rpc.ts`) sends the last id when it reconnects, re-reads only when the daemon could not resume, and reopens a stream that has been silent past its pings (a tunnel that hung); the TUI reconnects the same way (`StreamGapMsg`).
+- **Shells outlive the call that opens them.** A terminal's process was bound to the RPC's context: over HTTP — the browser, or the desktop app on a server — it was killed as soon as `terminal.spawn` answered.
+- **Calls wait as long as the work.** `protocol.MaxCallDuration` (an hour) is what the daemon gives an answer and what clients wait: the Go client waited 5 minutes (a longer chat turn on a server lost its answer), the TUI 30 seconds (every longer turn showed as failed).
+- **Updating rovecode on a server** stops the old daemon with `pkill -f '<dir>/[r]ovecode daemon'`: the plain pattern matched the shell running the install script, which killed itself.
+- **Automation's `drive_goals`** starts pending goals in the background (`goal.Engine.Start`) instead of driving them one after another inside the tick.
+

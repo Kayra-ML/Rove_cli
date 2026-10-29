@@ -184,6 +184,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.connected = true
 		m.lastStatus = styleDim.Render("● connected")
 
+	case StreamGapMsg:
+		// events fired while the stream was down are gone: read again what
+		// they would have changed
+		if m.ipc != nil {
+			cmds = append(cmds, m.ipc.FetchSessions())
+			if m.currentSessID != "" {
+				cmds = append(cmds, m.ipc.FetchHistory(m.currentSessID))
+			}
+		}
+
 	case DisconnectedMsg:
 		m.connected = false
 		if msg.Err != nil {

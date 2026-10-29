@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/Kayra-ML/rove/internal/config"
 	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Kayra-ML/rove/pkg/client"
 	"github.com/Kayra-ML/rove/pkg/protocol"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -77,6 +79,10 @@ type EventMsg struct {
 type ConnectedMsg struct{}
 type DisconnectedMsg struct{ Err error }
 
+// StreamGapMsg: the event stream came back without what fired while it was
+// down; what the screen shows from events must be read again.
+type StreamGapMsg struct{}
+
 type ProfilesMsg struct{ Profiles []types.AgentProfile }
 type LinkedSessionsMsg struct {
 	Links    []types.SessionLink
@@ -126,8 +132,19 @@ func (c *IPCClient) nextID() string {
 	return fmt.Sprintf("tui-%d", c.reqID.Add(1))
 }
 
+// callWait is how long an ordinary call may take to be answered (a
+// variable so tests can shorten it).
+var callWait = 30 * time.Second
+
 // Call sends a JSON-RPC request over the unix socket (or TCP tunnel) and returns the raw result.
 func (c *IPCClient) Call(method string, params any) (json.RawMessage, error) {
+	return c.call(method, params, callWait)
+}
+
+// call is Call with its own wait: a chat turn is answered when it is done,
+// which can be many minutes — after 30 seconds it was shown as failed while
+// its reply went on arriving.
+func (c *IPCClient) call(method string, params any, wait time.Duration) (json.RawMessage, error) {
 	raw, _ := json.Marshal(params)
 	req := protocol.Request{
 		ID:     c.nextID(),
@@ -143,7 +160,7 @@ func (c *IPCClient) Call(method string, params any) (json.RawMessage, error) {
 			return nil, fmt.Errorf("ipc tcp dial %s: %w", c.tcpAddr, err)
 		}
 		defer conn.Close()
-		_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+		_ = conn.SetDeadline(time.Now().Add(wait))
 		if err := json.NewEncoder(conn).Encode(req); err != nil {
 			return nil, fmt.Errorf("ipc encode: %w", err)
 		}
@@ -161,10 +178,10 @@ func (c *IPCClient) Call(method string, params any) (json.RawMessage, error) {
 	conn, err := net.DialTimeout("unix", c.ipcPath, 3*time.Second)
 	if err != nil {
 		// Fall back to HTTP
-		return c.callHTTP(req)
+		return c.callHTTP(req, wait)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(wait))
 
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return nil, fmt.Errorf("ipc encode: %w", err)
@@ -179,8 +196,8 @@ func (c *IPCClient) Call(method string, params any) (json.RawMessage, error) {
 	return resp.Result, nil
 }
 
-func (c *IPCClient) callHTTP(req protocol.Request) (json.RawMessage, error) {
-	hc := &http.Client{Timeout: 30 * time.Second}
+func (c *IPCClient) callHTTP(req protocol.Request, wait time.Duration) (json.RawMessage, error) {
+	hc := &http.Client{Timeout: wait}
 	b, _ := json.Marshal(req)
 	httpReq, err := http.NewRequest(http.MethodPost, c.httpBase+"/rpc", strings.NewReader(string(b)))
 	if err != nil {
@@ -360,46 +377,81 @@ func (c *IPCClient) CreateSession(agentID string) tea.Cmd {
 // SendMessage sends a chat message to a session.
 func (c *IPCClient) SendMessage(sessionID, content string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := c.Call(protocol.MethodSessionSend, map[string]any{
+		_, err := c.call(protocol.MethodSessionSend, map[string]any{
 			"sessionId": sessionID,
 			"content":   content,
-		})
+		}, protocol.MaxCallDuration)
 		return SendMsg{SessionID: sessionID, Err: err}
 	}
 }
 
-// SubscribeEvents starts an SSE subscription in the background and sends
-// EventMsg to the program via the provided send function.
+// Event stream reconnects: the first wait, and the longest.
+const (
+	streamRetry    = 500 * time.Millisecond
+	streamRetryMax = 8 * time.Second
+)
+
+// SubscribeEvents follows the daemon's event stream in the background and
+// hands its events to the program. A stream that drops — the daemon
+// restarted, a tunnel blinked — is opened again from the last event seen;
+// when the daemon cannot hand over what fired in between, the program is
+// told (StreamGapMsg) to read its screen again.
 func (c *IPCClient) SubscribeEvents(p *tea.Program) {
 	go func() {
-		hc := &http.Client{Timeout: 0}
-		url := c.httpBase + "/events?token=" + c.token
-		resp, err := hc.Get(url)
-		if err != nil {
-			p.Send(DisconnectedMsg{Err: err})
-			return
-		}
-		defer resp.Body.Close()
-
-		p.Send(ConnectedMsg{})
-		br := bufio.NewReader(resp.Body)
+		last, wait, again := "", streamRetry, false
 		for {
-			line, err := br.ReadString('\n')
-			if err != nil {
-				p.Send(DisconnectedMsg{Err: err})
-				return
+			opened, err := c.followEvents(&last, again, p.Send)
+			p.Send(DisconnectedMsg{Err: err})
+			if opened {
+				wait = streamRetry
 			}
-			line = trimSSEData(line)
-			if line == "" {
-				continue
+			again = true
+			time.Sleep(wait)
+			if wait *= 2; wait > streamRetryMax {
+				wait = streamRetryMax
 			}
-			var ev protocol.EventFrame
-			if err := json.Unmarshal([]byte(line), &ev); err != nil {
-				continue
-			}
-			p.Send(EventMsg{Frame: ev})
 		}
 	}()
+}
+
+// followEvents reads one stream until it ends. On a reconnect, a first
+// frame that is not a hello that resumed (an older daemon sends none) means
+// the events of the gap are gone.
+func (c *IPCClient) followEvents(last *string, reconnect bool, send func(tea.Msg)) (opened bool, err error) {
+	u := c.httpBase + "/events?token=" + url.QueryEscape(c.token)
+	if *last != "" {
+		u += "&since=" + url.QueryEscape(*last)
+	}
+	resp, err := (&http.Client{}).Get(u)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("events: %s", resp.Status)
+	}
+	send(ConnectedMsg{})
+	first := true
+	return true, client.ReadFrames(resp.Body, func(f client.Frame) {
+		if first {
+			first = false
+			var h client.Hello
+			resumed := f.Name == "hello" && json.Unmarshal([]byte(f.Data), &h) == nil && h.Resumed
+			if reconnect && !resumed {
+				send(StreamGapMsg{})
+			}
+		}
+		if f.Name != "" {
+			return
+		}
+		if f.ID != "" {
+			*last = f.ID
+		}
+		var ev protocol.EventFrame
+		if json.Unmarshal([]byte(f.Data), &ev) == nil {
+			send(EventMsg{Frame: ev})
+		}
+	})
 }
 
 // FetchProfiles fetches profile list via profile.list RPC.
@@ -523,12 +575,4 @@ func (c *IPCClient) RestoreCheckpoint(sessionID string) tea.Cmd {
 type AutomationsMsg struct {
 	Jobs []types.AutomationJob
 	Err  error
-}
-
-func trimSSEData(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "data:") {
-		s = strings.TrimSpace(s[5:])
-	}
-	return s
 }

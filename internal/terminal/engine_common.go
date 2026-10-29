@@ -44,6 +44,20 @@ func (e *Engine) Detach(id types.ID) error {
 	return nil
 }
 
+// Close kills every shell the engine started, when the daemon stops: they
+// belong to it, and one left behind would run on with nobody attached.
+func (e *Engine) Close() {
+	e.mu.Lock()
+	ids := make([]types.ID, 0, len(e.sess))
+	for id := range e.sess {
+		ids = append(ids, id)
+	}
+	e.mu.Unlock()
+	for _, id := range ids {
+		_ = e.Kill(id)
+	}
+}
+
 func (e *Engine) List() []types.TerminalSession {
 	e.mu.Lock()
 	defer e.mu.Unlock()

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Kayra-ML/rove/internal/config"
@@ -44,14 +45,19 @@ func FromEnv() (*Client, error) {
 		HTTP:   "http://" + cfg.ListenHTTP,
 		IPC:    cfg.ListenIPC,
 		Token:  tok,
-		client: &http.Client{Timeout: 5 * time.Minute},
+		client: &http.Client{Timeout: callTimeout},
 	}, nil
 }
+
+// callTimeout is how long a call over HTTP waits for its answer: as long
+// as the daemon may take to give one, plus the trip. Five minutes cut off
+// a long chat turn on a server — its work done, its answer lost.
+const callTimeout = protocol.MaxCallDuration + time.Minute
 
 // NewHTTP is a client for a daemon reached over HTTP only — one on a
 // server, through an SSH tunnel.
 func NewHTTP(base, token string) *Client {
-	return &Client{HTTP: base, Token: token, client: &http.Client{Timeout: 5 * time.Minute}}
+	return &Client{HTTP: base, Token: token, client: &http.Client{Timeout: callTimeout}}
 }
 
 // RemoteError is an error the daemon returned for a request it handled.
@@ -123,17 +129,57 @@ func (c *Client) callIPC(req protocol.Request) (json.RawMessage, error) {
 	return out.Result, nil
 }
 
+// Events follows the daemon's event stream until it ends, handing each
+// event to handler; the stream's own frames (hello, ping) are skipped.
 func (c *Client) Events(filter string, handler func(protocol.EventFrame)) error {
 	url := c.HTTP + "/events?token=" + c.Token
 	if filter != "" {
 		url += "&filter=" + filter
 	}
-	resp, err := c.client.Get(url)
+	// a stream lasts as long as it is followed: no timeout on it
+	resp, err := http.Get(url)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	br := bufio.NewReader(resp.Body)
+	return ReadFrames(resp.Body, func(f Frame) {
+		if f.Name != "" {
+			return
+		}
+		var ev struct {
+			Type    string          `json:"type"`
+			Topic   string          `json:"topic"`
+			Payload json.RawMessage `json:"payload"`
+		}
+		if json.Unmarshal([]byte(f.Data), &ev) != nil {
+			return
+		}
+		handler(protocol.EventFrame{Type: ev.Type, Topic: ev.Topic, Payload: ev.Payload})
+	})
+}
+
+// Frame is one frame of the daemon's event stream: an event (Name empty),
+// with the id a client resumes after (?since=), or one of the stream's own
+// ("hello" first, then "ping" while idle).
+type Frame struct {
+	Name string
+	ID   string
+	Data string
+}
+
+// Hello is a stream's first frame: where it starts, and whether it resumed
+// after the id it was asked to — nothing was missed.
+type Hello struct {
+	Epoch   string `json:"epoch"`
+	Seq     uint64 `json:"seq"`
+	Resumed bool   `json:"resumed"`
+}
+
+// ReadFrames reads an event stream frame by frame until it ends (nil at
+// its end, the read error otherwise). Comments are skipped.
+func ReadFrames(r io.Reader, fn func(Frame)) error {
+	br := bufio.NewReader(r)
+	var f Frame
 	for {
 		line, err := br.ReadString('\n')
 		if err != nil {
@@ -142,37 +188,28 @@ func (c *Client) Events(filter string, handler func(protocol.EventFrame)) error 
 			}
 			return err
 		}
-		line = trimData(line)
-		if line == "" {
-			continue
+		line = strings.TrimRight(line, "\r\n")
+		switch {
+		case line == "":
+			if f.Data != "" || f.Name != "" {
+				fn(f)
+			}
+			f = Frame{}
+		case strings.HasPrefix(line, ":"):
+		default:
+			k, v, _ := strings.Cut(line, ":")
+			v = strings.TrimPrefix(v, " ")
+			switch k {
+			case "event":
+				f.Name = v
+			case "id":
+				f.ID = v
+			case "data":
+				if f.Data != "" {
+					f.Data += "\n"
+				}
+				f.Data += v
+			}
 		}
-		var ev struct {
-			Type    string          `json:"type"`
-			Topic   string          `json:"topic"`
-			Payload json.RawMessage `json:"payload"`
-		}
-		if err := json.Unmarshal([]byte(line), &ev); err != nil {
-			continue
-		}
-		handler(protocol.EventFrame{Type: ev.Type, Topic: ev.Topic, Payload: ev.Payload})
 	}
-}
-
-func trimData(s string) string {
-	s = stringBytesTrim(s)
-	if len(s) >= 5 && s[:5] == "data:" {
-		return stringBytesTrim(s[5:])
-	}
-	return ""
-}
-
-func stringBytesTrim(s string) string {
-	i, j := 0, len(s)
-	for i < j && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t') {
-		i++
-	}
-	for j > i && (s[j-1] == ' ' || s[j-1] == '\n' || s[j-1] == '\r' || s[j-1] == '\t') {
-		j--
-	}
-	return s[i:j]
 }

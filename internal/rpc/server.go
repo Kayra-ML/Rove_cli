@@ -35,9 +35,20 @@ type Server struct {
 	mu   sync.Mutex
 	ln   net.Listener
 	http *http.Server
+	// OnShutdown is what the shutdown method does: the daemon stops the way
+	// a SIGTERM stops it (store closed, MCP servers and terminals ended).
+	// A server without one exits the process.
+	OnShutdown func()
+	// done is closed by Close; event streams end with it
+	done      chan struct{}
+	closeOnce sync.Once
+	// hub numbers the bus's events for the streams (see stream.go)
+	hub *hub
 }
 
-func New(app *core.App) *Server { return &Server{app: app} }
+func New(app *core.App) *Server {
+	return &Server{app: app, done: make(chan struct{}), hub: newHub(app.Bus)}
+}
 
 // maxBodyBytes caps incoming request bodies to 4 MiB to prevent OOM DoS.
 const maxBodyBytes = 4 << 20 // 4 MiB
@@ -48,12 +59,12 @@ func (s *Server) ServeHTTPOn(ln net.Listener) error {
 	addr := ln.Addr().String()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, s.app.Health())
+		writeJSON(w, http.StatusOK, s.health())
 	})
 	mux.HandleFunc("/rpc", s.handleHTTPRPC)
 	mux.HandleFunc("/webhook/", s.handleWebhookTrigger)
 	mux.HandleFunc("/events", s.handleSSE)
-	s.http = &http.Server{
+	srv := &http.Server{
 		Addr:    addr,
 		Handler: withCORS(mux),
 		// Reasonable timeouts — prevents slow-loris and hung connections.
@@ -62,7 +73,17 @@ func (s *Server) ServeHTTPOn(ln net.Listener) error {
 		WriteTimeout:      httpWriteTimeout,
 		IdleTimeout:       60 * time.Second,
 	}
-	return s.http.Serve(ln)
+	s.mu.Lock()
+	select {
+	case <-s.done:
+		s.mu.Unlock()
+		_ = ln.Close()
+		return http.ErrServerClosed
+	default:
+	}
+	s.http = srv
+	s.mu.Unlock()
+	return srv.Serve(ln)
 }
 
 func (s *Server) ServeIPC(path string) error {
@@ -78,7 +99,17 @@ func (s *Server) ServeIPC(path string) error {
 		_ = ln.Close()
 		return err
 	}
+	// Close may have come first (a daemon stopped right after it started):
+	// a listener it never saw would keep Accept, and the daemon's Stop,
+	// waiting for ever
 	s.mu.Lock()
+	select {
+	case <-s.done:
+		s.mu.Unlock()
+		_ = ln.Close()
+		return nil
+	default:
+	}
 	s.ln = ln
 	s.mu.Unlock()
 	for {
@@ -94,6 +125,10 @@ func (s *Server) ServeIPC(path string) error {
 }
 
 func (s *Server) Close() error {
+	s.closeOnce.Do(func() {
+		close(s.done)
+		s.hub.close()
+	})
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var err error
@@ -103,7 +138,10 @@ func (s *Server) Close() error {
 	if s.http != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		err = s.http.Shutdown(ctx)
+		if err = s.http.Shutdown(ctx); err != nil {
+			// a call still being answered is cut off, not waited for
+			_ = s.http.Close()
+		}
 	}
 	return err
 }
@@ -129,7 +167,7 @@ func (s *Server) serveConn(c net.Conn) {
 
 // rpcWriteLimit bounds how long one call may take to answer over HTTP;
 // httpWriteTimeout is the server's default for everything else.
-const rpcWriteLimit = time.Hour
+const rpcWriteLimit = protocol.MaxCallDuration
 
 var httpWriteTimeout = 120 * time.Second
 
@@ -213,33 +251,58 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	// The desktop app multiplexes all its subscriptions over one unfiltered
+	// stream; a client coming back says where it was (see stream.go).
+	since := r.URL.Query().Get("since")
+	if since == "" {
+		since = r.Header.Get("Last-Event-ID")
+	}
+	c, replay, seq, resumed := s.hub.join(r.URL.Query().Get("filter"), since)
+	defer s.hub.leave(c)
 	// Flush headers immediately. Without an initial frame, clients block inside
 	// http.Get until the first real event and falsely remain "offline".
 	fmt.Fprint(w, ": connected\n\n")
-	flusher.Flush()
-	filter := r.URL.Query().Get("filter")
-	// The desktop app multiplexes all its subscriptions over one unfiltered
-	// stream, so a burst (a streamed reply, terminal output) must fit here
-	// or events are dropped.
-	ch := make(chan types.Event, 1024)
-	unsub := s.app.Bus.Subscribe(filter, func(ev types.Event) {
-		select {
-		case ch <- ev:
-		default:
+	fmt.Fprintf(w, "event: hello\ndata: {\"epoch\":%q,\"seq\":%d,\"resumed\":%t}\n\n", s.hub.epoch, seq, resumed)
+	for _, f := range replay {
+		if writeFrame(w, s.hub.frameID(f.seq), f.data) != nil {
+			return
 		}
-	})
-	defer unsub()
+	}
+	flusher.Flush()
+	ping := time.NewTicker(pingEvery)
+	defer ping.Stop()
 	ctx := r.Context()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case ev := <-ch:
-			payload, _ := json.Marshal(ev)
-			fmt.Fprintf(w, "data: %s\n\n", payload)
+		case <-s.done:
+			return
+		case <-c.gone:
+			// fell behind: the client comes back with since and gets the rest
+			return
+		case f := <-c.ch:
+			if writeFrame(w, s.hub.frameID(f.seq), f.data) != nil {
+				return
+			}
+			flusher.Flush()
+		case <-ping.C:
+			cur, _ := s.hub.current()
+			if _, err := fmt.Fprintf(w, "event: ping\ndata: {\"seq\":%d}\n\n", cur); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}
+}
+
+// health is the core's, with the event streams this server has open.
+func (s *Server) health() map[string]any {
+	h := s.app.Health()
+	seq, clients := s.hub.current()
+	h["streams"] = clients
+	h["eventSeq"] = seq
+	return h
 }
 
 // tokenOK compares in constant time, so the answer's timing says nothing
@@ -317,9 +380,9 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 	a := s.app
 	switch req.Method {
 	case protocol.MethodPing:
-		return core.MustJSON(a.Health()), nil
+		return core.MustJSON(s.health()), nil
 	case protocol.MethodUsageGet:
-		return core.MustJSON(a.Health()), nil
+		return core.MustJSON(s.health()), nil
 	case protocol.MethodUsageReport:
 		var p struct {
 			Days int `json:"days"`
@@ -908,13 +971,17 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 		}
 		return core.MustJSON(map[string]any{"content": string(b)}), nil
 	case protocol.MethodShutdown:
+		stop := s.OnShutdown
 		go func() {
+			// the answer goes out first
 			time.Sleep(100 * time.Millisecond)
+			if stop != nil {
+				stop()
+				return
+			}
 			os.Exit(0)
 		}()
 		return core.MustJSON(map[string]any{"ok": true}), nil
-
-	// ── Harness policy ────────────────────────────────────────────────────────
 
 	case protocol.MethodAgentDelete:
 		var p struct {
@@ -1386,6 +1453,11 @@ func (s *Server) handle(ctx context.Context, req protocol.Request) (json.RawMess
 
 	case protocol.MethodModelList, protocol.MethodSessionModel, protocol.MethodSessionSetModel:
 		return s.handleModels(ctx, req)
+
+	case protocol.MethodGoalCancel, protocol.MethodGoalVerdicts,
+		protocol.MethodHarnessCatalog, protocol.MethodHarnessGet, protocol.MethodHarnessSet,
+		protocol.MethodHarnessCompose, protocol.MethodHarnessMutations:
+		return s.handleHarness(ctx, req)
 
 	case protocol.MethodEditsList, protocol.MethodEditsAccept, protocol.MethodEditsRevert,
 		protocol.MethodSessionCompact, protocol.MethodSessionSetEffort, protocol.MethodWorkspaceRules:

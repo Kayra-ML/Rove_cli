@@ -129,13 +129,73 @@ export type TerminalSession = {
   pid: number;
   ssh?: SSHTarget;
 };
+export type GoalStatus = "pending" | "running" | "done" | "blocked" | "failed" | "canceled";
+export type GateResult = { name: string; passed: boolean; exitCode: number; output: string; error?: string };
+export type JudgeVerdict = {
+  id: ID;
+  goalId: ID;
+  decision: "DONE" | "CONTINUE" | "BLOCKED";
+  reason: string;
+  gateResults?: GateResult[] | null;
+  iteration: number;
+  createdAt: string;
+};
+export type QualityGate = { name: string; kind: "build" | "test" | "lint" | "custom"; command: string; expectExitZero: boolean; timeoutSeconds?: number };
 export type Goal = {
   id: ID;
   title: string;
-  status: string;
+  description?: string;
+  status: GoalStatus | string;
   iteration: number;
   workspaceId?: ID;
   agentId?: ID;
+  // the chat the goal works in, when it has one
+  sessionId?: ID;
+  completionContract?: { criteria: string[] | null; qualityGates?: QualityGate[] | null; maxIterations: number };
+  lastVerdict?: JudgeVerdict | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+// A goal's harness (internal/harness): five bitmasks of tactics, composed
+// automatically or picked by hand, and what they come to when it runs.
+export type HarnessCategoryKey = "context" | "execution" | "tools" | "verify" | "recovery";
+export type HarnessProfile = {
+  mode: "auto" | "manual" | "";
+  context: number;
+  execution: number;
+  tools: number;
+  verify: number;
+  recovery: number;
+  contextBudgetTokens?: number;
+  maxToolConcurrency?: number;
+  composerReason?: string;
+  allowedTools?: string[] | null;
+  fallbackModelRefs?: string[] | null;
+  version: number;
+};
+export type HarnessCategory = { key: HarnessCategoryKey; tactics: { key: string; bit: number }[] };
+export type HarnessResolved = {
+  maxTurns: number;
+  contextBudget: number;
+  toolConcurrency: number;
+  allowedTools: string[] | null;
+  tools: string;
+  verify: string;
+  recovery: string[];
+  recoveryNote: string;
+  maxRetries: number;
+};
+export type HarnessCheckpoint = { goalId: ID; iteration: number; progress?: string[] | null; lastSummary?: string; savedAt: string };
+export type HarnessMutation = { iteration: number; reason: string; old: HarnessProfile; new: HarnessProfile; result?: string; at: string };
+export type HarnessView = {
+  goalId: ID;
+  profile: HarnessProfile;
+  explain: string;
+  resolved: HarnessResolved;
+  running: boolean;
+  checkpoint?: HarnessCheckpoint | null;
+  mutations: HarnessMutation[] | null;
 };
 
 export type AutomationJob = {

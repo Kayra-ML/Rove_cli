@@ -80,6 +80,17 @@ func TestMonitorHandsOnlyNewItems(t *testing.T) {
 	if n := e.Tick(ctx, t0.Add(18*time.Minute)); n != 1 {
 		t.Fatal("the waiting line gave no task")
 	}
+	// that task finishes in the background; until it has, the monitor
+	// (rightly) does not check, and the checks below would not run
+	waitFor(t, func() bool {
+		x, _ := e.Tasks(ctx, ali.ID, 0)
+		for _, task := range x {
+			if task.Status != StatusDone {
+				return false
+			}
+		}
+		return len(x) == 2
+	})
 	// nothing new: no task, no tokens
 	if n := e.Tick(ctx, t0.Add(24*time.Minute)); n != 0 {
 		t.Fatal("old lines gave a task")

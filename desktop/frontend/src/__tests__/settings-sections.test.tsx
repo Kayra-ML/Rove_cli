@@ -52,7 +52,7 @@ describe("settings: every section in cards", () => {
     render(<Settings onClose={() => {}} initialSection="goals" />);
     await screen.findByText("README");
     const form = document.querySelector(".split-body .form-stack")!;
-    expect(Array.from(form.querySelectorAll("label")).map((l) => l.textContent)).toEqual(["Başlık", "Kriterler"]);
+    expect(Array.from(form.querySelectorAll("label")).map((l) => l.textContent)).toEqual(["Başlık", "Kriterler", "En fazla tur", "Kontrol komutu"]);
     expect(form.querySelector("button.primary")).toBeTruthy();
     fireEvent.change(form.querySelectorAll("input")[0], { target: { value: "x" } });
   });

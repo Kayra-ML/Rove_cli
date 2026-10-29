@@ -15,6 +15,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -233,6 +234,23 @@ func goTarget(osName, arch string) (string, string, error) {
 // shq quotes a string for a POSIX shell.
 func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
+// killPattern is a pkill -f pattern for a command line that does not match
+// the shell running it. That shell's own command line (sh -c '<script>')
+// holds the pattern, so a plain one killed the install script along with
+// the old daemon. "[r]ovecode" matches "rovecode" but not its own text.
+func killPattern(cmdline string) string {
+	q := regexp.QuoteMeta(cmdline)
+	i := strings.LastIndex(q, "/") + 1
+	if i < len(q) && isAlnum(q[i]) {
+		return q[:i] + "[" + q[i:i+1] + "]" + q[i+1:]
+	}
+	return q
+}
+
+func isAlnum(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
 // setup makes the daemon reachable: installs or updates rovecode, starts
 // the daemon, reads the token and opens the forward.
 func (c *Conn) setup(ctx context.Context, progress func(string), readyWithin time.Duration) (State, error) {
@@ -265,7 +283,7 @@ func (c *Conn) setup(ctx context.Context, progress func(string), readyWithin tim
 		// an older daemon must go before the new one starts
 		stopOld := ""
 		if bin != "" {
-			stopOld = "pkill -u \"$(id -u)\" -f " + shq(bin+" daemon") + " 2>/dev/null || true; sleep 1; "
+			stopOld = "pkill -u \"$(id -u)\" -f " + shq(killPattern(bin+" daemon")) + " 2>/dev/null || true; sleep 1; "
 		}
 		script := stopOld + `set -e; mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/rovecode.new"; chmod 0755 "$HOME/.local/bin/rovecode.new"

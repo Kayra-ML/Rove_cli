@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,11 +62,16 @@ func TestSecondDaemonOnSameDataDirIsRefused(t *testing.T) {
 	dup := cfg
 	dup.ListenHTTP = "127.0.0.1:17432"
 	dup.ListenIPC = socks + "/b.sock"
+	began := time.Now()
 	if d2, err := Start(dup); !errors.Is(err, ErrAlreadyRunning) {
 		if d2 != nil {
 			d2.Stop()
 		}
 		t.Fatalf("second daemon: err = %v", err)
+	}
+	// the first one answers: it is running, not stopping, so no wait
+	if time.Since(began) > 2*time.Second {
+		t.Fatalf("refusing took %v", time.Since(began))
 	}
 	// the first keeps its socket
 	if _, err := os.Stat(cfg.ListenIPC); err != nil {
@@ -101,4 +108,83 @@ func TestStartFailsWhenPortIsTaken(t *testing.T) {
 		t.Fatalf("data dir still locked after failed start: %v", err)
 	}
 	d.Stop()
+}
+
+// The shutdown method stops the daemon the way a signal does: Done closes,
+// and Stop (safe to call twice) closes the core and lets go of the data dir.
+func TestShutdownMethodStopsCleanly(t *testing.T) {
+	dir, socks := t.TempDir(), shortSockDir(t)
+	cfg := config.Config{DataDir: dir, ListenHTTP: "127.0.0.1:17434", ListenIPC: socks + "/s.sock"}
+	d, err := Start(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"method":"shutdown","token":"` + d.app.Token + `"}`
+	resp, err := http.Post("http://"+cfg.ListenHTTP+"/rpc", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	select {
+	case <-d.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("the shutdown method did not reach the daemon")
+	}
+	if err := d.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Stop(); err != nil {
+		t.Fatalf("second Stop: %v", err)
+	}
+	if resp, err := http.Get("http://" + cfg.ListenHTTP + "/health"); err == nil {
+		resp.Body.Close()
+		t.Fatal("still serving after Stop")
+	}
+	d2, err := Start(cfg)
+	if err != nil {
+		t.Fatalf("start after a clean stop: %v", err)
+	}
+	d2.Stop()
+}
+
+// A daemon still putting things away holds the data dir without serving;
+// one started meanwhile waits for it rather than failing.
+func TestStartWaitsForAStoppingDaemon(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no data dir lock on windows")
+	}
+	dir, socks := t.TempDir(), shortSockDir(t)
+	release, err := lockDataDir(dir, "127.0.0.1:1") // a holder that serves nowhere
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { time.Sleep(300 * time.Millisecond); release() }()
+	began := time.Now()
+	d, err := Start(config.Config{DataDir: dir, ListenHTTP: "127.0.0.1:17435", ListenIPC: socks + "/w.sock"})
+	if err != nil {
+		t.Fatalf("start while the old daemon stopped: %v", err)
+	}
+	d.Stop()
+	if time.Since(began) < 300*time.Millisecond {
+		t.Fatal("started without waiting for the data dir")
+	}
+}
+
+// A daemon stopped the moment it has started still stops: its IPC listener
+// may come up after Stop began, and must not keep it waiting.
+func TestStopRightAfterStart(t *testing.T) {
+	for i := 0; i < 5; i++ {
+		dir, socks := t.TempDir(), shortSockDir(t)
+		d, err := Start(config.Config{DataDir: dir, ListenHTTP: "127.0.0.1:17436", ListenIPC: socks + "/q.sock"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stopped := make(chan struct{})
+		go func() { _ = d.Stop(); close(stopped) }()
+		select {
+		case <-stopped:
+		case <-time.After(10 * time.Second):
+			t.Fatal("Stop hung right after Start")
+		}
+	}
 }

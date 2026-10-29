@@ -80,3 +80,49 @@ func TestResizeAndList(t *testing.T) {
 	}
 	_ = replay
 }
+
+// A shell outlives the call that opened it. Over HTTP that call's context
+// ends as soon as it is answered, which used to kill the shell with it.
+func TestShellOutlivesTheCallThatSpawnedIt(t *testing.T) {
+	e := New(nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	sess, err := e.Spawn(ctx, SpawnOpts{Command: []string{"/bin/sh", "-c", "sleep 5"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Kill(sess.ID)
+	cancel() // the RPC answered
+	time.Sleep(300 * time.Millisecond)
+	for _, s := range e.List() {
+		if s.ID == sess.ID && s.Status != types.TermRunning {
+			t.Fatalf("shell %s after its call ended", s.Status)
+		}
+	}
+}
+
+func TestCloseKillsEveryShell(t *testing.T) {
+	e := New(nil, nil)
+	var ids []types.ID
+	for i := 0; i < 2; i++ {
+		sess, err := e.Spawn(context.Background(), SpawnOpts{Command: []string{"/bin/sh", "-c", "sleep 30"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, sess.ID)
+	}
+	e.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		running := 0
+		for _, s := range e.List() {
+			if s.Status == types.TermRunning {
+				running++
+			}
+		}
+		if running == 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("shells %v still running after Close", ids)
+}

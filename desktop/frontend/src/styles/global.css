@@ -3342,3 +3342,47 @@ g.on .usage-hit { fill: color-mix(in srgb, var(--text) 5%, transparent); }
 .sa-detail { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-sunken); font-size: 12px; }
 .sa-detail .sa-dot { margin-top: 0; }
 .sa-detail .sa-line { white-space: pre-wrap; max-height: 6.5em; overflow: auto; }
+
+/* Goals and their harness (Settings → Goals) */
+.goal-item { display: flex; flex-direction: column; gap: 1px; }
+.split-body .goal-item + .goal-item { border-top: 1px solid var(--border); }
+.goal-row .meta > span { display: block; margin-top: 2px; }
+.goal-row button { font-size: 11px; white-space: nowrap; }
+.pip.goal-pip.blocked, .pip.goal-pip.failed { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 18%, transparent); }
+.pip.goal-pip.canceled { background: var(--warn); }
+.goal-row .meta .goal-status { color: var(--text); font-weight: 550; }
+.goal-row .meta .goal-status.running { color: var(--accent-2); }
+.goal-row .meta .goal-status.done { color: var(--ok); }
+.goal-row .meta .goal-status.blocked, .goal-row .meta .goal-status.failed { color: var(--bad); }
+.goal-row .meta .goal-status.canceled { color: var(--warn); }
+.goal-detail { background: var(--bg-sunken); padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+.harness-head { display: flex; align-items: center; gap: 10px; }
+.harness-head button { margin-left: auto; font-size: 11px; }
+.harness-mode { font-size: 11px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--border); color: var(--muted); }
+.harness-mode.auto { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.harness-mode.manual { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.harness-hint { margin: 0; color: var(--faint); font-size: 12px; }
+.tactic-grid { display: flex; flex-direction: column; gap: 6px; }
+.tactic-row, .harness-effect { display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: start; }
+.tactic-cat { font-size: 11px; color: var(--muted); letter-spacing: 0.04em; padding-top: 4px; }
+.tactic-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.tactic { font-size: 11.5px; padding: 3px 10px; border-radius: 99px; color: var(--muted); background: transparent; }
+.tactic.on { color: var(--text); background: color-mix(in srgb, var(--accent) 18%, var(--bg-raised)); border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.tactic:disabled { opacity: 1; }
+.tactic:disabled:not(.on) { opacity: 0.5; }
+.harness-effect > span:last-child { font-size: 12px; padding-top: 3px; }
+.harness-section h4 { margin: 6px 0; font-size: 12px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+.harness-sub { font-weight: 400; color: var(--faint); font-size: 11px; }
+.harness-progress, .mutation-list, .verdict-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.harness-progress li { color: var(--muted); font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.mutation-list li, .verdict-list li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.mutation-it { color: var(--faint); font-family: var(--mono); font-size: 11px; min-width: 28px; }
+.mutation-reason { color: var(--text); flex: 1; min-width: 12em; overflow-wrap: anywhere; }
+.mutation-diff { display: inline-flex; gap: 6px; flex-wrap: wrap; font-size: 11.5px; }
+.mutation-diff .plus { color: var(--ok); }
+.mutation-diff .minus { color: var(--bad); }
+.verdict { font-size: 10px; font-weight: 650; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 4px; background: var(--bg-hover); }
+.verdict.done { color: var(--ok); }
+.verdict.continue { color: var(--accent); }
+.verdict.blocked { color: var(--bad); }
+.verdict-gates { color: var(--bad); font-size: 11px; }

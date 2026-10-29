@@ -4,9 +4,16 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/Kayra-ML/rove/internal/agent"
 	"github.com/Kayra-ML/rove/internal/eventbus"
+	"github.com/Kayra-ML/rove/internal/goal"
+	"github.com/Kayra-ML/rove/internal/judge"
+	"github.com/Kayra-ML/rove/internal/provider"
+	"github.com/Kayra-ML/rove/internal/session"
 	"github.com/Kayra-ML/rove/internal/store"
+	"github.com/Kayra-ML/rove/internal/tool"
 	"github.com/Kayra-ML/rove/internal/types"
 )
 
@@ -107,4 +114,67 @@ func TestDefaultEverySeconds(t *testing.T) {
 	if j.EverySeconds != 30 || j.Kind != types.AutoDriveGoals {
 		t.Fatalf("%+v", j)
 	}
+}
+
+// blocking answers once released; until then a goal driven with it runs.
+type blocking struct{ release chan struct{} }
+
+func (blocking) Kind() types.ProviderKind { return types.ProviderFake }
+func (blocking) Name() string             { return "blocking" }
+func (b blocking) Complete(ctx context.Context, _ provider.ChatRequest) (<-chan provider.ChatDelta, error) {
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	ch := make(chan provider.ChatDelta, 2)
+	ch <- provider.ChatDelta{Content: "done"}
+	ch <- provider.ChatDelta{Done: true}
+	close(ch)
+	return ch, nil
+}
+
+// A tick starts pending goals and returns; it does not hold the loop (and
+// every other job) for as long as a goal runs.
+func TestDriveGoalsDoesNotHoldTheTick(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "a.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	bus := eventbus.New()
+	t.Cleanup(bus.Close)
+	ctx := context.Background()
+	m := blocking{release: make(chan struct{})}
+	r := provider.NewRouter()
+	r.Register("blocking", m)
+	sess := session.New(s, bus)
+	rt := agent.New(s, bus, sess, nil, r, tool.New(nil))
+	ag, _ := rt.Upsert(ctx, types.Agent{Name: "a", Provider: "blocking", Model: "m"})
+	goals := goal.New(s, bus, rt, judge.New(nil), nil)
+	t.Cleanup(goals.Close)
+	g, _ := goals.Create(ctx, types.Goal{Title: "slow", AgentID: ag.ID, CompletionContract: types.CompletionContract{Criteria: []string{"x"}}})
+
+	e := New(s, bus, goals)
+	if _, err := e.Upsert(ctx, types.AutomationJob{Name: "drive", Kind: types.AutoDriveGoals, EverySeconds: 1, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan []types.AutomationJob, 1)
+	go func() { out, _ := e.Tick(ctx); done <- out }()
+	select {
+	case out := <-done:
+		if len(out) != 1 || out[0].LastResult != "started 1" {
+			t.Fatalf("tick = %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the tick waited for the goal to finish")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for !goals.Running(g.ID) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !goals.Running(g.ID) {
+		t.Fatal("the goal was not started")
+	}
+	close(m.release)
 }

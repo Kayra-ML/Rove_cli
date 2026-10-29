@@ -455,6 +455,11 @@ func (s *Store) PutKV(ctx context.Context, k, v string) error {
 	return err
 }
 
+func (s *Store) DeleteKV(ctx context.Context, k string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM kv WHERE k=?`, k)
+	return err
+}
+
 func (s *Store) GetKV(ctx context.Context, k string) (string, error) {
 	var v string
 	err := s.db.QueryRowContext(ctx, `SELECT v FROM kv WHERE k=?`, k).Scan(&v)
@@ -705,7 +710,12 @@ func (s *Store) TruncateMessages(ctx context.Context, sessionID types.ID, keep i
 }
 
 func (s *Store) DeleteGoal(ctx context.Context, id types.ID) error {
+	// what the goal left behind goes with it: its checkpoint, the
+	// reviewer's verdicts, the harness's mutations and its resume count
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM goal_checkpoints WHERE goal_id=?`, id)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM verdicts WHERE goal_id=?`, id)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM harness_mutations WHERE goal_id=?`, id)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM kv WHERE k=?`, "goal.resumes."+string(id))
 	_, err := s.db.ExecContext(ctx, `DELETE FROM goals WHERE id=?`, id)
 	return err
 }

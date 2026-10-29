@@ -135,6 +135,9 @@ func ensureDaemon() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
+	// a session of its own: the daemon outlives the app (and a terminal
+	// the app was opened from), its goals with it
+	daemon.Detach(cmd)
 	if err := cmd.Start(); err != nil {
 		return
 	}

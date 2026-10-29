@@ -5,13 +5,14 @@ import { toast } from "~/lib/toast";
 import { notify, notifyEnabled, setNotifyEnabled } from "~/lib/notify";
 import { useSkills, useProviders, useGoals, useWorkspaces } from "~/hooks/useApi";
 import { ConnectPicker } from "./ConnectPicker";
-import type { Goal, InstalledSkill, Provider, SSHTarget, TerminalSession, Workspace } from "~/lib/types";
+import type { InstalledSkill, Provider, SSHTarget, TerminalSession, Workspace } from "~/lib/types";
 import { AgentRoster, loadSSHHosts, removeSSHHost, saveSSHHost } from "./Popovers";
 import { Permissions } from "./Permissions";
 import { Automation } from "./Automation";
 import { Memory } from "./Memory";
 import { Icon } from "./Icons";
 import { UsagePanel } from "./UsagePanel";
+import { GoalsPanel } from "./GoalsPanel";
 import { PALETTES, THEMES, applyTheme, applyLang, type Palette, type ThemeId } from "~/lib/themes";
 import { LANGS, t, getLang, type Lang } from "~/lib/i18n";
 
@@ -82,8 +83,6 @@ export function Settings({ onClose, onSelectWorkspace, onOpenShell, initialSecti
   const [provBusy, setProvBusy] = useState<string | null>(null); // "new" or a provider id
   const [provErr, setProvErr] = useState("");
   const [notifyOn, setNotifyOn] = useState(notifyEnabled);
-  const [goalTitle, setGoalTitle] = useState("");
-  const [goalCriteria, setGoalCriteria] = useState("");
 
   // SSH: Settings owns the saved host list; connecting starts the shell and
   // hands it to Terminal mode, then closes here.
@@ -436,68 +435,7 @@ export function Settings({ onClose, onSelectWorkspace, onOpenShell, initialSecti
               </>
             )}
 
-            {section === "goals" && (
-              <>
-                <h2>{t("goals", lang)}</h2>
-                <p className="split-lead">{t("goalsLead", lang)}</p>
-                {goals.length === 0 ? (
-                  <div className="empty">
-                    <strong>{t("goalsEmpty", lang)}</strong>
-                    <p>{t("goalsEmptyHint", lang)}</p>
-                  </div>
-                ) : (
-                  <div className="row-list" style={{ marginBottom: 18 }}>
-                    {goals.map((g: Goal) => (
-                      <div key={g.id} className="row">
-                        <span className={`pip${g.status === "running" ? " run" : g.status === "done" ? " on" : ""}`} />
-                        <div className="meta">
-                          <strong>{g.title}</strong>
-                          <span>{g.status} · iter {g.iteration}</span>
-                        </div>
-                        <button
-                          className="primary"
-                          style={{ fontSize: 11 }}
-                          disabled={g.status === "running"}
-                          onClick={() => void rpc("goal.drive", {
-                            id: g.id,
-                            sessionId: sessionId ?? "",
-                            workspace: workspace?.path ?? "",
-                          }).then(() => reloadGoals())}
-                        >
-                          ▶
-                        </button>
-                        <button className="danger-btn" style={{ fontSize: 11 }} onClick={() => void rpc("goal.delete", { id: g.id }).then(() => reloadGoals())}>{t("delete", lang)}</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="form-stack">
-                  <label>{t("goalTitle", lang)}</label>
-                  <input value={goalTitle} onChange={(e) => setGoalTitle(e.target.value)} placeholder={t("goalTitleHint", lang)} />
-                  <label>{t("goalCriteria", lang)}</label>
-                  <input value={goalCriteria} onChange={(e) => setGoalCriteria(e.target.value)} placeholder={t("goalCriteriaHint", lang)} />
-                <button
-                  className="primary"
-                  onClick={async () => {
-                    if (!goalTitle.trim()) return;
-                    await rpc("goal.create", {
-                      title: goalTitle.trim(),
-                      workspaceId: workspace?.id ?? "",
-                      completionContract: {
-                        criteria: goalCriteria.split(",").map((s) => s.trim()).filter(Boolean),
-                        maxIterations: 8,
-                      },
-                    });
-                    setGoalTitle("");
-                    setGoalCriteria("");
-                    await reloadGoals();
-                  }}
-                >
-                  {t("create", lang)}
-                </button>
-                </div>
-              </>
-            )}
+            {section === "goals" && <GoalsPanel workspace={workspace} sessionId={sessionId} onChange={reloadGoals} />}
 
             {section === "permissions" && <Permissions />}
 

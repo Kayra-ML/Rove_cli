@@ -48,10 +48,22 @@ rovecode daemon       # shared daemon in the foreground
 rovecode --version
 ```
 
+The daemon can also be looked after from a terminal:
+
+```bash
+rovecode daemon status    # running? pid, version, uptime, goals, event streams (exit 3: not running)
+rovecode daemon start     # start it in the background, detached from this terminal
+rovecode daemon restart   # e.g. after an update; running goals resume from their checkpoint
+rovecode daemon stop      # stops cleanly and waits until it is gone
+rovecode daemon logs -f   # its log, then new lines as they come
+```
+
 ## Layout
 
 - Desktop: Wails + React, Go core and daemon
 - Profiles, sessions, SSH tunnels, automations, marketplace live in the daemon
+- Goals run until a reviewer and their checks agree, under a harness (execution policy) that adapts when they get stuck; Settings → Goals shows and edits it
+- See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit
 
 ## Develop
 

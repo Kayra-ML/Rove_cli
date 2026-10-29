@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,13 +22,68 @@ type Daemon struct {
 	server  *rpc.Server
 	wg      sync.WaitGroup
 	release func()
+	// done is closed when the daemon is asked to stop (the shutdown
+	// method) and when it stops
+	done     chan struct{}
+	doneOnce sync.Once
+	stopOnce sync.Once
+	stopErr  error
 }
 
 // ErrAlreadyRunning means another daemon holds this data dir.
 var ErrAlreadyRunning = errors.New("a rovecode daemon is already running for this data dir")
 
+// lockWait is how long a starting daemon waits for one that is stopping —
+// no longer serving, still closing its store — to let go of the data dir.
+var lockWait = 10 * time.Second
+
+// lock takes the data dir. A holder that still answers is a running daemon
+// and refuses at once; one that does not is on its way out and is waited
+// for: an app that restarts the daemon starts the new one as soon as the
+// old stops answering, while the old is still putting things away.
+func lock(cfg config.Config) (func(), error) {
+	deadline := time.Now().Add(lockWait)
+	for {
+		release, err := lockDataDir(cfg.DataDir, cfg.ListenHTTP)
+		if !errors.Is(err, ErrAlreadyRunning) {
+			return release, err
+		}
+		if holderServes(cfg.DataDir) || time.Now().After(deadline) {
+			return nil, err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// holderServes reports whether the daemon holding the data dir answers on
+// the address it wrote in the lock file.
+func holderServes(dataDir string) bool {
+	_, addr := lockHolder(dataDir)
+	if addr == "" {
+		return false
+	}
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get("http://" + addr + "/health")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// lockHolder reads the pid and HTTP address the holder wrote.
+func lockHolder(dataDir string) (pid, addr string) {
+	b, _ := os.ReadFile(filepath.Join(dataDir, "rovecode.lock"))
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	pid = strings.TrimSpace(lines[0])
+	if len(lines) > 1 {
+		addr = strings.TrimSpace(lines[1])
+	}
+	return pid, addr
+}
+
 func Start(cfg config.Config) (*Daemon, error) {
-	release, err := lockDataDir(cfg.DataDir)
+	release, err := lock(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +101,8 @@ func Start(cfg config.Config) (*Daemon, error) {
 		release()
 		return nil, err
 	}
-	d := &Daemon{cfg: cfg, app: app, server: rpc.New(app), release: release}
+	d := &Daemon{cfg: cfg, app: app, server: rpc.New(app), release: release, done: make(chan struct{})}
+	d.server.OnShutdown = d.requestStop
 	d.wg.Add(2)
 	go func() {
 		defer d.wg.Done()
@@ -66,14 +123,25 @@ func Start(cfg config.Config) (*Daemon, error) {
 	return d, nil
 }
 
+// Done is closed once the daemon has been asked to stop over RPC (or has
+// stopped). Whoever runs the daemon then calls Stop, as for a signal.
+func (d *Daemon) Done() <-chan struct{} { return d.done }
+
+func (d *Daemon) requestStop() { d.doneOnce.Do(func() { close(d.done) }) }
+
+// Stop stops serving, closes the core (goals, runs, MCP servers, terminals,
+// store) and lets go of the data dir. It may be called more than once.
 func (d *Daemon) Stop() error {
-	_ = d.server.Close()
-	err := d.app.Close()
-	d.wg.Wait()
-	if d.release != nil {
-		d.release()
-	}
-	return err
+	d.stopOnce.Do(func() {
+		d.requestStop()
+		_ = d.server.Close()
+		d.stopErr = d.app.Close()
+		d.wg.Wait()
+		if d.release != nil {
+			d.release()
+		}
+	})
+	return d.stopErr
 }
 
 func waitHTTP(addr string, d time.Duration) error {

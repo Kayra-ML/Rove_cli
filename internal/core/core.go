@@ -52,6 +52,10 @@ import (
 	"github.com/Kayra-ML/rove/internal/workspace"
 )
 
+// Version is the program's version, set by the binary that runs the core
+// (rovecode sets it from its build); health reports it.
+var Version = "dev"
+
 // App is the Go Core. CLI and Desktop are clients of this object via the daemon.
 type App struct {
 	Cfg     config.Config
@@ -97,6 +101,9 @@ type App struct {
 	mu      sync.Mutex
 	cancels []context.CancelFunc
 	started time.Time
+	// Close runs once: the daemon's stop and a failed start may both ask
+	closeOnce sync.Once
+	closeErr  error
 	// the program this daemon runs from, and when that file was written: the
 	// desktop app compares them with the daemon it carries to tell whether
 	// this one is older and should make way
@@ -672,28 +679,29 @@ func (a *App) recover(ctx context.Context) {
 	if a.Staff != nil {
 		a.Staff.Recover(ctx)
 	}
-	goals, err := a.Goals.List(ctx)
-	if err != nil {
-		return
-	}
-	for _, g := range goals {
-		if g.Status == types.GoalRunning {
-			g.Status = types.GoalPending
-			g.UpdatedAt = time.Now().UTC()
-			_ = a.Store.UpsertGoal(ctx, g)
-		}
-	}
+	// goals it was driving are pending again; those whose harness resumes
+	// from a checkpoint go on where they were
+	a.Goals.Recover(ctx)
 }
 
+// runsWait bounds how long Close waits for chat turns to wind down.
+const runsWait = 3 * time.Second
+
+// Close stops the core in an order where nothing writes to what is
+// already closed: first what starts new work (automation, goals, agents'
+// tasks), then the runs still going, then the processes the core owns (MCP
+// servers, terminals), and the store last.
 func (a *App) Close() error {
+	a.closeOnce.Do(func() { a.closeErr = a.close() })
+	return a.closeErr
+}
+
+func (a *App) close() error {
 	a.mu.Lock()
 	for _, c := range a.cancels {
 		c()
 	}
 	a.mu.Unlock()
-	if a.MCP != nil {
-		a.MCP.StopAll()
-	}
 	if a.Auto != nil {
 		a.Auto.Stop()
 	}
@@ -702,6 +710,15 @@ func (a *App) Close() error {
 	}
 	if a.Staff != nil {
 		a.Staff.Close()
+	}
+	if a.Agents != nil {
+		a.Agents.Shutdown(runsWait)
+	}
+	if a.MCP != nil {
+		a.MCP.StopAll()
+	}
+	if a.Term != nil {
+		a.Term.Close()
 	}
 	if a.Bus != nil {
 		a.Bus.Close()
@@ -779,7 +796,31 @@ func (a *App) Health() map[string]any {
 		"exe":              a.exe,
 		"exeModTime":       a.exeTime.Unix(),
 		"activeAgents":     running,
+		"pid":              os.Getpid(),
+		"version":          Version,
+		"goalsRunning":     a.goalsRunning(),
+		"terminals":        a.terminalsRunning(),
 	}
+}
+
+func (a *App) goalsRunning() int {
+	if a.Goals == nil {
+		return 0
+	}
+	return a.Goals.RunningCount()
+}
+
+func (a *App) terminalsRunning() int {
+	if a.Term == nil {
+		return 0
+	}
+	n := 0
+	for _, t := range a.Term.List() {
+		if t.Status != types.TermExited {
+			n++
+		}
+	}
+	return n
 }
 
 func MustJSON(v any) json.RawMessage {

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +25,18 @@ import (
 
 // ErrRunning is returned when a goal is driven while it already runs.
 var ErrRunning = errors.New("goal is already running")
+
+// ErrClosed is returned when a goal is driven after the engine was closed.
+var ErrClosed = errors.New("the goal engine is shutting down")
+
+// closeWait bounds how long Close waits for running drives to stop.
+const closeWait = 5 * time.Second
+
+// maxResumes is how many times in a row a goal is picked up again after the
+// daemon stopped under it, without finishing an iteration in between,
+// before it is left for the user: a goal that brings the daemon down must
+// not do it again on every start.
+const maxResumes = 3
 
 // Engine drives autonomous goals using the harness execution kernel.
 type Engine struct {
@@ -45,6 +59,15 @@ type Engine struct {
 	running map[types.ID]*run
 	base    context.Context
 	stop    context.CancelFunc
+	// closing is set by Close: no drive starts after it, and drives it
+	// stops leave their goal marked running, to be picked up on the next
+	// start, rather than canceled (which is the user's word).
+	closing bool
+	drives  sync.WaitGroup
+	// harnessMu orders a drive loading its harness against a hand edit:
+	// an edit either lands before the drive reads the profile, or finds
+	// the goal running and is refused
+	harnessMu sync.Mutex
 }
 
 type run struct {
@@ -128,12 +151,31 @@ func (e *Engine) Delete(ctx context.Context, id types.ID) error {
 func (e *Engine) Start(goalID, sessionID types.ID, workspacePath string) error {
 	e.mu.Lock()
 	_, busy := e.running[goalID]
+	closing := e.closing
 	e.mu.Unlock()
+	if closing {
+		return ErrClosed
+	}
 	if busy {
 		return ErrRunning
 	}
 	go func() { _, _ = e.Drive(e.base, goalID, sessionID, workspacePath) }()
 	return nil
+}
+
+// Running reports whether a goal is being driven now.
+func (e *Engine) Running(goalID types.ID) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, ok := e.running[goalID]
+	return ok
+}
+
+// RunningCount is how many goals are being driven now.
+func (e *Engine) RunningCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.running)
 }
 
 // Cancel stops a running goal; it keeps its checkpoint and can be resumed.
@@ -166,8 +208,83 @@ func (e *Engine) CancelSession(sessionID types.ID) int {
 	return len(hit)
 }
 
-// Close stops every running goal.
-func (e *Engine) Close() { e.stop() }
+// Close stops every running goal and waits (a while) for the drives to
+// stop. Their goals stay marked running: the daemon is going away under
+// them, and Recover picks them up on its next start.
+func (e *Engine) Close() {
+	e.mu.Lock()
+	e.closing = true
+	e.mu.Unlock()
+	e.stop()
+	done := make(chan struct{})
+	go func() { e.drives.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(closeWait):
+	}
+}
+
+func (e *Engine) isClosing() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.closing
+}
+
+// resumesKey counts a goal's resumes since its last finished iteration.
+func resumesKey(id types.ID) string { return "goal.resumes." + string(id) }
+
+// Recover takes back the goals a stopped daemon was driving (crashed, or
+// closed with them running). Each is pending again; one whose harness
+// resumes from its checkpoint (CheckpointResume) is driven on from where
+// it was — unless it has already been resumed maxResumes times without
+// finishing an iteration, which blocks it for the user instead. It returns
+// the goals it resumed.
+func (e *Engine) Recover(ctx context.Context) []types.ID {
+	list, err := e.store.ListGoals(ctx)
+	if err != nil {
+		return nil
+	}
+	var resumed []types.ID
+	for _, g := range list {
+		if g.Status != types.GoalRunning {
+			continue
+		}
+		g.Status = types.GoalPending
+		g.UpdatedAt = time.Now().UTC()
+		_ = e.store.UpsertGoal(ctx, g)
+		if !e.resumable(ctx, g.ID) {
+			continue
+		}
+		n := 0
+		if raw, err := e.store.GetKV(ctx, resumesKey(g.ID)); err == nil {
+			n, _ = strconv.Atoi(raw)
+		}
+		if n >= maxResumes {
+			_, _ = e.finish(g, types.GoalBlocked, fmt.Sprintf("the daemon stopped under this goal %d times in a row; look at it, then run it again", n))
+			_ = e.store.DeleteKV(ctx, resumesKey(g.ID))
+			continue
+		}
+		_ = e.store.PutKV(ctx, resumesKey(g.ID), strconv.Itoa(n+1))
+		if e.Start(g.ID, g.SessionID, "") == nil {
+			log.Printf("goal %s resumed from its checkpoint (iteration %d)", g.ID, g.Iteration)
+			resumed = append(resumed, g.ID)
+		}
+	}
+	return resumed
+}
+
+// resumable: the goal's harness picks up from its checkpoint.
+func (e *Engine) resumable(ctx context.Context, goalID types.ID) bool {
+	raw, err := e.store.LoadGoalHarness(ctx, goalID)
+	if err != nil || raw == "" {
+		return false
+	}
+	var hp harness.HarnessProfile
+	if json.Unmarshal([]byte(raw), &hp) != nil {
+		return false
+	}
+	return hp.Current.HasRecovery(harness.CheckpointResume)
+}
 
 // HarnessFor returns (or auto-composes) the HarnessProfile for a goal.
 // The result is persisted so restarts reuse the same profile.
@@ -178,24 +295,101 @@ func (e *Engine) HarnessFor(ctx context.Context, g types.Goal, workDir string) (
 			return &hp, nil
 		}
 	}
-	repoFiles := listRepoFiles(workDir)
-	analysis := harness.TaskAnalysis{
-		TaskType:          inferTaskType(g),
-		Complexity:        inferComplexity(g),
-		RiskLevel:         inferRisk(g),
-		RepositoryFiles:   len(repoFiles),
-		AffectedFiles:     len(g.CompletionContract.Criteria) * 3, // heuristic
-		EstimatedMinutes:  float64(g.CompletionContract.MaxIterations) * 5,
-		RequestedAutonomy: 0.7,
-	}
 	hp := &harness.HarnessProfile{
 		GoalID:    string(g.ID),
-		Current:   e.composer.Compose(analysis),
+		Current:   e.composer.Compose(e.analyse(g, workDir)),
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
 	raw, _ := json.Marshal(hp)
 	_ = e.store.SaveGoalHarness(ctx, g.ID, string(raw))
+	return hp, nil
+}
+
+// analyse is what the composer is told about a goal.
+func (e *Engine) analyse(g types.Goal, workDir string) harness.TaskAnalysis {
+	return harness.TaskAnalysis{
+		TaskType:          inferTaskType(g),
+		Complexity:        inferComplexity(g),
+		RiskLevel:         inferRisk(g),
+		RepositoryFiles:   len(listRepoFiles(workDir)),
+		AffectedFiles:     len(g.CompletionContract.Criteria) * 3, // heuristic
+		EstimatedMinutes:  float64(g.CompletionContract.MaxIterations) * 5,
+		RequestedAutonomy: 0.7,
+	}
+}
+
+// workDirOf is the folder a goal works in: its workspace's.
+func (e *Engine) workDirOf(ctx context.Context, g types.Goal) string {
+	if e.workspaces != nil && g.WorkspaceID != "" {
+		if ws, err := e.workspaces.Get(ctx, g.WorkspaceID); err == nil {
+			return ws.Path
+		}
+	}
+	return ""
+}
+
+// Harness is a goal's harness: the one it runs with, composed (and kept)
+// now if it has none yet.
+func (e *Engine) Harness(ctx context.Context, goalID types.ID) (*harness.HarnessProfile, error) {
+	g, err := e.store.GetGoal(ctx, goalID)
+	if err != nil {
+		return nil, err
+	}
+	return e.HarnessFor(ctx, g, e.workDirOf(ctx, g))
+}
+
+// SetHarness gives a goal a profile picked by hand (manual mode). It is
+// refused while the goal runs: the drive holds the profile it started with
+// and would write its own over this one. The change is kept in the trace
+// like the harness's own mutations.
+func (e *Engine) SetHarness(ctx context.Context, goalID types.ID, p harness.GoalExecProfile) (*harness.HarnessProfile, error) {
+	p, err := p.Clean()
+	if err != nil {
+		return nil, err
+	}
+	p.Mode = harness.ProfileManual
+	p.ComposerReason = ""
+	return e.replaceHarness(ctx, goalID, p, "set by hand")
+}
+
+// ComposeHarness lets the composer pick the goal's profile again (auto
+// mode), from what the goal is now.
+func (e *Engine) ComposeHarness(ctx context.Context, goalID types.ID) (*harness.HarnessProfile, error) {
+	g, err := e.store.GetGoal(ctx, goalID)
+	if err != nil {
+		return nil, err
+	}
+	return e.replaceHarness(ctx, goalID, e.composer.Compose(e.analyse(g, e.workDirOf(ctx, g))), "composed again")
+}
+
+func (e *Engine) replaceHarness(ctx context.Context, goalID types.ID, p harness.GoalExecProfile, reason string) (*harness.HarnessProfile, error) {
+	e.harnessMu.Lock()
+	defer e.harnessMu.Unlock()
+	if e.Running(goalID) {
+		return nil, ErrRunning
+	}
+	g, err := e.store.GetGoal(ctx, goalID)
+	if err != nil {
+		return nil, err
+	}
+	hp, err := e.HarnessFor(ctx, g, e.workDirOf(ctx, g))
+	if err != nil {
+		return nil, err
+	}
+	hp.Mutate(p, reason, g.Iteration)
+	m := hp.Mutations[len(hp.Mutations)-1]
+	oldJSON, _ := json.Marshal(m.OldProfile)
+	newJSON, _ := json.Marshal(m.NewProfile)
+	_ = e.store.InsertHarnessMutation(ctx, store.HarnessMutationRow{
+		ID: string(id.NewID()), GoalID: string(g.ID), Iteration: m.Iteration, Reason: reason,
+		OldProfile: string(oldJSON), NewProfile: string(newJSON), CreatedAt: m.Timestamp,
+	})
+	raw, _ := json.Marshal(hp)
+	if err := e.store.SaveGoalHarness(ctx, g.ID, string(raw)); err != nil {
+		return nil, err
+	}
+	e.publishHarness(g, g.Iteration, hp.Current.Explain(), len(hp.Mutations))
 	return hp, nil
 }
 
@@ -229,16 +423,24 @@ func (e *Engine) Drive(ctx context.Context, goalID types.ID, sessionID types.ID,
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	e.mu.Lock()
+	if e.closing {
+		e.mu.Unlock()
+		return g, ErrClosed
+	}
 	if _, busy := e.running[g.ID]; busy {
 		e.mu.Unlock()
 		return g, ErrRunning
 	}
 	e.running[g.ID] = &run{sessionID: sessionID, cancel: cancel}
+	// added under the lock that Close sets closing under: no drive is
+	// added once Close waits for them
+	e.drives.Add(1)
 	e.mu.Unlock()
 	defer func() {
 		e.mu.Lock()
 		delete(e.running, g.ID)
 		e.mu.Unlock()
+		e.drives.Done()
 	}()
 
 	if e.agents != nil && g.AgentID == "" {
@@ -246,13 +448,13 @@ func (e *Engine) Drive(ctx context.Context, goalID types.ID, sessionID types.ID,
 	}
 
 	workDir := workspacePath
-	if workDir == "" && e.workspaces != nil && g.WorkspaceID != "" {
-		if ws, err2 := e.workspaces.Get(ctx, g.WorkspaceID); err2 == nil {
-			workDir = ws.Path
-		}
+	if workDir == "" {
+		workDir = e.workDirOf(ctx, g)
 	}
 	repoFiles := listRepoFiles(workDir)
+	e.harnessMu.Lock()
 	hp, err := e.HarnessFor(ctx, g, workDir)
+	e.harnessMu.Unlock()
 	if err != nil {
 		hp = &harness.HarnessProfile{Current: harness.SmallBugProfile()}
 	}
@@ -292,6 +494,7 @@ func (e *Engine) Drive(ctx context.Context, goalID types.ID, sessionID types.ID,
 	e.emitHarness(g, kernel)
 
 	briefed := false
+	iterated := false // an iteration of this drive has been checkpointed
 	for {
 		if ctx.Err() != nil {
 			return e.finish(g, types.GoalCanceled, "stopped")
@@ -400,6 +603,12 @@ func (e *Engine) Drive(ctx context.Context, goalID types.ID, sessionID types.ID,
 			Progress:    progress,
 			SavedAt:     time.Now().UTC(),
 		})
+		if !iterated {
+			// an iteration got through: the goal is not taking the daemon
+			// down with it, and its resumes count starts over
+			_ = e.store.DeleteKV(ctx, resumesKey(g.ID))
+			iterated = true
+		}
 
 		if mutated, _ := kernel.ObserveIteration(g.Iteration, errs, failedGates, filesEdited, toolsCalled, summary); mutated {
 			for _, m := range kernel.Mutations() {
@@ -447,6 +656,11 @@ func (e *Engine) Drive(ctx context.Context, goalID types.ID, sessionID types.ID,
 // canceled drive must still be able to save that it stopped.
 func (e *Engine) finish(g types.Goal, status types.GoalStatus, reason string) (types.Goal, error) {
 	ctx := context.Background()
+	if status == types.GoalCanceled && e.isClosing() {
+		// the daemon is stopping, not the user: the goal stays marked
+		// running so Recover takes it back on the next start
+		return g, context.Canceled
+	}
 	g.Status = status
 	g.UpdatedAt = time.Now().UTC()
 	if reason != "" && status != types.GoalDone && (g.LastVerdict == nil || g.LastVerdict.Reason != reason) {
@@ -616,6 +830,10 @@ func (e *Engine) emitVerdict(v types.JudgeVerdict) {
 }
 
 func (e *Engine) emitHarness(g types.Goal, kernel *harness.ExecutionKernel) {
+	e.publishHarness(g, g.Iteration, kernel.Explain(), len(kernel.Mutations()))
+}
+
+func (e *Engine) publishHarness(g types.Goal, iteration int, explain string, mutations int) {
 	if e.bus == nil {
 		return
 	}
@@ -624,9 +842,9 @@ func (e *Engine) emitHarness(g types.Goal, kernel *harness.ExecutionKernel) {
 		Topic: "goal." + string(g.ID),
 		Payload: map[string]any{
 			"goalId":    string(g.ID),
-			"iteration": g.Iteration,
-			"explain":   kernel.Explain(),
-			"mutations": len(kernel.Mutations()),
+			"iteration": iteration,
+			"explain":   explain,
+			"mutations": mutations,
 		},
 	})
 }
