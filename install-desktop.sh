@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rove Code — macOS desktop (.app) installer
 # Run from anywhere:
-#   curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install-desktop.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Burak-ML/Rove_cli/main/install-desktop.sh | bash
 set -euo pipefail
 
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
@@ -57,7 +57,7 @@ fetch_tarball() {
   rm -rf "$tmp"
 }
 
-REPO="${ROVECODE_REPO:-Kayra-ML/Rove_cli}"
+REPO="${ROVECODE_REPO:-Burak-ML/Rove_cli}"
 BRANCH="${ROVECODE_BRANCH:-main}"
 SRC_DIR="${ROVECODE_SRC:-$HOME/Library/Caches/RoveCode/src}"
 

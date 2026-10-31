@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 func goalWith(criteria []string, gates ...types.QualityGate) types.Goal {

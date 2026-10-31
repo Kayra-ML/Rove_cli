@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Kayra-ML/rove/internal/skill"
+	"github.com/Burak-ML/rove/internal/skill"
 )
 
 func TestSeedBundledRoveCode(t *testing.T) {

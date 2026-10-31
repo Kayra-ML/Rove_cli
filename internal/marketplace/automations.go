@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 //go:embed all:bundled/automations

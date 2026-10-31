@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // Teamwork plans are stored as JSON bodies: the plan's shape belongs to the

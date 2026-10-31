@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/eventbus"
-	"github.com/Kayra-ML/rove/internal/id"
-	"github.com/Kayra-ML/rove/internal/store"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/eventbus"
+	"github.com/Burak-ML/rove/internal/id"
+	"github.com/Burak-ML/rove/internal/store"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 type Manager struct {

@@ -6,11 +6,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Kayra-ML/rove/internal/config"
-	"github.com/Kayra-ML/rove/internal/core"
-	"github.com/Kayra-ML/rove/internal/provider"
-	"github.com/Kayra-ML/rove/internal/types"
-	"github.com/Kayra-ML/rove/pkg/protocol"
+	"github.com/Burak-ML/rove/internal/config"
+	"github.com/Burak-ML/rove/internal/core"
+	"github.com/Burak-ML/rove/internal/provider"
+	"github.com/Burak-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/pkg/protocol"
 )
 
 // modelRecorder answers "ok" and remembers which model each call asked for.

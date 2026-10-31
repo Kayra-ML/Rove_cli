@@ -1,6 +1,6 @@
 name: automation
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "Automation engineering expertise covering workflow design, browser automation, scheduling, data transformation, and reliability."
 entrypoints:
   - PLUGIN.md
@@ -20,5 +20,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins
+homepage: https://github.com/Burak-ML/RoveCode_plugins
 license: proprietary

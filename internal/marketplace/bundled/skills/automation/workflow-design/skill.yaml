@@ -1,6 +1,6 @@
 name: workflow-design
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "Designing automation workflows: step sequencing, branching logic, error boundaries, idempotency, and workflow state management."
 entrypoints:
   - SKILL.md
@@ -14,5 +14,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/automation
+homepage: https://github.com/Burak-ML/RoveCode_plugins/tree/main/plugins/automation
 license: proprietary

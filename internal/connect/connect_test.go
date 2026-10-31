@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Kayra-ML/rove/internal/provider"
+	"github.com/Burak-ML/rove/internal/provider"
 )
 
 func TestCatalog(t *testing.T) {

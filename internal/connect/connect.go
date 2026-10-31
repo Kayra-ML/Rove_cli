@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/provider"
+	"github.com/Burak-ML/rove/internal/provider"
 	"gopkg.in/yaml.v3"
 )
 

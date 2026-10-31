@@ -14,11 +14,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/config"
-	"github.com/Kayra-ML/rove/internal/daemon"
-	"github.com/Kayra-ML/rove/internal/sshtunnel"
-	"github.com/Kayra-ML/rove/internal/tui"
-	"github.com/Kayra-ML/rove/pkg/protocol"
+	"github.com/Burak-ML/rove/internal/config"
+	"github.com/Burak-ML/rove/internal/daemon"
+	"github.com/Burak-ML/rove/internal/sshtunnel"
+	"github.com/Burak-ML/rove/internal/tui"
+	"github.com/Burak-ML/rove/pkg/protocol"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -294,7 +294,7 @@ func desktopMissing() {
 		os.Exit(1)
 	}
 	fmt.Fprintln(os.Stderr, "On macOS, from any directory:")
-	fmt.Fprintln(os.Stderr, "  curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install-desktop.sh | bash")
+	fmt.Fprintln(os.Stderr, "  curl -fsSL https://raw.githubusercontent.com/Burak-ML/Rove_cli/main/install-desktop.sh | bash")
 	os.Exit(1)
 }
 

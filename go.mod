@@ -1,4 +1,4 @@
-module github.com/Kayra-ML/rove
+module github.com/Burak-ML/rove
 
 go 1.25.0
 

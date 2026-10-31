@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/agent"
-	"github.com/Kayra-ML/rove/internal/id"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/agent"
+	"github.com/Burak-ML/rove/internal/id"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // Watch is an agent watching a chat, drawn on the Session Map as a cable

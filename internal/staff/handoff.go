@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/id"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/id"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // Handoff pairs two agents: when the first finishes a task, the second

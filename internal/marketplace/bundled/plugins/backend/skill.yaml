@@ -1,6 +1,6 @@
 name: backend
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "Backend API design, server patterns, authentication, middleware, and HTTP engineering."
 entrypoints:
   - PLUGIN.md
@@ -20,5 +20,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins
+homepage: https://github.com/Burak-ML/RoveCode_plugins
 license: proprietary

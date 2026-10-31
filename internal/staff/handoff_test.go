@@ -9,9 +9,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Kayra-ML/rove/internal/agent"
-	"github.com/Kayra-ML/rove/internal/gitwt"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/agent"
+	"github.com/Burak-ML/rove/internal/gitwt"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // Paired agents: when Ali finishes, Ayşe takes it on from his changes, and

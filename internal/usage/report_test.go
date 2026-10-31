@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/store"
+	"github.com/Burak-ML/rove/internal/store"
 )
 
 func TestBuildByDayAndModel(t *testing.T) {

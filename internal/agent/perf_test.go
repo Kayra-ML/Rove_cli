@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/provider"
-	"github.com/Kayra-ML/rove/internal/tool"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/provider"
+	"github.com/Burak-ML/rove/internal/tool"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 func init() { turnRetryWait = time.Millisecond }

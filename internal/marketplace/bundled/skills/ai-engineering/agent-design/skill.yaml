@@ -1,6 +1,6 @@
 name: agent-design
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "Tool-using agents, planner-executor loops, memory, multi-agent handoff, termination conditions, and sandboxing."
 entrypoints:
   - SKILL.md
@@ -14,5 +14,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/ai-engineering
+homepage: https://github.com/Burak-ML/RoveCode_plugins/tree/main/plugins/ai-engineering
 license: proprietary

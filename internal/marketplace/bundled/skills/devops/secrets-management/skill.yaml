@@ -1,6 +1,6 @@
 name: secrets-management
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "Never secrets in code, secret scanning, management tools (Vault, AWS Secrets Manager, Doppler), secret rotation, least-privilege access, and audit logging."
 entrypoints:
   - SKILL.md
@@ -14,5 +14,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/devops
+homepage: https://github.com/Burak-ML/RoveCode_plugins/tree/main/plugins/devops
 license: proprietary

@@ -1,6 +1,6 @@
 name: input-validation
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "Never trust user input, Zod schema validation, allowlist vs denylist, file upload validation, SSRF, ReDoS, HTML sanitization, and path traversal."
 entrypoints:
   - SKILL.md
@@ -14,5 +14,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/security
+homepage: https://github.com/Burak-ML/RoveCode_plugins/tree/main/plugins/security
 license: proprietary

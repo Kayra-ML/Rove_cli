@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/Kayra-ML/rove/internal/tool"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/tool"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // SendName is the tool a terminal's agent uses to hand work to another.

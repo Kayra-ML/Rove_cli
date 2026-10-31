@@ -40,7 +40,7 @@ func (a *App) InstallUpdate() error {
 //   - Windows: PowerShell in a new window running install-windows.ps1
 //   - Linux:   xterm (or x-terminal-emulator) running install.sh
 func (a *App) UpdateInTerminal() error {
-	const repo = "Kayra-ML/Rove_cli"
+	const repo = "Burak-ML/Rove_cli"
 	switch runtime.GOOS {
 	case "windows":
 		script := `iwr https://raw.githubusercontent.com/` + repo + `/main/install-windows.ps1 | iex`

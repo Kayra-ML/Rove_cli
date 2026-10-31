@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/store"
+	"github.com/Burak-ML/rove/internal/store"
 )
 
 // Tally is a sum of calls.

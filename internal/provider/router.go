@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/secrets"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/secrets"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 var ErrNoProvider = errors.New("provider: none configured")

@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Kayra-ML/rove/internal/connect"
-	"github.com/Kayra-ML/rove/internal/core"
-	"github.com/Kayra-ML/rove/internal/provider"
-	"github.com/Kayra-ML/rove/internal/types"
-	"github.com/Kayra-ML/rove/pkg/protocol"
+	"github.com/Burak-ML/rove/internal/connect"
+	"github.com/Burak-ML/rove/internal/core"
+	"github.com/Burak-ML/rove/internal/provider"
+	"github.com/Burak-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/pkg/protocol"
 )
 
 func (s *Server) handleConnect(ctx context.Context, req protocol.Request) (json.RawMessage, error) {

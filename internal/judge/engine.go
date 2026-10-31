@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/id"
-	"github.com/Kayra-ML/rove/internal/qualitygate"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/id"
+	"github.com/Burak-ML/rove/internal/qualitygate"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 type Evidence struct {

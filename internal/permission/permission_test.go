@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Kayra-ML/rove/internal/store"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/store"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 func TestEvaluate_DefaultAsk(t *testing.T) {

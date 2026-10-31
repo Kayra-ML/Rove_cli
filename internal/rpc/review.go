@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Kayra-ML/rove/internal/agent"
-	"github.com/Kayra-ML/rove/internal/core"
-	"github.com/Kayra-ML/rove/internal/diffx"
-	"github.com/Kayra-ML/rove/internal/types"
-	"github.com/Kayra-ML/rove/pkg/protocol"
+	"github.com/Burak-ML/rove/internal/agent"
+	"github.com/Burak-ML/rove/internal/core"
+	"github.com/Burak-ML/rove/internal/diffx"
+	"github.com/Burak-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/pkg/protocol"
 )
 
 // editFile is one changed file of a turn, for review.

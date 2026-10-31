@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Kayra-ML/rove/internal/config"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/config"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 func TestOpenSeedsAndRecoversRunningGoals(t *testing.T) {

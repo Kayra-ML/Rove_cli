@@ -7,7 +7,7 @@
 // model to answer in the user's language.
 package persona
 
-import "github.com/Kayra-ML/rove/internal/types"
+import "github.com/Burak-ML/rove/internal/types"
 
 // Feature is something a session can switch on or off. Tool features gate
 // tool schemas (off = the schema is never sent, which also saves tokens);

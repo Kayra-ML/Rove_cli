@@ -28,7 +28,7 @@ import (
 // SHA256SUMS) is installed in place; one without it can still be installed
 // with the source installer in a terminal.
 const (
-	updateRepo  = "Kayra-ML/Rove_cli"
+	updateRepo  = "Burak-ML/Rove_cli"
 	updateAsset = "RoveCode-macos-universal.zip"
 	installCmd  = "curl -fsSL https://raw.githubusercontent.com/" + updateRepo + "/main/install-desktop.sh | bash"
 )

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Kayra-ML/rove/internal/store"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/store"
+	"github.com/Burak-ML/rove/internal/types"
 	"gopkg.in/yaml.v3"
 )
 

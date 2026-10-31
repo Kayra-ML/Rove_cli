@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Kayra-ML/rove/internal/core"
-	"github.com/Kayra-ML/rove/internal/persona"
-	"github.com/Kayra-ML/rove/internal/store"
-	"github.com/Kayra-ML/rove/internal/types"
-	"github.com/Kayra-ML/rove/pkg/protocol"
+	"github.com/Burak-ML/rove/internal/core"
+	"github.com/Burak-ML/rove/internal/persona"
+	"github.com/Burak-ML/rove/internal/store"
+	"github.com/Burak-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/pkg/protocol"
 )
 
 // modelChoice is one model /models offers: a provider's configured model.

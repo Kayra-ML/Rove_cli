@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Kayra-ML/rove/internal/permission"
-	"github.com/Kayra-ML/rove/internal/provider"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/permission"
+	"github.com/Burak-ML/rove/internal/provider"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 type Context struct {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/config"
+	"github.com/Burak-ML/rove/internal/config"
 )
 
 func TestStartHealthAndStop(t *testing.T) {

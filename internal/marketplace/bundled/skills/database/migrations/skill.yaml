@@ -1,6 +1,6 @@
 name: migrations
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "Zero-downtime migration strategies, never rename columns, migration tools, up/down migrations, deployment order, and lock-free migrations in Postgres."
 entrypoints:
   - SKILL.md
@@ -14,5 +14,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/database
+homepage: https://github.com/Burak-ML/RoveCode_plugins/tree/main/plugins/database
 license: proprietary

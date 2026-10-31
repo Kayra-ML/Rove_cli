@@ -1,6 +1,6 @@
 name: express-patterns
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "Route organization, controller/service/repository pattern, async handlers, request validation, graceful shutdown, and framework comparison."
 entrypoints:
   - SKILL.md
@@ -14,5 +14,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/backend
+homepage: https://github.com/Burak-ML/RoveCode_plugins/tree/main/plugins/backend
 license: proprietary

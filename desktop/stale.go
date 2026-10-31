@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/daemon"
-	"github.com/Kayra-ML/rove/pkg/client"
-	"github.com/Kayra-ML/rove/pkg/protocol"
+	"github.com/Burak-ML/rove/internal/daemon"
+	"github.com/Burak-ML/rove/pkg/client"
+	"github.com/Burak-ML/rove/pkg/protocol"
 )
 
 type daemonHealth struct {

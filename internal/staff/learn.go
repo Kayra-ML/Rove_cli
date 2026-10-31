@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/id"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/id"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // After every task an agent looks back at it and keeps what is worth

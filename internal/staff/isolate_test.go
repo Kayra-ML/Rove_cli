@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Kayra-ML/rove/internal/agent"
-	"github.com/Kayra-ML/rove/internal/gitwt"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/agent"
+	"github.com/Burak-ML/rove/internal/gitwt"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 func repoFor(t *testing.T) string {

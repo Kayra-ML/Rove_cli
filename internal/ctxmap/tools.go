@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Kayra-ML/rove/internal/tool"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/tool"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // Tools gives agents two small tools: see which sessions they are wired to,

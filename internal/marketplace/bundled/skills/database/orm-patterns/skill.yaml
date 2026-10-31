@@ -1,6 +1,6 @@
 name: orm-patterns
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "ORM vs query builder vs raw SQL decision tree, Prisma and Drizzle patterns, N+1 with ORMs, raw queries, transactions, and repository pattern."
 entrypoints:
   - SKILL.md
@@ -14,5 +14,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/database
+homepage: https://github.com/Burak-ML/RoveCode_plugins/tree/main/plugins/database
 license: proprietary

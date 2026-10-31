@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/eventbus"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/eventbus"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 func TestSpawnEchoAndKill(t *testing.T) {

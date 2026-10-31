@@ -1,6 +1,6 @@
 name: transactions
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "ACID properties, isolation levels, deadlock detection, optimistic vs pessimistic locking, SELECT FOR UPDATE, and distributed transaction problems."
 entrypoints:
   - SKILL.md
@@ -14,5 +14,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/database
+homepage: https://github.com/Burak-ML/RoveCode_plugins/tree/main/plugins/database
 license: proprietary

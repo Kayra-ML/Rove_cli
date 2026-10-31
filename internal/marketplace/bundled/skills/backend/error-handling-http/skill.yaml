@@ -1,6 +1,6 @@
 name: error-handling-http
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "Error response structure, global error handler pattern, operational vs programmer errors, async error catching, and HTTP status code selection."
 entrypoints:
   - SKILL.md
@@ -14,5 +14,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/backend
+homepage: https://github.com/Burak-ML/RoveCode_plugins/tree/main/plugins/backend
 license: proprietary

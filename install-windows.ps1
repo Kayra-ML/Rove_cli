@@ -1,14 +1,14 @@
 # Rove Code — Windows installer
 # Run in PowerShell (Admin recommended for PATH changes):
 #   Set-ExecutionPolicy -Scope Process Bypass
-#   iwr https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install-windows.ps1 | iex
+#   iwr https://raw.githubusercontent.com/Burak-ML/Rove_cli/main/install-windows.ps1 | iex
 #
 # Installs rovecode-desktop.exe + rovecode.exe (daemon/CLI) to %LOCALAPPDATA%\RoveCode
 # and optionally adds them to the user PATH.
 
 $ErrorActionPreference = "Stop"
 
-$REPO        = if ($env:ROVECODE_REPO)    { $env:ROVECODE_REPO }    else { "Kayra-ML/Rove_cli" }
+$REPO        = if ($env:ROVECODE_REPO)    { $env:ROVECODE_REPO }    else { "Burak-ML/Rove_cli" }
 $INSTALL_DIR = if ($env:ROVECODE_INSTALL) { $env:ROVECODE_INSTALL } else { "$env:LOCALAPPDATA\RoveCode" }
 $ASSET       = "RoveCode-windows-amd64.zip"
 

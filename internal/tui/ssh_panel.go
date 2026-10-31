@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Kayra-ML/rove/internal/sshtunnel"
+	"github.com/Burak-ML/rove/internal/sshtunnel"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 )

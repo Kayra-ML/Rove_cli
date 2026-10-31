@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/codemap"
+	"github.com/Burak-ML/rove/internal/codemap"
 )
 
 // Finder decides, without calling a model, which files in root are likely

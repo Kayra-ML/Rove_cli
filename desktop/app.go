@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/config"
-	"github.com/Kayra-ML/rove/internal/daemon"
-	"github.com/Kayra-ML/rove/pkg/client"
-	"github.com/Kayra-ML/rove/pkg/protocol"
+	"github.com/Burak-ML/rove/internal/config"
+	"github.com/Burak-ML/rove/internal/daemon"
+	"github.com/Burak-ML/rove/pkg/client"
+	"github.com/Burak-ML/rove/pkg/protocol"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // FetchModels asks a provider which models it serves: GET {base}/models, the

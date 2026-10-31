@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/id"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/id"
+	"github.com/Burak-ML/rove/internal/types"
 	"golang.org/x/sys/windows"
 )
 

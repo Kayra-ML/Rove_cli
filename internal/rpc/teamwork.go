@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Kayra-ML/rove/internal/core"
-	"github.com/Kayra-ML/rove/internal/store"
-	"github.com/Kayra-ML/rove/internal/types"
-	"github.com/Kayra-ML/rove/pkg/protocol"
+	"github.com/Burak-ML/rove/internal/core"
+	"github.com/Burak-ML/rove/internal/store"
+	"github.com/Burak-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/pkg/protocol"
 )
 
 func (s *Server) handleTeamwork(ctx context.Context, req protocol.Request) (json.RawMessage, error) {

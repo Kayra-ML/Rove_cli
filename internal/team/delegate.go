@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/agent"
-	"github.com/Kayra-ML/rove/internal/gitwt"
-	"github.com/Kayra-ML/rove/internal/id"
-	"github.com/Kayra-ML/rove/internal/tool"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/agent"
+	"github.com/Burak-ML/rove/internal/gitwt"
+	"github.com/Burak-ML/rove/internal/id"
+	"github.com/Burak-ML/rove/internal/tool"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 const DelegateName = "team_delegate"

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO="${ROVECODE_REPO:-Kayra-ML/Rove_cli}"
+REPO="${ROVECODE_REPO:-Burak-ML/Rove_cli}"
 BINARY="rovecode"
 INSTALL_DIR="${ROVECODE_INSTALL_DIR:-/usr/local/bin}"
 
@@ -85,6 +85,6 @@ if [ "$GOOS" = "linux" ]; then
 fi
 if [ "$GOOS" = "darwin" ]; then
   printf '\nDesktop app (one-time, from any folder):\n'
-  printf '  curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install-desktop.sh | bash\n'
+  printf '  curl -fsSL https://raw.githubusercontent.com/Burak-ML/Rove_cli/main/install-desktop.sh | bash\n'
   printf 'Then: rovecode\n'
 fi

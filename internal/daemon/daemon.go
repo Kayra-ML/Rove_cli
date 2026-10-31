@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/config"
-	"github.com/Kayra-ML/rove/internal/core"
-	"github.com/Kayra-ML/rove/internal/rpc"
+	"github.com/Burak-ML/rove/internal/config"
+	"github.com/Burak-ML/rove/internal/core"
+	"github.com/Burak-ML/rove/internal/rpc"
 )
 
 type Daemon struct {

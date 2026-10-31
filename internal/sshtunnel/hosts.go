@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/config"
+	"github.com/Burak-ML/rove/internal/config"
 )
 
 // SavedHost is a persisted SSH host entry.

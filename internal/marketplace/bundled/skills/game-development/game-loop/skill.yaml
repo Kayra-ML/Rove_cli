@@ -1,6 +1,6 @@
 name: game-loop
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "Fixed vs variable timestep, interpolation, spiral-of-death, frame pacing, and engine tick architecture in Unity, Unreal, and Godot."
 entrypoints:
   - SKILL.md
@@ -14,5 +14,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/game-development
+homepage: https://github.com/Burak-ML/RoveCode_plugins/tree/main/plugins/game-development
 license: proprietary

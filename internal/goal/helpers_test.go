@@ -1,6 +1,6 @@
 package goal
 
-import "github.com/Kayra-ML/rove/internal/types"
+import "github.com/Burak-ML/rove/internal/types"
 
 // Running reports whether a goal is being driven now.
 func (e *Engine) Running(goalID types.ID) bool {

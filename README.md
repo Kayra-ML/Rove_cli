@@ -19,13 +19,13 @@ A local-first coding agent built around a **Go daemon**, a **desktop interface**
 **macOS / Linux:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Burak-ML/Rove_cli/main/install.sh | sh
 ```
 
 **macOS desktop app** (from any directory, not the repo):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install-desktop.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Burak-ML/Rove_cli/main/install-desktop.sh | bash
 ```
 
 That clones the source, builds `Rove Code.app`, and copies it to `/Applications`. Then `rovecode`.
@@ -34,7 +34,7 @@ That clones the source, builds `Rove Code.app`, and copies it to `/Applications`
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-iwr https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install-windows.ps1 | iex
+iwr https://raw.githubusercontent.com/Burak-ML/Rove_cli/main/install-windows.ps1 | iex
 ```
 
 Installs `rovecode-desktop.exe` (Wails GUI) + `rovecode.exe` (daemon/CLI) to `%LOCALAPPDATA%\RoveCode`, creates a Desktop shortcut and adds to PATH.

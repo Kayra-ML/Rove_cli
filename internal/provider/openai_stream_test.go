@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // to sends every request to the test server, whatever host the base URL

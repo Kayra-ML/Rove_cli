@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 type Runner struct{}

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Kayra-ML/rove/internal/eventbus"
-	"github.com/Kayra-ML/rove/internal/store"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/eventbus"
+	"github.com/Burak-ML/rove/internal/store"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 var ErrNotFound = errors.New("terminal: not found")

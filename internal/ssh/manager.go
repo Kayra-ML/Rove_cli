@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Kayra-ML/rove/internal/terminal"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/terminal"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 type Manager struct {

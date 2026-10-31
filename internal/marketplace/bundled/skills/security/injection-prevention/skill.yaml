@@ -1,6 +1,6 @@
 name: injection-prevention
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "SQL injection mechanics, parameterized queries, ORM injection risks, NoSQL injection, command injection, template injection, and eval() dangers."
 entrypoints:
   - SKILL.md
@@ -14,5 +14,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/security
+homepage: https://github.com/Burak-ML/RoveCode_plugins/tree/main/plugins/security
 license: proprietary

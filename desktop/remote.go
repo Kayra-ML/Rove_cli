@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/remote"
-	"github.com/Kayra-ML/rove/pkg/client"
-	"github.com/Kayra-ML/rove/pkg/protocol"
+	"github.com/Burak-ML/rove/internal/remote"
+	"github.com/Burak-ML/rove/pkg/client"
+	"github.com/Burak-ML/rove/pkg/protocol"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 

@@ -1,6 +1,6 @@
 name: react-native-patterns
 version: 0.1.0
-author: Kayra-ML
+author: Burak-ML
 description: "Expo vs bare RN, StyleSheet performance, FlatList optimization, platform-specific code, Reanimated 2, Gesture Handler, and image optimization."
 entrypoints:
   - SKILL.md
@@ -14,5 +14,5 @@ permissions:
   network: false
   browser: false
   git: false
-homepage: https://github.com/Kayra-ML/RoveCode_plugins/tree/main/plugins/mobile
+homepage: https://github.com/Burak-ML/RoveCode_plugins/tree/main/plugins/mobile
 license: proprietary

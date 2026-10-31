@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/id"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/id"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // Schedule gives an agent a task on a timer: every so many minutes, or

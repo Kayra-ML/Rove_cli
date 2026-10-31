@@ -206,13 +206,13 @@ jobs:
 
             **macOS / Linux:**
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install.sh | sh
+            curl -fsSL https://raw.githubusercontent.com/Burak-ML/Rove_cli/main/install.sh | sh
             ```
 
             **Windows (PowerShell):**
             ```powershell
             Set-ExecutionPolicy -Scope Process Bypass
-            iwr https://raw.githubusercontent.com/Kayra-ML/Rove_cli/main/install-windows.ps1 | iex
+            iwr https://raw.githubusercontent.com/Burak-ML/Rove_cli/main/install-windows.ps1 | iex
             ```
 
             ```bash

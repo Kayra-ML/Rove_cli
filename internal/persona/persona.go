@@ -5,9 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/Kayra-ML/rove/internal/provider"
-	"github.com/Kayra-ML/rove/internal/store"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/provider"
+	"github.com/Burak-ML/rove/internal/store"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // Resolved is the persona in effect for a session after combining the

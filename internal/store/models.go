@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // A chat's own model (picked with /models) wins over its profile's and its

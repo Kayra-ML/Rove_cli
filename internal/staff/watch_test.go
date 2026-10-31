@@ -6,9 +6,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Kayra-ML/rove/internal/agent"
-	"github.com/Kayra-ML/rove/internal/session"
-	"github.com/Kayra-ML/rove/internal/types"
+	"github.com/Burak-ML/rove/internal/agent"
+	"github.com/Burak-ML/rove/internal/session"
+	"github.com/Burak-ML/rove/internal/types"
 )
 
 // An agent watching a chat gets a task when a turn there changes files it

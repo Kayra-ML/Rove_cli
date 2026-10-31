@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Kayra-ML/rove/internal/core"
-	"github.com/Kayra-ML/rove/pkg/protocol"
+	"github.com/Burak-ML/rove/internal/core"
+	"github.com/Burak-ML/rove/pkg/protocol"
 )
 
 // dirList is one folder of the daemon's machine, for picking a project
