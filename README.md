@@ -68,3 +68,9 @@ cd desktop/frontend && npm test -- --run && npx tsc --noEmit
 |---|---|
 | macOS | `chmod +x build-mac.sh && ./build-mac.sh` |
 | Windows | `.\build-windows.ps1` (PowerShell) |
+
+---
+
+## License
+
+MIT. See [LICENSE](LICENSE).
